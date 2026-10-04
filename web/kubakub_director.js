@@ -494,8 +494,8 @@ function injectStyle() {
 }
 
 // ------------------------------------------------------------------------------------------------ helpers
-const viewURL = r => api.apiURL(`/view?filename=${encodeURIComponent(r.filename)}&subfolder=${encodeURIComponent(r.subfolder || "")}&type=${r.type || "temp"}&t=${Date.now()}`);
-const stableURL = r => api.apiURL(`/view?filename=${encodeURIComponent(r.filename)}&subfolder=${encodeURIComponent(r.subfolder || "")}&type=${r.type || "temp"}`);
+const viewURL = r => api.apiURL(`/view?filename=${encodeURIComponent(r.filename)}&subfolder=${encodeURIComponent(r.subfolder || "")}&type=${encodeURIComponent(r.type || "temp")}&t=${Date.now()}`);
+const stableURL = r => api.apiURL(`/view?filename=${encodeURIComponent(r.filename)}&subfolder=${encodeURIComponent(r.subfolder || "")}&type=${encodeURIComponent(r.type || "temp")}`);
 const inputURL = name => { const i = name.lastIndexOf("/"); return viewURL({ filename: name.slice(i + 1), subfolder: i >= 0 ? name.slice(0, i) : "", type: "input" }); };
 const loadImage = url => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error("image " + url)); im.src = url; });
 const mkCanvas = (w, h) => Object.assign(document.createElement("canvas"), { width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) });
@@ -1524,12 +1524,12 @@ class Director {
       ${D.loras.map((l, i) => `<div class="kkd-field"><span>lora ${i + 1}</span><select data-dl="${i}"><option value="">none</option>
         ${sorted.filter(fits).length ? `<optgroup label="for ${esc(pre?.name || "")}">${sorted.filter(fits).map(n => opt(n, l.name)).join("")}</optgroup>` : ""}
         <optgroup label="all loras">${sorted.filter(n => !fits(n)).map(n => opt(n, l.name)).join("")}</optgroup></select>
-        <input type="range" data-dls="${i}" min="-1" max="2" step="0.05" value="${l.strength}" style="width:70px" data-tip="LoRA strength"><span class="v" data-dlv="${i}">${(+l.strength).toFixed(2)}</span></div>`).join("")}
-      <div class="kkd-field"><span>steps</span><input type="range" data-df="steps" min="1" max="12" step="1" value="${D.steps}"><span class="v">${D.steps}</span></div>
-      <div class="kkd-field" data-tip="Working size of the model: bigger = more detail, slower"><span>size</span><input type="range" data-df="megapixels" min="0.25" max="2" step="0.05" value="${D.megapixels}"><span class="v">${(+D.megapixels).toFixed(2)} MP</span></div>
-      <div class="kkd-field" data-tip="Extra room around the layer the model sees, as a share of its size"><span>context</span><input type="range" data-df="context" min="0" max="1" step="0.05" value="${D.context}"><span class="v">${Math.round(D.context * 100)}%</span></div>
-      <div class="kkd-field" data-tip="Width of the blended edge around the shape (preview pixels)"><span>edge band</span><input type="range" data-df="band" min="0" max="64" step="1" value="${D.band}"><span class="v">${D.band} px</span></div>
-      <div class="kkd-field" data-tip="-1 = a new seed every time"><span>seed</span><input type="text" data-df="seed" value="${D.seed}"><span></span></div>
+        <input type="range" data-dls="${i}" min="-1" max="2" step="0.05" value="${esc(l.strength)}" style="width:70px" data-tip="LoRA strength"><span class="v" data-dlv="${i}">${(+l.strength).toFixed(2)}</span></div>`).join("")}
+      <div class="kkd-field"><span>steps</span><input type="range" data-df="steps" min="1" max="12" step="1" value="${esc(D.steps)}"><span class="v">${esc(D.steps)}</span></div>
+      <div class="kkd-field" data-tip="Working size of the model: bigger = more detail, slower"><span>size</span><input type="range" data-df="megapixels" min="0.25" max="2" step="0.05" value="${esc(D.megapixels)}"><span class="v">${(+D.megapixels).toFixed(2)} MP</span></div>
+      <div class="kkd-field" data-tip="Extra room around the layer the model sees, as a share of its size"><span>context</span><input type="range" data-df="context" min="0" max="1" step="0.05" value="${esc(D.context)}"><span class="v">${Math.round(D.context * 100)}%</span></div>
+      <div class="kkd-field" data-tip="Width of the blended edge around the shape (preview pixels)"><span>edge band</span><input type="range" data-df="band" min="0" max="64" step="1" value="${esc(D.band)}"><span class="v">${esc(D.band)} px</span></div>
+      <div class="kkd-field" data-tip="-1 = a new seed every time"><span>seed</span><input type="text" data-df="seed" value="${esc(D.seed)}"><span></span></div>
       <div class="kkd-field"><span>reference</span><button class="kkd-pill" data-dref aria-pressed="${!!D.reference}" data-tip="The crop as reference latent: keeps layout, perspective and colours">${D.reference ? "on" : "off"}</button><span></span></div>`;
   }
   updateLightStatus(L) {
@@ -2123,7 +2123,7 @@ class Director {
     const names = Object.keys(this.views).filter(k => !k.startsWith("_"));
     const tips = { matrix: "The base image", clay: "Clay render from the projector camera", depth: "Depth: warm = close to the audience",
       ids: "ID shelves of the 3D scene, with the region names", regions: "Every region in its own colour with its name · use the names in clip to / holes" };
-    this.$("views").innerHTML = names.map((v, i) => `<button class="kkd-pill" data-view="${v}" aria-pressed="${v === this.view}" data-tip="${tips[v] || v}|${i + 1}">${v}</button>`).join("");
+    this.$("views").innerHTML = names.map((v, i) => `<button class="kkd-pill" data-view="${esc(v)}" aria-pressed="${v === this.view}" data-tip="${esc(tips[v] || v)}|${i + 1}">${esc(v)}</button>`).join("");
   }
   setView(v) { if (!this.views[v]) return; this.view = v; this.renderViews(); this.draw(); this.renderLayers(); }
   setTool(t) {
@@ -2162,7 +2162,7 @@ class Director {
         <span class="kkd-grip" data-tip="Drag to change what is in front|Ctrl ] / Ctrl [">⋮⋮</span>
         <button class="kkd-eye ${L.visible ? "on" : ""}" data-eye="${i}" aria-label="show or hide" data-tip="Show / hide|Alt H"></button>
         <img class="kkd-thumb" alt="" src="${this.thumb(L)}">
-        <span class="kkd-lname">${L.mask.by === "below" ? "↳ " : ""}${esc(L.name)}<small>${L.kind === "image" ? (L.blend !== "normal" ? L.blend : isVideo(L) ? "video" : "image") : L.kind === "shape" ? (L.w >= this.W * 0.98 && L.h >= this.H * 0.98 && L.shape?.type === "rect" ? "solid" : L.shape?.type || "shape") : L.kind}${L.clip ? " · in " + esc(L.clip) : ""}${this.maskLabel(i)}${L.kind === "image" && !L.img ? (isVideo(L) ? " · video not loaded" : " · missing file") : ""}${L.video?.on ? " · ltx" : ""}${L.kind === "light" ? " · " + esc(L.pendingKey ? "rendering…" : L.err ? "failed" : L.img ? L.light.environment + ", " + L.light.lights.filter(q => q.on !== false).length + " lights" : "not rendered") : ""}</small></span>
+        <span class="kkd-lname">${L.mask.by === "below" ? "↳ " : ""}${esc(L.name)}<small>${L.kind === "image" ? (L.blend !== "normal" ? esc(L.blend) : isVideo(L) ? "video" : "image") : L.kind === "shape" ? (L.w >= this.W * 0.98 && L.h >= this.H * 0.98 && L.shape?.type === "rect" ? "solid" : esc(L.shape?.type || "shape")) : esc(L.kind)}${L.clip ? " · in " + esc(L.clip) : ""}${this.maskLabel(i)}${L.kind === "image" && !L.img ? (isVideo(L) ? " · video not loaded" : " · missing file") : ""}${L.video?.on ? " · ltx" : ""}${L.kind === "light" ? " · " + esc(L.pendingKey ? "rendering…" : L.err ? "failed" : L.img ? L.light.environment + ", " + L.light.lights.filter(q => q.on !== false).length + " lights" : "not rendered") : ""}</small></span>
         ${this.relTag(i)}
       </div>`).join("");
     this.$("count").textContent = this.layers.length;
@@ -2196,7 +2196,7 @@ class Director {
     const L = this.layers[this.sel]; if (!L) return; const $ = id => this.$(id);
     $("insp-title").textContent = L.name;
     $("i-name").value = L.name;
-    $("i-blend").kkdHTML = (this.m.blend_modes || Object.keys(OPS)).map(b => `<option ${b === L.blend ? "selected" : ""}>${b}</option>`).join("");
+    $("i-blend").kkdHTML = (this.m.blend_modes || Object.keys(OPS)).map(b => `<option ${b === L.blend ? "selected" : ""}>${esc(b)}</option>`).join("");
     $("i-op").value = L.opacity; $("i-op-v").textContent = Math.round(L.opacity * 100) + "%";
     const typing = el => el === document.activeElement && this.regLayer === L;      // do not overwrite what is being typed
     $("g-holes").hidden = L.kind !== "base"; if (!typing($("i-holes"))) $("i-holes").value = L.holes || "";
@@ -2230,7 +2230,7 @@ class Director {
       $("g-fx").kkdHTML = `<div class="kkd-sub">effects <span class="kkd-grow"></span>${rest.length ? `<select data-id="fx-add" style="font-size:12px;max-width:130px"><option value="">+ effect</option>${rest.map(g => `<option value="${g[0]}">${g[0]}</option>`).join("")}</select>` : ""}${shown.length ? `<button class="kkd-pill" style="padding:2px 8px;font-size:12px" data-fxreset data-tip="All effects off">reset</button>` : ""}</div>` +
         FX_GROUPS.filter(g => shown.includes(g[0])).map(([name, tip, keys]) => `<div class="kkd-fxh" data-tip="${esc(tip)}">${name}<span class="kkd-grow"></span><button class="kkd-x" data-fxdel="${name}" data-tip="Remove ${name}">×</button></div>` +
           keys.map(key => { const [, label, lo, hi, st, unit, t] = FX_UI.find(x => x[0] === key);
-            return `<div class="kkd-field" data-tip="${esc(t)}"><span>${label}</span><input type="range" data-fx="${key}" min="${lo}" max="${hi}" step="${st}" value="${f[key]}"><span class="v" data-fxv="${key}">${+(+f[key]).toFixed(2)}${unit}</span></div>`; }).join("")).join(""); }
+            return `<div class="kkd-field" data-tip="${esc(t)}"><span>${label}</span><input type="range" data-fx="${key}" min="${lo}" max="${hi}" step="${st}" value="${esc(f[key])}"><span class="v" data-fxv="${key}">${+(+f[key]).toFixed(2)}${unit}</span></div>`; }).join("")).join(""); }
     this.renderMotion(L);
     $("g-shape").hidden = L.kind !== "shape";
     if (L.kind === "shape") { $("sh-col").value = isHex(L.color) ? L.color : "#ffffff"; $("sh-f").value = +L.shape?.feather || 0; $("sh-f-v").textContent = (+L.shape?.feather || 0) + " px"; }
@@ -2279,7 +2279,7 @@ class Director {
     const M = L.media || (L.media = this.mediaDefaults(null)), fmt = v => (+v).toFixed(3).replace(/\.?0+$/, "") || "0";
     const num = (i, k, v, tip) => `<input type="text" data-ms="${i}" data-mk="${k}" value="${v}" data-tip="${esc(tip)}" style="width:100%;padding:2px 6px">`;
     box.innerHTML = `
-      <div class="kkd-sub">video <span class="kkd-grow"></span><span style="font-weight:400;letter-spacing:0;text-transform:none">${I.w}×${I.h} · ${fmt((+I.fps).toFixed(2))} fps · ${(+I.duration).toFixed(2)} s${I.alpha ? " · alpha" : ""}${I.audio ? " · sound" : ""}</span></div>
+      <div class="kkd-sub">video <span class="kkd-grow"></span><span style="font-weight:400;letter-spacing:0;text-transform:none">${esc(I.w)}×${esc(I.h)} · ${fmt((+I.fps).toFixed(2))} fps · ${(+I.duration).toFixed(2)} s${I.alpha ? " · alpha" : ""}${I.audio ? " · sound" : ""}</span></div>
       ${M.segments.map((q, i) => `<div data-msi="${i}" style="border:1px solid ${i === this.segSel ? "var(--orange)" : "var(--line)"};border-radius:10px;padding:6px 8px;margin:4px 0;font-size:12px;display:grid;grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr);gap:4px 6px;align-items:center">
         <span>at</span>${num(i, "start", fmt(q.start), "Where it starts on the timeline (s) · drag the clip on the timeline")}
         <span>speed</span>${num(i, "speed", fmt(q.speed), "2 = twice as fast, 0.5 = slow motion · Alt-drag the clip end on the timeline")}
@@ -2293,7 +2293,7 @@ class Director {
         <button class="kkd-pill" data-id="m-tl" data-tip="Timeline length = the end of this video">timeline = video</button></div><span></span></div>
       <div class="kkd-field"><span>fit</span><div class="kkd-seg">${[["canvas", "The whole matrix"], ["regions", "The box around the regions of 'clip to' (windows, a floor …)"], ["native", "The video's own pixel size"]]
         .map(([v, tip]) => `<button class="kkd-pill" data-mfit="${v}" data-tip="${tip}">${v}</button>`).join("")}</div><span></span></div>
-      <div class="kkd-field"><span>sound</span><input type="range" data-id="m-vol" min="0" max="2" step="0.05" value="${M.volume}"><span class="v" data-id="m-vol-v">${Math.round(M.volume * 100)}%</span></div>
+      <div class="kkd-field"><span>sound</span><input type="range" data-id="m-vol" min="0" max="2" step="0.05" value="${esc(M.volume)}"><span class="v" data-id="m-vol-v">${Math.round(M.volume * 100)}%</span></div>
       <div class="kkd-field"><span>frames</span><button class="kkd-pill" data-id="m-blend" aria-pressed="${!!M.blend_frames}" data-tip="In the render: blend neighbouring frames (smooth slow motion, other fps) or take the nearest one · the window shows the nearest">${M.blend_frames ? "blended" : "nearest"}</button><span></span></div>`;
   }
   fitVideo(how) {
@@ -2316,8 +2316,8 @@ class Director {
     this.lsel = Math.min(this.lsel, R.lights.length - 1);
     const q = R.lights[this.lsel];
     const range = (key, label, min, max, step, val, unit, tip) => `<div class="kkd-field"${tip ? ` data-tip="${esc(tip)}"` : ""}><span>${label}</span>
-      <input type="range" data-l="${key}" min="${min}" max="${max}" step="${step}" value="${val}"><span class="v" data-v="${key}">${this.fmtL(val, unit)}</span></div>`;
-    const envs = (this.m.scene?.environments || ["none", "night"]).map(e => `<option ${e === R.environment ? "selected" : ""}>${e}</option>`).join("");
+      <input type="range" data-l="${key}" min="${min}" max="${max}" step="${step}" value="${esc(val)}"><span class="v" data-v="${key}">${esc(this.fmtL(val, unit))}</span></div>`;
+    const envs = (this.m.scene?.environments || ["none", "night"]).map(e => `<option ${e === R.environment ? "selected" : ""}>${esc(e)}</option>`).join("");
     const reach = Math.ceil(f.width_m / 2 + 10);
     let lamp = "";
     if (q) {
@@ -2359,7 +2359,7 @@ class Director {
       <div class="kkd-sub">lamps <span class="kkd-grow"></span>${["point", "area", "spot", "sun"].map(t => `<button class="kkd-pill" style="padding:2px 8px;font-size:12px" data-ladd="${t}" data-tip="Add a ${t} light${t === "sun" ? "" : " · or double click the facade for a point light"}">+ ${t}</button>`).join("")}</div>
       <div class="kkd-lights">${R.lights.map((z, i) => `<div class="kkd-lrow${z.on === false ? " off" : ""}" data-li="${i}" aria-selected="${i === this.lsel}">
         <span class="kkd-dot" style="background:${esc(z.color || "#fff")}"></span>
-        <span>${z.type} <small style="color:var(--muted)">${z.type === "sun" ? `${Math.round(+z.azimuth || 0)}° / ${Math.round(+z.elevation || 0)}°` : `${(+z.x || 0).toFixed(1)} · ${(+z.height || 0).toFixed(1)} · ${(+z.distance || 0).toFixed(1)} m`}</small></span>
+        <span>${esc(z.type)} <small style="color:var(--muted)">${z.type === "sun" ? `${Math.round(+z.azimuth || 0)}° / ${Math.round(+z.elevation || 0)}°` : `${(+z.x || 0).toFixed(1)} · ${(+z.height || 0).toFixed(1)} · ${(+z.distance || 0).toFixed(1)} m`}</small></span>
         <button class="kkd-eye ${z.on === false ? "" : "on"}" data-lon="${i}" data-tip="Lamp on / off"></button>
         <button class="kkd-x" data-lx="lamp" data-tip="Remove this lamp">×</button></div>`).join("") || `<div class="kkd-lstatus">no lamps: environment light only</div>`}</div>
       ${lamp}
@@ -2385,7 +2385,7 @@ class Director {
   fmtL(v, unit) { v = +v; return (Math.abs(v) >= 100 ? Math.round(v) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2).replace(/\.?0+$/, "") || "0") + (unit || ""); }
   renderOutputs() {
     const placed = this.layers.filter(q => q.visible && (q.kind === "image" || q.kind === "paint"));
-    this.outpop.innerHTML = `<h3>back into the workflow</h3><div class="kkd-outs">${[["image", `${this.W}×${this.H}`], ["layer masks", placed.length],
+    this.outpop.innerHTML = `<h3>back into the workflow</h3><div class="kkd-outs">${[["image", `${esc(this.W)}×${esc(this.H)}`], ["layer masks", placed.length],
       ["changed", "re-diffused + edge bands"], ["regions", `${(this.m.regions || []).length} + ${placed.length}`], ["plan rules", "text"], ["document", "json"]]
       .map(([a, b]) => `<span><b>${a}</b> ${b}</span>`).join("")}</div>`;
   }
@@ -3479,7 +3479,7 @@ class Director {
 }
 
 function openDirector(node) {
-  const m = node.properties?.kuba_director_manifest;
+  const m = node.kkdManifest || node.properties?.kuba_director_manifest;   // the full one of this session, else the saved one
   if (!m) { note("run the workflow once, then open the director - it needs the node's images"); return; }
   if (Director.current) Director.current.close();
   Director.current = new Director(node, m);
@@ -3517,7 +3517,12 @@ app.registerExtension({
     nodeType.prototype.onExecuted = function (msg) {
       const r = executed?.apply(this, arguments);
       const m = msg?.kuba_director?.[0];
-      if (m) { this.properties = this.properties || {}; this.properties.kuba_director_manifest = m; }
+      if (m) {
+        this.kkdManifest = m;                    // not saved: it lists this computer's LoRA folder
+        this.properties = this.properties || {};
+        // the copy that travels with the workflow has no file listing (the LoRA list comes back with the next run)
+        this.properties.kuba_director_manifest = m.diffusion ? { ...m, diffusion: { ...m.diffusion, loras: [] } } : m;
+      }
       return r;
     };
   },

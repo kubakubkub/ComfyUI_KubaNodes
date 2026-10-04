@@ -137,7 +137,7 @@ class LoadImagesFromDirWithNames:
         if name_filter.strip():
             pattern = name_filter.strip()
             # Support simple wildcard: *.png or dormant*
-            pattern = pattern.replace('*', '.*').replace('?', '.')
+            pattern = re.escape(pattern).replace(r'\*', '.*').replace(r'\?', '.')   # only * and ? are wildcards
             try:
                 regex = re.compile(pattern, re.IGNORECASE)
                 files = [f for f in files if regex.search(f[1])]
@@ -182,9 +182,8 @@ class LoadImagesFromDirWithNames:
 
             i = Image.open(filepath)
             i = ImageOps.exif_transpose(i)
-            image = i.convert("RGB")
-            image = np.array(image).astype(np.float32) / 255.0
-            image = torch.from_numpy(image)[None,]
+            from ...kubakub import imio
+            image = torch.from_numpy(imio.pil_rgb01(i))[None,]     # 16-bit greyscale keeps its range
 
             if 'A' in i.getbands():
                 mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0

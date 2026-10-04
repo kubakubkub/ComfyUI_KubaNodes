@@ -371,7 +371,7 @@ def write_pass(folder, name, pix_labels, names=None, prefix=None):
     cols = distinct_colors(len(ids), seed=len(name))
     img = np.zeros(pix_labels.shape + (3,), np.uint8)
     img[fg] = cols[new[fg]]
-    cv2.imwrite(os.path.join(folder, f"ids_{name}.png"), img[..., ::-1])
+    cv2.imencode(".png", np.ascontiguousarray(img[..., ::-1]))[1].tofile(os.path.join(folder, f"ids_{name}.png"))   # tofile: any path on Windows
     used, lines = set(), []
     for k, (i, c) in enumerate(zip(ids, counts)):
         base = safe_name(names[i], f"{prefix or name}_{k + 1:03d}") if names is not None else f"{prefix or name}_{k + 1:03d}"

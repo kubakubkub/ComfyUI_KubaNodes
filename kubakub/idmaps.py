@@ -97,7 +97,7 @@ def read_exr(path: str) -> np.ndarray:
     except Exception as e:  # noqa: BLE001
         errors.append(f"imageio/FreeImage: {type(e).__name__}")
     try:
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        img = cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_UNCHANGED)   # fromfile: any path on Windows
         if img is not None:
             img = img.astype(np.float32)
             if img.ndim == 2:

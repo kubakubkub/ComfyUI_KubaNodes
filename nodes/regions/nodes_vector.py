@@ -122,10 +122,10 @@ class KUBA_RegionsToVector(io.ComfyNode):
             raise ValueError("switch on at least one of svg / pdf / dxf")
         doc = vec.build(labels, table, ids, mode=mode, simplify_px=simplify_px, corner_deg=corner_deg,
                         min_area_px=min_area_px, spur_px=spur_px, width_mm=width_mm, kerf_mm=kerf_mm)
-        if not folder:
-            import folder_paths
-            folder = os.path.join(folder_paths.get_output_directory(), "kuba_vector")
-        files = vec.write_all(doc, os.path.expandvars(folder.strip().strip('"')), filename_prefix, formats)
+        import folder_paths
+        from ...kubakub import save_paths
+        folder = save_paths.save_folder(folder or "kuba_vector", folder_paths.get_output_directory(), "folder")
+        files = vec.write_all(doc, folder, filename_prefix, formats)
         H, W = labels.shape
         bg = matrix[0, ..., :3].cpu().float().numpy() if matrix is not None else None
         if bg is not None and bg.shape[:2] != (H, W):

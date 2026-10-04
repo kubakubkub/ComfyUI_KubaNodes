@@ -27,10 +27,12 @@ import torch
 import folder_paths
 from comfy_api.latest import io, ui
 
+from ...kubakub import save_paths as sp
 from ...kubakub import viewer as vw
 from ...kubakub.io_types import RegionsType, SceneType, ViewerType
 from ...kubakub.scene3d import bridge, scene_ids, scene_view as sv
 from ...kubakub.types import Regions
+from ...kubakub import imio
 
 log = logging.getLogger("KUBA.regions")
 
@@ -233,7 +235,7 @@ class KUBA_SceneRender(io.ComfyNode):
             scene = scene_ids.load(folder)
             depth = np.load(os.path.join(ids_dir, "depth_m.npy"))
             pp = os.path.join(ids_dir, f"ids_{preview_pass}.png")
-            previews = {preview_pass: cv2.imread(pp)[..., ::-1]} if os.path.isfile(pp) else {}
+            previews = {preview_pass: imio.imread(pp)[..., ::-1]} if os.path.isfile(pp) else {}
             info = scene["info"]
             info["ids"] = summary
         else:
@@ -252,14 +254,14 @@ class KUBA_SceneRender(io.ComfyNode):
                 shutil.rmtree(stage, ignore_errors=True)
                 raise
             _after_render()
-        if save_folder.strip():
-            dst = os.path.expandvars(save_folder.strip().strip('"').strip("'"))
+        dst = sp.save_folder(save_folder, folder_paths.get_output_directory())
+        if dst:
             os.makedirs(dst, exist_ok=True)
             for fn in os.listdir(ids_dir):
                 if fn.endswith((".png", ".txt", ".json")):
                     shutil.copy(os.path.join(ids_dir, fn), os.path.join(dst, fn))
 
-        clay = cv2.imread(os.path.join(folder, "clay.png"))[..., ::-1] / 255.0
+        clay = imio.imread(os.path.join(folder, "clay.png"))[..., ::-1] / 255.0
         fid = scene["faceid"]
         fg = fid > 0
         prev = previews.get(preview_pass)
@@ -489,7 +491,7 @@ class KUBA_ScenePreview(io.ComfyNode):
                                           unit_scale=scene.get("unit_scale", 1.0), view=view)
             vs = scene_ids.load(vf)
             rp = sv.reprojection(vs, s)
-            clay = cv2.imread(os.path.join(vf, "clay.png"))[..., ::-1].astype(np.float32) / 255
+            clay = imio.imread(os.path.join(vf, "clay.png"))[..., ::-1].astype(np.float32) / 255
             for fi, f in enumerate(frames):
                 previews.append(sv.render_preview(f, rp, clay, ambient=ambient, gain=gain, physical=physical,
                                                   background=None if bgs is None else bgs[fi % len(bgs)]))
@@ -610,7 +612,7 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
                       "position": np.load(os.path.join(d, "position.npy")),
                       "normal": np.load(os.path.join(d, "normal.npy")).astype(np.float32)}
                 rp = sv.reprojection(vs, s)
-                clay = cv2.imread(os.path.join(d, "clay.png"))[..., ::-1].astype(np.float32) / 255
+                clay = imio.imread(os.path.join(d, "clay.png"))[..., ::-1].astype(np.float32) / 255
                 i = c0 + k
                 out.append(sv.render_preview(frames[i % len(frames)], rp, clay, ambient=ambient, gain=gain,
                                              physical=physical, background=None if bgs is None else bgs[i % len(bgs)]))
@@ -781,7 +783,7 @@ def _rig_job(s, fr, rig, emission, projector, root, notes):
         os.makedirs(pdir, exist_ok=True)
         fp = os.path.join(pdir, hashlib.sha1(a.tobytes() + str(a.shape).encode()).hexdigest()[:16] + ".png")
         if not os.path.isfile(fp):
-            cv2.imwrite(fp, cv2.cvtColor(a, cv2.COLOR_RGB2BGR))
+            imio.imwrite(fp, cv2.cvtColor(a, cv2.COLOR_RGB2BGR))
         if pj.get("mode") == "paint":
             part["projector"] = {"image": fp, "mode": "paint"}
             notes.append(f"painted: {a.shape[1]}x{a.shape[0]} image as the model's colour from the camera")
@@ -800,7 +802,7 @@ def _render_size(info, size, scale):
 
 
 def _read_relit(path, W, H, rw, rh, background):
-    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    img = imio.imread(path, cv2.IMREAD_UNCHANGED)
     img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGBA).astype(np.float32) / (65535.0 if img.dtype == np.uint16 else 255.0)
     if (rw, rh) != (W, H):
         img = cv2.resize(img, (W, H), interpolation=cv2.INTER_CUBIC if rw < W else cv2.INTER_AREA)

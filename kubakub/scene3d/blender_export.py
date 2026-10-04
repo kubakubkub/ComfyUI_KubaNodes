@@ -46,7 +46,7 @@ def log(msg):
 def open_file(path):
     ext = os.path.splitext(path)[1].lower()
     if ext == ".blend":
-        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False)
+        bpy.ops.wm.open_mainfile(filepath=path, load_ui=False, use_scripts=False)   # never run scripts stored in a .blend
     elif ext in IMPORTERS:
         bpy.ops.wm.read_factory_settings(use_empty=True)
         IMPORTERS[ext](path)

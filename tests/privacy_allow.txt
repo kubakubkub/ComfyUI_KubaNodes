@@ -2,3 +2,5 @@
 :\\PROJECT\\
 :/.../
 URL-like 'x://'
+\\server\share
+"C:/x/y"

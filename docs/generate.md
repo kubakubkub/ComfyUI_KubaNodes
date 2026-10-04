@@ -299,7 +299,7 @@ of every rendered version, so one version can be continued by hand in a region p
 | picks_folder | empty | final: a folder with the drafts you like; every image in it becomes a final. The sheet and `pick` are not used |
 | generate | regions | **regions**: every region is repainted inside its own mask. **whole picture**: one free sample of the whole picture, see below |
 | unify | 0 | one more pass over the whole picture after the regions, at this denoise; 0 = off |
-| save_folder | kubakub/versions | where the versions are saved, inside ComfyUI's output folder or a full path; empty = nothing is saved |
+| save_folder | kubakub/versions | where the versions are saved, inside ComfyUI's output folder (a full path needs `save_anywhere = on` in kubakub.ini); empty = nothing is saved |
 
 **Picking by folder.** The node saves every draft as `r<run>_v<number>_<what it is made of>.png` (for example
 `r07_v03_isometric_soft-pair_ref12.png`). Each file holds its own version: the rules, the LoRAs, the style image

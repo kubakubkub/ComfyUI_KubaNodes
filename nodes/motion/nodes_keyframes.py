@@ -188,7 +188,7 @@ class KUBA_KeyframeClips(io.ComfyNode):
                               tooltip="A text encoder that can write (the Gemma 4 LTX encoder: CLIPLoader type ltxv) - it "
                                       "expands each clip's prompt into H3's format, looking at the clip's first frame."),
                 io.Boolean.Input("enhance", default=True, optional=True, tooltip="Use enhance_clip when connected."),
-                io.Int.Input("crossfade", advanced=True, default=6, min=0, max=48, tooltip="Frames blended into the director's own frames at each clip end (H3 does not always land exactly on the end frame)."),
+                io.Int.Input("crossfade", advanced=True, default=6, min=0, max=48, tooltip="Frames blended into the director's own frames at each clip end (H3 does not always land exactly on the end frame). At most 12 are used."),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="The sequence with the clips in."),
@@ -368,6 +368,7 @@ class KUBA_KeyframeClips(io.ComfyNode):
     def _paste(j, out, fps, crossfade, fh, fw):
         """The clip into the sequence, by time; keyframe clips keep the director's own end frames (the anchors)."""
         i0, i1 = j["i0"], j["i1"]
+        crossfade = min(crossfade, kf.HIDDEN_MARGIN)            # skip_h3_frames keeps only that many director frames
         video = j["video_u8"].float() / 255.0                   # the same 8 bits whether cached or not
         idx = kf.frame_map(i1 - i0 + 1, j["dur"], video.shape[0])
         lo, hi = (i0 + 1, i1 - 1) if j["mode"] == "keyframes" else (i0, i1)

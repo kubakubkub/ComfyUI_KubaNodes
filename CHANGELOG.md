@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.1.1 (2026-10-04)
+
+Security, after a review of the published code:
+- **Director window:** values from a workflow or a composition file (layer kind, blend mode, shape type, number
+  fields, view names) are escaped before they become HTML. A file from someone else could run script in the ComfyUI
+  page before.
+- **scene render `blender_path`:** only `blender.exe` (or the folder that holds it) on a local drive is started.
+  Another program is only taken from `blender = ...` in kubakub.ini.
+- **save folders** (region video sampler, scene render, regions from sam3, versions, regions to svg / pdf / dxf): a
+  folder typed into a node stays inside ComfyUI's output folder; `save_anywhere = on` in kubakub.ini allows any
+  folder again. The video sampler's `filename_prefix` is a file name only. `kubakub/save_paths.py`,
+  `tests/test_save_paths.py`.
+- **Director routes:** with ComfyUI started with `--listen`, the window's routes no longer read videos, images or
+  HDRIs by path (`remote_paths = on` allows it); an HDRI on a network share is never opened from a route; the
+  projection mask preview has a size limit; errors return their first line only.
+- **Saved workflows** no longer carry the LoRA folder listing in the director node (it comes back with the next run).
+- **.blend files** are opened with their scripts off, explicitly.
+- **Setup tool:** the Hugging Face token is not sent along when a download is redirected to another host; an
+  incomplete download is kept as `.part` instead of being renamed.
+- **Publish action:** pinned to a commit, read-only permissions.
+
+Fixes:
+- Folders with characters outside the Windows code page (a user name like Zażółć): scene render stopped, the
+  director showed no pictures, ID passes were not written. All image files go through `kubakub/imio.py` now.
+- The director's `regions` output keeps the scope of the regions it got.
+- regions from sam3: an object under `min_area` no longer removes every other object with the same name.
+- keyframe clips: `crossfade` uses at most 12 frames, the number the director keeps with skip_h3_frames.
+- relief field: an alpha channel is not averaged into the depth.
+- 16-bit greyscale files (depth passes, After Effects masks) keep their range in load images from a folder and as a
+  versions start / style image; the folder loader's name filter treats only `*` and `?` as wildcards.
+- onnx style transfer: overlap as large as the tile size, a side shorter than the overlap, RGBA input.
+- regions to mask: a `select` that matches nothing is an error instead of an empty mask.
+
 ## 2026-10-04
 - New layout: the node files are in `nodes/<group>/`, one folder per menu group (project, regions, sketch,
   generate, director, motion, post, scene3d, from_renders, fabricate, lab, utils); the logic they call is in

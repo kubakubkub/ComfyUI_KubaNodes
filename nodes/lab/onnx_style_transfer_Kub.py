@@ -112,6 +112,7 @@ class OnnxStyleTransfer:
     def _infer_tiled(self, session, arr_rgb_01, tile_size=512, overlap=64):
         """Tiled inference with overlap blending. Full native quality."""
         h, w = arr_rgb_01.shape[:2]
+        overlap = max(0, min(overlap, tile_size // 2))      # a step of at least half a tile (overlap = tile_size was a step of 0)
         step = tile_size - overlap
         out = np.zeros((h, w, 3), dtype=np.float32)
         weight = np.zeros((h, w, 1), dtype=np.float32)
@@ -129,8 +130,8 @@ class OnnxStyleTransfer:
         tiles_done = 0
         total_tiles = ((h - overlap) // step + 1) * ((w - overlap) // step + 1)
 
-        for y in range(0, h - overlap, step):
-            for x in range(0, w - overlap, step):
+        for y in range(0, max(1, h - overlap), step):       # max(1, ...): a side shorter than the overlap still gets a tile
+            for x in range(0, max(1, w - overlap), step):
                 # Extract tile (handle edges)
                 y2 = min(y + tile_size, h)
                 x2 = min(x + tile_size, w)
@@ -182,7 +183,7 @@ class OnnxStyleTransfer:
         results = []
 
         for b in range(batch):
-            img_np = image[b].cpu().numpy()  # [H, W, 3] float32 0-1
+            img_np = image[b][..., :3].cpu().numpy()  # [H, W, 3] float32 0-1 (an alpha channel is left out)
             h, w = img_np.shape[:2]
 
             if mode == "tiled" and (h > tile_size or w > tile_size):

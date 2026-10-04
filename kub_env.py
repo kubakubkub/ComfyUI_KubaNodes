@@ -8,7 +8,7 @@ import importlib.util
 import shutil
 
 MIN_COMFYUI = (0, 37, 0)          # the V3 node API with advanced inputs, core SAM3 / background removal / H3 guide
-TESTED = "ComfyUI 0.37.0, torch 2.10 cu130, Python 3.12, Blender 4.5, Windows 11, RTX 5070 Ti 12 GB"
+TESTED = "ComfyUI 0.38.2, torch 2.10 cu130, Python 3.12, Blender 4.5, Windows 11, RTX 5070 Ti 12 GB"
 
 REQUIRED = [("cv2", "opencv-python-headless"), ("scipy", "scipy"), ("numpy", "numpy"), ("PIL", "Pillow")]
 OPTIONAL = [                        # (module, pip package, what needs it)

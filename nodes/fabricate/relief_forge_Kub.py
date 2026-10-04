@@ -30,7 +30,7 @@ FIELD = "RELIEFFORGE_FIELD"
 def _img_to_np(image):
     a = image[0].detach().cpu().numpy()
     if a.ndim == 3:
-        a = a.mean(axis=2)
+        a = a[..., :3].mean(axis=2)          # the colour channels only: an alpha channel is not depth
     return a.astype(np.float32)
 
 

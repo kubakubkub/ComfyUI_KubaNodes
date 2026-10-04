@@ -33,6 +33,7 @@ import torch
 from comfy_api.latest import io, ui
 
 from ...kubakub import clip_cache as cc
+from ...kubakub import save_paths as sp
 from ...kubakub import video as vd
 from ...kubakub.io_types import PlanType
 
@@ -429,10 +430,11 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
         oh, ow = max(1, int(round(H * output_scale))), max(1, int(round(W * output_scale)))
         if output_scale < 1:                           # scaled output: even sizes for H.264 / yuv420
             oh, ow = max(2, 2 * round(oh / 2)), max(2, 2 * round(ow / 2))
-        folder = os.path.expandvars((save_folder or "").strip().strip('"'))
+        import folder_paths
+        folder = sp.save_folder(save_folder, folder_paths.get_output_directory())
         if folder:
             os.makedirs(folder, exist_ok=True)
-        out_frames = _composite(still, bg, clips, F, H, W, oh, ow, folder, filename_prefix)
+        out_frames = _composite(still, bg, clips, F, H, W, oh, ow, folder, sp.file_stem(filename_prefix, "region_video"))
         report = "\n".join([f"{len(clips)} clip(s), {F} frames at {fps:g} fps ({F / fps:.2f} s), "
                             f"{'two stages' if upscale_model is not None else 'one stage'} (stage 1 {stage1_mp:.2f} MP), "
                             f"{'into the background video, ' if bg is not None else ''}"

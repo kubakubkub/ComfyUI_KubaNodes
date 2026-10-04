@@ -41,6 +41,7 @@ from ...kubakub import ops
 from ...kubakub import plan as rp
 from ...kubakub import region_cache as rc
 from ...kubakub import runtime
+from ...kubakub import save_paths
 from ...kubakub import schedules
 from ...kubakub import seams
 from ...kubakub import strategies as st
@@ -90,8 +91,8 @@ def _with_lora(model, name: str, strength: float):
 
 
 def _load_reference(path: str) -> torch.Tensor:
-    img = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
-    return torch.from_numpy(np.asarray(img, dtype=np.float32) / 255.0)[None]
+    from ...kubakub import imio
+    return torch.from_numpy(imio.pil_rgb01(ImageOps.exif_transpose(Image.open(path))))[None]
 
 
 class KUBA_Versions(io.ComfyNode):
@@ -440,12 +441,10 @@ class KUBA_Versions(io.ComfyNode):
     def _save(cls, outs: dict, by_number: dict, recipes: dict, save_folder: str, final: bool,
               from_picks: bool) -> list[str]:
         """Write every version as a PNG that holds its recipe (and the workflow, as Save Image does)."""
-        folder = (save_folder or "").strip().strip('"')
+        folder = save_paths.save_folder(save_folder, folder_paths.get_output_directory())
         if not folder:
             return []
-        if not os.path.isabs(folder):
-            folder = os.path.join(folder_paths.get_output_directory(), folder)
-        drafts_dir = folder = os.path.normpath(folder)
+        drafts_dir = folder
         if final:
             folder = os.path.join(folder, "final")
         os.makedirs(folder, exist_ok=True)

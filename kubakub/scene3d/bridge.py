@@ -45,8 +45,16 @@ kst = _pack_settings()
 
 def find_blender(explicit: str = "") -> str:
     """Explicit path, setting blender (kubakub.ini), the newest 'Blender Foundation' install, or blender on PATH."""
-    for cand in (explicit.strip().strip('"'), kst.get("blender", "").strip().strip('"')):
+    for i, cand in enumerate((explicit.strip().strip('"'), kst.get("blender", "").strip().strip('"'))):
         if cand:
+            if i == 0:          # typed into a node, so it can come from a stranger's workflow: only a local blender
+                name = os.path.basename(cand.replace("\\", "/").rstrip("/")).lower()
+                if cand.replace("/", "\\").startswith("\\\\"):
+                    raise ValueError("blender_path: a network path is not started from a node. "
+                                     "Set  blender = ...  in kubakub.ini [settings] instead.")
+                if not os.path.isdir(cand) and name not in ("blender.exe", "blender"):
+                    raise ValueError(f"blender_path: '{cand}' is not blender.exe (or the folder that holds it). "
+                                     "Another program is only started from  blender = ...  in kubakub.ini [settings].")
             if os.path.isdir(cand):
                 cand = os.path.join(cand, "blender.exe" if os.name == "nt" else "blender")
             if os.path.isfile(cand):

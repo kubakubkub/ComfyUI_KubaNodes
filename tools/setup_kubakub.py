@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -223,13 +224,27 @@ def offer_packages(pkgs, why: str, check_only: bool) -> None:
 
 # ---------------------------------------------------------------- downloads
 
+class _TokenStaysHome(urllib.request.HTTPRedirectHandler):
+    """A redirect to another host (Hugging Face sends file downloads to its CDN) goes without the login token."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlsplit(newurl).hostname != urllib.parse.urlsplit(req.full_url).hostname:
+            new.headers.pop("Authorization", None)
+            new.unredirected_hdrs.pop("Authorization", None)
+        return new
+
+
+_OPENER = urllib.request.build_opener(_TokenStaysHome)
+
+
 def _request(url: str, token: str, method: str = "GET", start: int = 0):
     req = urllib.request.Request(url, method=method, headers={"User-Agent": "kubakub-setup"})
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     if start:
         req.add_header("Range", f"bytes={start}-")
-    return urllib.request.urlopen(req, timeout=60)
+    return _OPENER.open(req, timeout=60)
 
 
 def remote_size(url: str, token: str) -> int | None:
@@ -258,6 +273,8 @@ def download(url: str, dest: str, token: str) -> None:
                 if total:
                     print(f"\r    {done / 2**30:6.2f} / {total / 2**30:.2f} GB", end="", flush=True)
     print()
+    if total and done != total:                            # a cut connection: keep the part, the next run resumes
+        raise OSError(f"download incomplete: {done} of {total} bytes")
     os.replace(part, dest)
 
 

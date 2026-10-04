@@ -28,6 +28,7 @@ import torch
 from comfy_api.latest import io, ui
 
 from ...kubakub import facade_core as fc
+from ...kubakub import save_paths
 from ...kubakub import sam_prompts as sp
 from ...kubakub.io_types import RegionsType
 from ...kubakub.types import Regions
@@ -363,17 +364,18 @@ class KUBA_RegionsSAM3Masks(io.ComfyNode):
                     continue
                 kept.append((n, m & sc, how, s))
             objects = kept
-        small = [n for n, m, _, _ in objects if m.sum() < max(1, min_area)]
+        small = {i for i, (_, m, _, _) in enumerate(objects) if m.sum() < max(1, min_area)}   # by object: names repeat
         if small:
-            notes.append(f"under {min_area} px, dropped: {', '.join(small)}")
-        objects = [o for o in objects if o[0] not in small]
+            notes.append(f"under {min_area} px, dropped: {', '.join(objects[i][0] for i in sorted(small))}")
+        objects = [o for i, o in enumerate(objects) if i not in small]
         final = sp.numbered([n for n, *_ in objects])
         objects = [(f, *o[1:]) for f, o in zip(final, objects)]
         if not objects:
             raise ValueError("SAM3 found nothing. Lower the threshold, check the prompts or points. "
                              + "; ".join(notes))
 
-        folder = fc.clean_folder_path(save_folder)
+        import folder_paths
+        folder = save_paths.save_folder(save_folder, folder_paths.get_output_directory())
         if folder:
             import cv2
             os.makedirs(folder, exist_ok=True)
@@ -681,6 +683,9 @@ class KUBA_RegionsMask(io.ComfyNode):
         from ...kubakub.director.render import select_regions
         all_ids = [r["region_id"] for r in regions.table.get("regions", [])]
         ids = all_ids if select.strip() in ("", "*") else select_regions(regions.table, select)
+        if not ids and all_ids:
+            raise ValueError(f"select '{select.strip()}' matches no region. Names, groups and tags are in the region table "
+                             "(the report of the node that made the regions).")
         lab = regions.labels[0].cpu().numpy()
         m = np.isin(lab, ids).astype(np.float32)
         if grow_px:

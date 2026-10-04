@@ -20,3 +20,6 @@
 # blender =                   # path to blender.exe (empty = found in Program Files or on PATH)
 # blender_worker = on         # keep one Blender process loaded between jobs (off = start it for every job)
 # blender_idle = 600          # seconds an idle Blender process stays loaded
+# Files and folders (a workflow can come from anyone, so these are off until you switch them on):
+# save_anywhere = on          # save_folder inputs may name any folder on this computer (off = inside ComfyUI/output)
+# remote_paths = on           # with ComfyUI --listen: the director window may still read videos / images by path

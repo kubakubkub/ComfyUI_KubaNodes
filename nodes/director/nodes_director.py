@@ -39,6 +39,7 @@ from ...kubakub import keyframes as kf
 from ...kubakub.director.blend import MODES
 from ...kubakub.io_types import DirectorType, RegionsType, SceneType
 from ...kubakub.types import Regions
+from ...kubakub import imio
 
 log = logging.getLogger("KUBA.regions")
 
@@ -55,9 +56,9 @@ def _png(path, rgba):
 
 def _png8(path, a):
     if a.shape[-1] == 4:
-        cv2.imwrite(path, cv2.cvtColor(a, cv2.COLOR_RGBA2BGRA))
+        imio.imwrite(path, cv2.cvtColor(a, cv2.COLOR_RGBA2BGRA))
     else:
-        cv2.imwrite(path, cv2.cvtColor(a, cv2.COLOR_RGB2BGR))
+        imio.imwrite(path, cv2.cvtColor(a, cv2.COLOR_RGB2BGR))
 
 
 def _proxy(img, k):
@@ -140,7 +141,7 @@ def _scene_views(scene, out_dir, stamp, W, H, k, made):
     for name, fname in (("clay", "clay.png"),):
         p = os.path.join(scene["ids"], fname)
         if os.path.isfile(p):
-            img = cv2.cvtColor(cv2.imread(p), cv2.COLOR_BGR2RGB).astype(np.float32) / 255
+            img = cv2.cvtColor(imio.imread(p), cv2.COLOR_BGR2RGB).astype(np.float32) / 255
             fn = f"{name}_{stamp}.png"
             _png(os.path.join(out_dir, fn), _proxy(cv2.resize(img, (W, H)), k))
             made[name] = fn
@@ -152,7 +153,7 @@ def _scene_views(scene, out_dir, stamp, W, H, k, made):
     ids = sorted(f for f in os.listdir(scene["ids"]) if f.startswith("ids_") and f.endswith(".png"))
     pick = next((f for f in ids if "shelves" in f), ids[0] if ids else None)
     if pick:
-        img = cv2.cvtColor(cv2.imread(os.path.join(scene["ids"], pick)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255
+        img = cv2.cvtColor(imio.imread(os.path.join(scene["ids"], pick)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255
         fn = f"ids_{stamp}.png"
         _png(os.path.join(out_dir, fn), _proxy(cv2.resize(img, (W, H), interpolation=cv2.INTER_NEAREST), k))
         made["ids"] = fn
@@ -240,6 +241,39 @@ def _source_video(ref):
         return p if p and md.is_video(p) else None
     name = ref[5:] if ref.startswith("file:") else ref
     return _input_path(name) if name and md.is_video(name) else None
+
+
+def _reachable_from_outside():
+    """ComfyUI was started with --listen on more than this computer: its routes answer other machines too."""
+    try:
+        from comfy.cli_args import args
+        hosts = [h.strip().lower() for h in str(getattr(args, "listen", "") or "").split(",")]
+    except Exception:  # noqa: BLE001
+        return False
+    return any(h not in ("", "127.0.0.1", "localhost", "::1") for h in hosts)
+
+
+PATHS_OFF = ("files by path are off while ComfyUI listens on the network (--listen). Put the file into ComfyUI's input "
+             "folder, or allow it with  remote_paths = on  in kubakub.ini [settings]")
+
+
+def _route_paths_ok():
+    """May a request to the window's routes name a file by its path ('path:...', hdri_file)? Yes on this computer
+    only; with --listen only when kubakub.ini says remote_paths = on. A workflow that runs is not affected."""
+    return not _reachable_from_outside() or kst.switch("remote_paths", False)
+
+
+def _doc_names_paths(doc):
+    """Does a document sent to a route read files by path (video / image sources 'path:...', a light's HDRI)?"""
+    doc = doc if isinstance(doc, dict) else {}
+    for L in doc.get("layers") or []:
+        if not isinstance(L, dict):
+            continue
+        lt = L.get("light") if isinstance(L.get("light"), dict) else {}
+        if str(L.get("source") or "").startswith("path:") or str(lt.get("hdri_file") or "").strip():
+            return True
+    pm = doc.get("projection_mask") if isinstance(doc.get("projection_mask"), dict) else {}
+    return str(pm.get("source") or "").startswith("path:")
 
 
 def _local_file(p):
@@ -1069,7 +1103,7 @@ def _register_routes():
             path = os.path.realpath(os.path.join(root, ref.get("subfolder", ""), ref.get("filename", "")))
             if not path.startswith(root + os.sep) or not os.path.isfile(path):
                 return web.json_response({"error": "image not found"}, status=404)
-            img = cv2.imread(path, cv2.IMREAD_COLOR)
+            img = imio.imread(path, cv2.IMREAD_COLOR)
             rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255
             out_dir = os.path.join(folder_paths.get_temp_directory(), "kuba_director", "masks")
             os.makedirs(out_dir, exist_ok=True)
@@ -1077,11 +1111,11 @@ def _register_routes():
             if not os.path.isfile(os.path.join(out_dir, fn)):      # same pixels: the mask made last time
                 from ...kubakub.director import bg
                 mask = await asyncio.get_running_loop().run_in_executor(None, bg.mask_for, rgb)
-                cv2.imwrite(os.path.join(out_dir, fn), np.clip(mask * 255 + 0.5, 0, 255).astype(np.uint8))
+                imio.imwrite(os.path.join(out_dir, fn), np.clip(mask * 255 + 0.5, 0, 255).astype(np.uint8))
             return web.json_response({"mask": {"filename": fn, "subfolder": "kuba_director/masks", "type": "temp"}})
         except Exception as e:  # noqa: BLE001
             log.exception("[KUBA director] remove_bg failed")
-            return web.json_response({"error": str(e)}, status=500)
+            return web.json_response({"error": (str(e).splitlines() or [""])[0]}, status=500)
 
     async def relight(request):
         """{node, layer: light layer id, doc, px, samples} -> a quick Cycles preview of that light layer (temp PNG)."""
@@ -1093,6 +1127,12 @@ def _register_routes():
             if last is None or last.get("scene") is None:
                 return web.json_response({"error": "run the workflow once with a scene connected to the director"}, status=409)
             doc = body.get("doc") or {}
+            if _doc_names_paths(doc) and not _route_paths_ok():
+                return web.json_response({"error": PATHS_OFF}, status=403)
+            for L in doc.get("layers") or []:          # a light's HDRI: a file on this computer, never a network share
+                lt = L.get("light") if isinstance(L, dict) and isinstance(L.get("light"), dict) else None
+                if lt and str(lt.get("hdri_file") or "").strip() and not _local_file(lt["hdri_file"]):
+                    return web.json_response({"error": "hdri_file: not a file on a local drive"}, status=400)
             px = int(min(max(float(body.get("px") or 800), 128), 4096))
             samples = int(min(max(float(body.get("samples") or 16), 1), 1024))
             projector = None
@@ -1110,7 +1150,7 @@ def _register_routes():
             return web.json_response({"image": ref, "report": report})
         except Exception as e:  # noqa: BLE001
             log.exception("[KUBA director] relight preview failed")
-            return web.json_response({"error": str(e)}, status=500)
+            return web.json_response({"error": (str(e).splitlines() or [""])[0]}, status=500)
 
     async def media(request):
         """{source: 'file:kuba_director/x.mov' or 'path:D:/.../x.mov'} -> {info, proxy}: a small browser-playable copy (made once
@@ -1118,6 +1158,8 @@ def _register_routes():
         import asyncio
         try:
             name = str((await request.json()).get("source") or "")        # 'file:<name in input/>' or 'path:<file>'
+            if name.startswith("path:") and not _route_paths_ok():
+                return web.json_response({"error": PATHS_OFF}, status=403)
             path = _source_video(name)
             if not path:
                 return web.json_response({"error": "video not found: " + name[5:]}, status=404)
@@ -1154,16 +1196,18 @@ def _register_routes():
                 return web.json_response({"error": "run the workflow once, then set the projection mask"}, status=409)
             notes = []
             doc = {"projection_mask": dict(body.get("pm") or {}, on=True)}
+            if _doc_names_paths(doc) and not _route_paths_ok():
+                return web.json_response({"error": PATHS_OFF}, status=403)
             m = await asyncio.get_running_loop().run_in_executor(None, projection_mask, doc, last["scene"], last["W"], last["H"], notes)
             if m is None:
                 return web.json_response({"error": "; ".join(notes) or "no mask"}, status=404)
-            pw, ph = max(1, int(body.get("pw") or last["W"])), max(1, int(body.get("ph") or last["H"]))
+            pw, ph = (min(max(1, int(body.get(k) or last[d])), 8192) for k, d in (("pw", "W"), ("ph", "H")))   # a preview, never huge
             small = cv2.resize(m, (pw, ph), interpolation=cv2.INTER_AREA)
             out_dir = os.path.join(folder_paths.get_temp_directory(), "kuba_director", uid)
             os.makedirs(out_dir, exist_ok=True)
             png = np.clip(small * 255 + 0.5, 0, 255).astype(np.uint8)
             fn = f"pmask_{hashlib.sha1(png.tobytes()).hexdigest()[:12]}.png"
-            cv2.imwrite(os.path.join(out_dir, fn), png)
+            imio.imwrite(os.path.join(out_dir, fn), png)
             return web.json_response({"image": {"filename": fn, "subfolder": f"kuba_director/{uid}", "type": "temp"},
                                       "note": "; ".join(notes)})
         except Exception as e:  # noqa: BLE001
@@ -1451,6 +1495,11 @@ class KUBA_Director(io.ComfyNode):
             masks[j, y0:y1, x0:x1] = torch.from_numpy(crop)
         changed = torch.from_numpy(r["changed"])[None]
         out_regions = Regions.from_numpy(r["labels"], r["table"])
+        if regions is not None and regions.scope is not None:           # the scope travels on: samplers clip to it
+            sc = regions.scope.float().cpu()
+            if tuple(sc.shape[-2:]) != tuple(out_regions.labels.shape[-2:]):
+                sc = (torch.nn.functional.interpolate(sc[:, None], size=tuple(out_regions.labels.shape[-2:]), mode="area")[:, 0] > 0.5).float()
+            out_regions = Regions(out_regions.labels, out_regions.table, sc)
         fn = _png_once(out_dir, "out", stamp, _proxy(r["image"], k))
 
         # clean older proxies of this director (node + workflow: only its own folder) after an hour

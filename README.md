@@ -129,7 +129,7 @@ are settings in `kubakub.ini` (section `[settings]`, see `kubakub.ini.example`);
 
 ## Requirements
 
-**Tested with:** ComfyUI 0.37.0, torch 2.10 cu130, Python 3.12, Blender 4.5, Windows 11, RTX 5070 Ti 12 GB.
+**Tested with:** ComfyUI 0.38.2, torch 2.10 cu130, Python 3.12, Blender 4.5, Windows 11, RTX 5070 Ti 12 GB.
 Other systems are untested.
 
 | needs | for | without it |
