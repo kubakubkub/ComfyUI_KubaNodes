@@ -1,0 +1,1434 @@
+{
+ "last_node_id": 101,
+ "last_link_id": 32,
+ "nodes": [
+  {
+   "type": "KUBA_SampleFacade",
+   "size": [
+    320,
+    260
+   ],
+   "flags": {},
+   "mode": 0,
+   "inputs": [],
+   "properties": {
+    "Node name for S&R": "KUBA_SampleFacade"
+   },
+   "widgets_values": [
+    1920,
+    1080,
+    3,
+    7,
+    "sandstone",
+    0
+   ],
+   "title": "sample facade (your own: Load Image + a mask folder)",
+   "id": 1,
+   "pos": [
+    0,
+    0
+   ],
+   "order": 0,
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      1,
+      3,
+      10
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "color_matrix",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "silhouette",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "mask_folder",
+     "type": "STRING",
+     "links": [
+      32
+     ],
+     "slot_index": 3
+    },
+    {
+     "name": "sketch_photo",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 4
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "type": "KUBA_FacadeMaskAtlas",
+   "pos": [
+    380,
+    0
+   ],
+   "size": [
+    400,
+    560
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 1
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "mask_folder",
+     "type": "STRING",
+     "widget": {
+      "name": "mask_folder"
+     },
+     "link": 32
+    }
+   ],
+   "outputs": [
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      4
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      2
+     ],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_FacadeMaskAtlas"
+   },
+   "widgets_values": [
+    "mask_folder",
+    400,
+    true,
+    24,
+    true,
+    0.08,
+    true,
+    "folder",
+    false,
+    0.5,
+    "auto",
+    1,
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "id": 3,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    820,
+    0
+   ],
+   "size": [
+    440,
+    620
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 2
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [
+      9,
+      16,
+      23
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      5
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[plan]\norder = largest_first\n\n[default]\nprompt = weathered sandstone palace facade at night, baroque detail\ndenoise = 0.55\n\n[group:M_Pilasters]\nprompt += carved vines climbing the stone\n\n[group:M_Stone_Frames, group:M_Lintels]\nprompt += ornate carved stone, crisp edges\ndenoise = 0.45\n\n[group:Windows]\nprompt = dark glass with faint reflections\n\n[W_F1_*]\nstrategy = frame_in_frame\nprompt = an underwater room with {jellyfish|a sunken piano|koi|a diver|a coral chandelier}\n\n[tag:M_FLOOR_F3 group:Windows]\nprompt = candle lit attic room behind old glass\n\n[M_Cornices_Portals]\nstrategy = keep\n",
+    7,
+    ""
+   ]
+  },
+  {
+   "id": 4,
+   "type": "PreviewImage",
+   "pos": [
+    380,
+    600
+   ],
+   "size": [
+    400,
+    300
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Atlas preview"
+  },
+  {
+   "id": 5,
+   "type": "PreviewImage",
+   "pos": [
+    820,
+    660
+   ],
+   "size": [
+    440,
+    300
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Plan preview"
+  },
+  {
+   "id": 10,
+   "type": "UNETLoader",
+   "pos": [
+    0,
+    1000
+   ],
+   "size": [
+    340,
+    90
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      30
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "flux-2-klein-9b-fp8.safetensors",
+    "default"
+   ],
+   "title": "Klein 9B"
+  },
+  {
+   "id": 11,
+   "type": "CLIPLoader",
+   "pos": [
+    0,
+    1120
+   ],
+   "size": [
+    340,
+    110
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      7,
+      21
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen_3_8b_fp8mixed.safetensors",
+    "flux2",
+    "default"
+   ]
+  },
+  {
+   "id": 12,
+   "type": "VAELoader",
+   "pos": [
+    0,
+    1260
+   ],
+   "size": [
+    340,
+    60
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      8,
+      22
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "flux2-vae.safetensors"
+   ]
+  },
+  {
+   "id": 13,
+   "type": "KUBA_RegionSampler",
+   "pos": [
+    380,
+    1000
+   ],
+   "size": [
+    400,
+    420
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 7
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 8
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 9
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      17
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "links": [
+      18
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      27
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionSampler"
+   },
+   "widgets_values": [
+    0,
+    0.0,
+    "euler",
+    "simple",
+    1.0,
+    4.0,
+    "auto",
+    0,
+    "auto",
+    "!W_F1_*"
+   ],
+   "title": "Region Sampler: Klein (all but W_F1_*)"
+  },
+  {
+   "id": 20,
+   "type": "UNETLoader",
+   "pos": [
+    0,
+    1500
+   ],
+   "size": [
+    340,
+    90
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      31
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "qwen_image_2.1_int8_convrot.safetensors",
+    "default"
+   ],
+   "title": "Qwen Image 2.1"
+  },
+  {
+   "id": 21,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    0,
+    1620
+   ],
+   "size": [
+    340,
+    90
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      12
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "Qwen-Image-2.1-viggle-turbo-v0.2-5step-lora-r256.safetensors",
+    1.0
+   ],
+   "title": "Viggle turbo LoRA (5 steps)"
+  },
+  {
+   "id": 22,
+   "type": "QwenImage21Cache",
+   "pos": [
+    0,
+    1740
+   ],
+   "size": [
+    340,
+    90
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 12
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      13
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "QwenImage21Cache"
+   },
+   "widgets_values": [
+    "gpu",
+    "default"
+   ],
+   "title": "Qwen cache: gpu / default"
+  },
+  {
+   "id": 23,
+   "type": "CLIPLoader",
+   "pos": [
+    0,
+    1860
+   ],
+   "size": [
+    340,
+    110
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      14
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen3vl_8b_w4a8.safetensors",
+    "qwen_image",
+    "default"
+   ]
+  },
+  {
+   "id": 24,
+   "type": "VAELoader",
+   "pos": [
+    0,
+    2000
+   ],
+   "size": [
+    340,
+    60
+   ],
+   "flags": {},
+   "order": 13,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      15
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "texture_fix_vae_for_qwen_image_2.1_bf16.safetensors"
+   ]
+  },
+  {
+   "id": 25,
+   "type": "KUBA_RegionSampler",
+   "pos": [
+    380,
+    1500
+   ],
+   "size": [
+    400,
+    420
+   ],
+   "flags": {},
+   "order": 14,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 13
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 14
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 15
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 16
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 17
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      24
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "links": [
+      19
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      28
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionSampler"
+   },
+   "widgets_values": [
+    0,
+    0.0,
+    "euler",
+    "simple",
+    1.0,
+    4.0,
+    "qwen21_turbo_5",
+    0,
+    "auto",
+    "W_F1_*"
+   ],
+   "title": "Region Sampler: Qwen turbo (W_F1_* frame in frame)"
+  },
+  {
+   "id": 30,
+   "type": "MaskComposite",
+   "pos": [
+    820,
+    1000
+   ],
+   "size": [
+    300,
+    130
+   ],
+   "flags": {},
+   "order": 15,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "destination",
+     "type": "MASK",
+     "link": 18
+    },
+    {
+     "name": "source",
+     "type": "MASK",
+     "link": 19
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MASK",
+     "type": "MASK",
+     "links": [
+      25
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "MaskComposite"
+   },
+   "widgets_values": [
+    0,
+    0,
+    "add"
+   ],
+   "title": "changed: Klein + Qwen"
+  },
+  {
+   "id": 31,
+   "type": "KUBA_SeamPass",
+   "pos": [
+    820,
+    1180
+   ],
+   "size": [
+    400,
+    440
+   ],
+   "flags": {},
+   "order": 16,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 20
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 21
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 22
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 23
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 24
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "link": 25
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      26
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "seam_mask",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      29
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SeamPass"
+   },
+   "widgets_values": [
+    32,
+    0.3,
+    0,
+    0.0,
+    "euler",
+    "simple",
+    true,
+    "auto",
+    0,
+    1024,
+    "auto",
+    ""
+   ],
+   "title": "Seam Pass (Klein)"
+  },
+  {
+   "id": 32,
+   "type": "SaveImage",
+   "pos": [
+    1260,
+    1000
+   ],
+   "size": [
+    600,
+    420
+   ],
+   "flags": {},
+   "order": 17,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 26
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "KubaRegions/facade_M1"
+   ]
+  },
+  {
+   "id": 33,
+   "type": "PreviewAny",
+   "pos": [
+    1260,
+    1460
+   ],
+   "size": [
+    300,
+    200
+   ],
+   "flags": {},
+   "order": 18,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 27
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Klein report"
+  },
+  {
+   "id": 34,
+   "type": "PreviewAny",
+   "pos": [
+    1580,
+    1460
+   ],
+   "size": [
+    300,
+    200
+   ],
+   "flags": {},
+   "order": 19,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 28
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Qwen report"
+  },
+  {
+   "id": 35,
+   "type": "PreviewAny",
+   "pos": [
+    1260,
+    1700
+   ],
+   "size": [
+    300,
+    200
+   ],
+   "flags": {},
+   "order": 20,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 29
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Seam report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    1300,
+    0
+   ],
+   "size": [
+    560,
+    420
+   ],
+   "flags": {},
+   "order": 21,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "# regions + diffusion: a prompt per region\n\n1. The **sample facade** node draws a facade and its mask folder, so this runs without files. Your own facade: a Load Image node for the matrix and the path of your mask folder in `mask_folder`.\n2. The regions node reads the mask folder: one region per mask (rules for names the folder does not have match nothing).\n3. Region Plan: edit the rules (prompts per group / name / tag). `{a|b}` picks one per region from the seed.\n4. Klein 9B paints every region except the floor 1 windows (`only = !W_F1_*`), ~10 s each.\n5. Qwen 2.1 + Viggle turbo LoRA puts a scene into each floor 1 window (frame in frame), ~25 s each.\n6. Seam Pass blends the borders of everything that changed; the result is saved to output/KubaRegions.\n\nIterate on a few regions: set `only` on a sampler (e.g. `W_F2_*`), mute the other sampler.\nKeep the Qwen cache on gpu / default; auto and int8 can crash on a 12 GB card.\n"
+   ],
+   "title": "Read me"
+  },
+  {
+   "id": 100,
+   "type": "ModelAttentionBackend",
+   "pos": [
+    0,
+    1130
+   ],
+   "size": [
+    320,
+    60
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "title": "comfy kitchen attention (int8)",
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 30
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6,
+      20
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ModelAttentionBackend"
+   },
+   "widgets_values": [
+    "comfy kitchen attention"
+   ]
+  },
+  {
+   "id": 101,
+   "type": "ModelAttentionBackend",
+   "pos": [
+    0,
+    1630
+   ],
+   "size": [
+    320,
+    60
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "title": "comfy kitchen attention (int8)",
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 31
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      11
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ModelAttentionBackend"
+   },
+   "widgets_values": [
+    "comfy kitchen attention"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   0,
+   "IMAGE"
+  ],
+  [
+   2,
+   2,
+   4,
+   3,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   3,
+   1,
+   0,
+   3,
+   1,
+   "IMAGE"
+  ],
+  [
+   4,
+   2,
+   2,
+   4,
+   0,
+   "IMAGE"
+  ],
+  [
+   5,
+   3,
+   3,
+   5,
+   0,
+   "IMAGE"
+  ],
+  [
+   6,
+   100,
+   0,
+   13,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   11,
+   0,
+   13,
+   1,
+   "CLIP"
+  ],
+  [
+   8,
+   12,
+   0,
+   13,
+   2,
+   "VAE"
+  ],
+  [
+   9,
+   3,
+   0,
+   13,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   10,
+   1,
+   0,
+   13,
+   4,
+   "IMAGE"
+  ],
+  [
+   11,
+   101,
+   0,
+   21,
+   0,
+   "MODEL"
+  ],
+  [
+   12,
+   21,
+   0,
+   22,
+   0,
+   "MODEL"
+  ],
+  [
+   13,
+   22,
+   0,
+   25,
+   0,
+   "MODEL"
+  ],
+  [
+   14,
+   23,
+   0,
+   25,
+   1,
+   "CLIP"
+  ],
+  [
+   15,
+   24,
+   0,
+   25,
+   2,
+   "VAE"
+  ],
+  [
+   16,
+   3,
+   0,
+   25,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   17,
+   13,
+   0,
+   25,
+   4,
+   "IMAGE"
+  ],
+  [
+   18,
+   13,
+   1,
+   30,
+   0,
+   "MASK"
+  ],
+  [
+   19,
+   25,
+   1,
+   30,
+   1,
+   "MASK"
+  ],
+  [
+   20,
+   100,
+   0,
+   31,
+   0,
+   "MODEL"
+  ],
+  [
+   21,
+   11,
+   0,
+   31,
+   1,
+   "CLIP"
+  ],
+  [
+   22,
+   12,
+   0,
+   31,
+   2,
+   "VAE"
+  ],
+  [
+   23,
+   3,
+   0,
+   31,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   24,
+   25,
+   0,
+   31,
+   4,
+   "IMAGE"
+  ],
+  [
+   25,
+   30,
+   0,
+   31,
+   5,
+   "MASK"
+  ],
+  [
+   26,
+   31,
+   0,
+   32,
+   0,
+   "IMAGE"
+  ],
+  [
+   27,
+   13,
+   2,
+   33,
+   0,
+   "STRING"
+  ],
+  [
+   28,
+   25,
+   2,
+   34,
+   0,
+   "STRING"
+  ],
+  [
+   29,
+   31,
+   2,
+   35,
+   0,
+   "STRING"
+  ],
+  [
+   30,
+   10,
+   0,
+   100,
+   0,
+   "MODEL"
+  ],
+  [
+   31,
+   20,
+   0,
+   101,
+   0,
+   "MODEL"
+  ],
+  [
+   32,
+   1,
+   3,
+   2,
+   2,
+   "STRING"
+  ]
+ ],
+ "groups": [
+  {
+   "title": "Regions and plan",
+   "bounding": [
+    -20,
+    -60,
+    1300,
+    1040
+   ],
+   "color": "#3f789e"
+  },
+  {
+   "title": "Klein 9B: all regions except floor 1 windows",
+   "bounding": [
+    -20,
+    950,
+    820,
+    500
+   ],
+   "color": "#8A8"
+  },
+  {
+   "title": "Qwen 2.1 turbo: floor 1 windows, frame in frame",
+   "bounding": [
+    -20,
+    1450,
+    820,
+    650
+   ],
+   "color": "#b58b2a"
+  },
+  {
+   "title": "Seams and output",
+   "bounding": [
+    800,
+    950,
+    1100,
+    980
+   ],
+   "color": "#a1309b"
+  }
+ ],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub example workflow"
+ },
+ "version": 0.4
+}

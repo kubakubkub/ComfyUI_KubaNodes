@@ -1,0 +1,763 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 15,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_SampleFacade",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    320,
+    260
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "color_matrix",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "silhouette",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "mask_folder",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "sketch_photo",
+     "type": "IMAGE",
+     "links": [
+      1
+     ],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SampleFacade"
+   },
+   "widgets_values": [
+    1920,
+    1080,
+    3,
+    7,
+    "sandstone",
+    0
+   ],
+   "title": "1 \u00b7 sample facade: its sketch_photo output (or Load Image: your photo)"
+  },
+  {
+   "id": 2,
+   "type": "KUBA_ScanToLine",
+   "pos": [
+    360,
+    0
+   ],
+   "size": [
+    360,
+    330
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "photo",
+     "type": "IMAGE",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "drawing",
+     "type": "IMAGE",
+     "links": [
+      2,
+      5,
+      10,
+      15
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "line",
+     "type": "MASK",
+     "links": [
+      3,
+      12
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "projection",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "found",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "corners",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_ScanToLine"
+   },
+   "widgets_values": [
+    1920,
+    1080,
+    "pencil",
+    0.5,
+    1.0,
+    false,
+    ""
+   ],
+   "title": "2 \u00b7 scan to line"
+  },
+  {
+   "id": 3,
+   "type": "KUBA_RegionsFromSketch",
+   "pos": [
+    760,
+    0
+   ],
+   "size": [
+    360,
+    330
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "drawing",
+     "type": "IMAGE",
+     "link": 2
+    },
+    {
+     "name": "line",
+     "type": "MASK",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      4
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "region_masks",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      14
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionsFromSketch"
+   },
+   "widgets_values": [
+    24,
+    0.3,
+    true,
+    "drop",
+    4000,
+    true
+   ],
+   "title": "3 \u00b7 regions from sketch"
+  },
+  {
+   "id": 4,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    1160,
+    0
+   ],
+   "size": [
+    420,
+    520
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 4
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [
+      9
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[plan]\norder = largest_first\n\n[default]\nprompt = ornate baroque sandstone facade at dusk, carved stone, warm evening light, architectural photograph\ndenoise = 0.9\n\n[tag:red]\nprompt = heavy carved wooden door with brass fittings\n\n[tag:blue]\nprompt = warm lit rooms behind old glass, curtains, a plant on the sill\n",
+    0,
+    ""
+   ],
+   "title": "4 \u00b7 plan: [tag:red] = the red dot, [tag:blue] = blue dots"
+  },
+  {
+   "id": 10,
+   "type": "UNETLoader",
+   "pos": [
+    0,
+    320
+   ],
+   "size": [
+    320,
+    90
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "flux-2-klein-4b.safetensors",
+    "default"
+   ],
+   "title": "flux 2 klein 4b"
+  },
+  {
+   "id": 11,
+   "type": "CLIPLoader",
+   "pos": [
+    0,
+    440
+   ],
+   "size": [
+    320,
+    110
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      7
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen_3_4b.safetensors",
+    "flux2",
+    "default"
+   ],
+   "title": "qwen 3 4b"
+  },
+  {
+   "id": 12,
+   "type": "VAELoader",
+   "pos": [
+    0,
+    580
+   ],
+   "size": [
+    320,
+    60
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      8
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "flux2-vae.safetensors"
+   ],
+   "title": "flux 2 vae"
+  },
+  {
+   "id": 5,
+   "type": "KUBA_RegionSampler",
+   "pos": [
+    1620,
+    0
+   ],
+   "size": [
+    380,
+    520
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 7
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 8
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 9
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      11
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionSampler"
+   },
+   "widgets_values": [
+    0,
+    0.0,
+    "euler",
+    "simple",
+    1.0,
+    4.0,
+    "auto",
+    0,
+    "auto",
+    ""
+   ],
+   "title": "5 \u00b7 region sampler: renders your drawing region by region"
+  },
+  {
+   "id": 6,
+   "type": "KUBA_LineOverlay",
+   "pos": [
+    2040,
+    0
+   ],
+   "size": [
+    340,
+    300
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 11
+    },
+    {
+     "name": "line",
+     "type": "MASK",
+     "link": 12
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      13
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_LineOverlay"
+   },
+   "widgets_values": [
+    0.6,
+    "multiply",
+    "#2a1a10",
+    0,
+    0.0
+   ],
+   "title": "6 \u00b7 your line back on top"
+  },
+  {
+   "id": 7,
+   "type": "SaveImage",
+   "pos": [
+    2420,
+    0
+   ],
+   "size": [
+    420,
+    440
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 13
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "kubakub_starter/sketch"
+   ],
+   "title": "result"
+  },
+  {
+   "id": 8,
+   "type": "PreviewImage",
+   "pos": [
+    760,
+    380
+   ],
+   "size": [
+    360,
+    300
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 14
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "regions"
+  },
+  {
+   "id": 9,
+   "type": "PreviewImage",
+   "pos": [
+    360,
+    380
+   ],
+   "size": [
+    360,
+    300
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 15
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "the scan"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    -560
+   ],
+   "size": [
+    700,
+    460
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## starter 05 \u00b7 sketch to render\n\n**You need:** Flux 2 Klein 4B as in starter 02.\n\n**Do:** Queue. The sample facade's *sketch_photo* is a phone photo of a pencil sketch: scan to line straightens and\ncleans it, every closed shape becomes a region, coloured dots name them (red = the door, blue = first floor\nwindows), Klein renders the drawing region by region and your line goes back on top.\n\n**Your drawing:** draw on a print of the template (or any paper), photograph it, Load Image into node 2 and link\nwidth / height from *kubakub project settings*. A marker dot in a shape = its name for the rules (`[tag:red]`).\nStrokes don't need to meet: `gap_px` closes gaps. Too many small regions: raise `min_region_area`.\n`denoise` lower = closer to the drawing; line overlay `amount` 0.3 = a light trace, 1 = exactly your stroke.\n"
+   ],
+   "title": "read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   4,
+   2,
+   0,
+   "IMAGE"
+  ],
+  [
+   2,
+   2,
+   0,
+   3,
+   0,
+   "IMAGE"
+  ],
+  [
+   3,
+   2,
+   1,
+   3,
+   1,
+   "MASK"
+  ],
+  [
+   4,
+   3,
+   0,
+   4,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   5,
+   2,
+   0,
+   4,
+   1,
+   "IMAGE"
+  ],
+  [
+   6,
+   10,
+   0,
+   5,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   11,
+   0,
+   5,
+   1,
+   "CLIP"
+  ],
+  [
+   8,
+   12,
+   0,
+   5,
+   2,
+   "VAE"
+  ],
+  [
+   9,
+   4,
+   0,
+   5,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   10,
+   2,
+   0,
+   5,
+   4,
+   "IMAGE"
+  ],
+  [
+   11,
+   5,
+   0,
+   6,
+   0,
+   "IMAGE"
+  ],
+  [
+   12,
+   2,
+   1,
+   6,
+   1,
+   "MASK"
+  ],
+  [
+   13,
+   6,
+   0,
+   7,
+   0,
+   "IMAGE"
+  ],
+  [
+   14,
+   3,
+   3,
+   8,
+   0,
+   "IMAGE"
+  ],
+  [
+   15,
+   2,
+   0,
+   9,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub starter workflow"
+ },
+ "version": 0.4
+}

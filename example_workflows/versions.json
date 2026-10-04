@@ -1,0 +1,741 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 13,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_SceneRender",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    420,
+    560
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "clay",
+     "type": "IMAGE",
+     "links": [
+      2,
+      5,
+      10
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "ids_preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "normal",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "coverage",
+     "type": "MASK",
+     "links": [
+      3
+     ],
+     "slot_index": 4
+    },
+    {
+     "name": "folder",
+     "type": "STRING",
+     "links": [
+      1
+     ],
+     "slot_index": 5
+    },
+    {
+     "name": "scene_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 7
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [],
+     "slot_index": 8
+    },
+    {
+     "name": "depth_gray",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 9
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneRender"
+   },
+   "widgets_values": [
+    "",
+    0,
+    0,
+    -1,
+    "elements sections floors shelves layers facing",
+    "elements",
+    0.05,
+    3.0,
+    0.02,
+    "-0.5 -0.05 0.05 0.5",
+    "",
+    "",
+    "",
+    1.0,
+    0.5
+   ],
+   "title": "1 · scene render: clay + ID passes (set the file)"
+  },
+  {
+   "id": 2,
+   "type": "KUBA_RegionsFromIDMaps",
+   "pos": [
+    460,
+    0
+   ],
+   "size": [
+    420,
+    380
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "folder",
+     "type": "STRING",
+     "widget": {
+      "name": "folder"
+     },
+     "link": 1
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 2
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      4
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      13
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "reference",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionsFromIDMaps"
+   },
+   "widgets_values": [
+    "",
+    "elements",
+    "facing layers shelves sections floors",
+    "id_map",
+    "",
+    400,
+    true,
+    "auto"
+   ],
+   "title": "2 · regions from the ID passes"
+  },
+  {
+   "id": 3,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    920,
+    0
+   ],
+   "size": [
+    440,
+    520
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 4
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [
+      9
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[plan]\norder = largest_first\n\n// what every version has in common\n[default]\nprompt = railway station facade at night, architectural photograph\ndenoise = 0.85\ncolor_match = none\n",
+    0,
+    ""
+   ],
+   "title": "3 · plan: what every version has in common"
+  },
+  {
+   "id": 10,
+   "type": "UNETLoader",
+   "pos": [
+    0,
+    620
+   ],
+   "size": [
+    320,
+    90
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "flux-2-klein-4b.safetensors",
+    "default"
+   ],
+   "title": "flux 2 klein 4b"
+  },
+  {
+   "id": 11,
+   "type": "CLIPLoader",
+   "pos": [
+    0,
+    740
+   ],
+   "size": [
+    320,
+    110
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      7
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen_3_4b.safetensors",
+    "flux2",
+    "default"
+   ],
+   "title": "qwen 3 4b"
+  },
+  {
+   "id": 12,
+   "type": "VAELoader",
+   "pos": [
+    0,
+    880
+   ],
+   "size": [
+    320,
+    60
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      8
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "flux2-vae.safetensors"
+   ],
+   "title": "flux 2 vae"
+  },
+  {
+   "id": 4,
+   "type": "KUBA_Versions",
+   "pos": [
+    1400,
+    0
+   ],
+   "size": [
+    520,
+    900
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 7
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 8
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 9
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 10
+    },
+    {
+     "name": "references",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "sheet",
+     "type": "IMAGE",
+     "links": [
+      11
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      12
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Versions"
+   },
+   "widgets_values": [
+    "// one option per line; 'short name = text' gives it a label\n[look]\ncopper = oxidised copper plates, verdigris, rivets, wet metal\npaper = folded white paper model, soft studio light, paper craft\nmoss = overgrown with moss and ivy, wet old stone\nice = carved from blue glacier ice, frost, cold light\n\n[region windows]\nwarm lit rooms behind the glass\naquariums full of fish, blue light\n\n// prompt rotation: the ideas move on by one region per version\n// [rotate windows | wall | roof]\n// glass = glowing molten glass\n// textile = woven red textile, embroidery\n// moss = moss and ferns\n\n[lora]\nnone\n// Your_Lora_Name : 0.8 : trigger words\n\n// style images: a file or a folder, one version per image\n// [reference]\n// none\n// my_project/style_images\n\n// [set denoise]\n// 0.7\n// 0.9\n\n// [seed]\n// 1\n// 2\n",
+    "rotate",
+    "draft",
+    "",
+    12,
+    0,
+    0.5,
+    0.4,
+    1600,
+    0,
+    0,
+    0,
+    "euler",
+    "auto",
+    "",
+    "kubakub/versions",
+    0.0,
+    "regions"
+   ],
+   "title": "4 · versions: the sheet, draft / final, pick"
+  },
+  {
+   "id": 5,
+   "type": "SaveImage",
+   "pos": [
+    1960,
+    0
+   ],
+   "size": [
+    640,
+    460
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "kubakub/versions/sheet"
+   ],
+   "title": "contact sheet (the versions themselves are saved by the node)"
+  },
+  {
+   "id": 7,
+   "type": "PreviewAny",
+   "pos": [
+    2640,
+    0
+   ],
+   "size": [
+    420,
+    600
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 12
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "report: numbers, times, each version's rules"
+  },
+  {
+   "id": 9,
+   "type": "PreviewImage",
+   "pos": [
+    920,
+    560
+   ],
+   "size": [
+    440,
+    300
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 13
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "regions (their names go into the sheet)"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    1300,
+    640
+   ],
+   "size": [
+    480,
+    560
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## kubakub · versions\n\nMany versions of one facade from one queue.\n\n1. **scene render** makes the clay view of the 3D file, **regions from id renders** the regions (roof, wall,\n   windows ...), the **plan** says what every version has in common.\n2. In **kubakub versions** write the sheet: `[look]` whole-facade looks, `[region windows]` ideas for some\n   regions, `[rotate a | b | c]` ideas that move on by one region per version, `[lora]` name : strength : words,\n   `[reference]` style images, `[set denoise]`, `[seed]`. One option per line.\n3. Queue with **quality = draft**: a numbered contact sheet, a few seconds per version.\n   mode *rotate* = version n takes option n of every list, *combine* = every combination, *one by one* = one\n   change at a time.\n4. The drafts are in `output/kubakub/versions`, named after what they are made of. Copy the ones you like into\n   a folder of your own, paste its path into **picks_folder**, set **quality = final**, queue: those pictures at\n   the full canvas size with full-size detail (`final_denoise`: higher = more new detail), saved to\n   `output/kubakub/versions/final`. Or write their numbers from the contact sheet into **pick** (`2, 5`).\n\nChanging one line re-renders only the versions that use it. The report lists every version's rules: paste them\ninto a region plan to keep working on one version by hand.\n\n**You need:** a scene file with a camera (node 1), Blender 4.x, Flux 2 Klein 4B (nodes 10-12).\n"
+   ],
+   "title": "read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   5,
+   2,
+   0,
+   "STRING"
+  ],
+  [
+   2,
+   1,
+   0,
+   2,
+   1,
+   "IMAGE"
+  ],
+  [
+   3,
+   1,
+   4,
+   2,
+   2,
+   "MASK"
+  ],
+  [
+   4,
+   2,
+   0,
+   3,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   5,
+   1,
+   0,
+   3,
+   1,
+   "IMAGE"
+  ],
+  [
+   6,
+   10,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   11,
+   0,
+   4,
+   1,
+   "CLIP"
+  ],
+  [
+   8,
+   12,
+   0,
+   4,
+   2,
+   "VAE"
+  ],
+  [
+   9,
+   3,
+   0,
+   4,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   10,
+   1,
+   0,
+   4,
+   4,
+   "IMAGE"
+  ],
+  [
+   11,
+   4,
+   1,
+   5,
+   0,
+   "IMAGE"
+  ],
+  [
+   12,
+   4,
+   2,
+   7,
+   0,
+   "STRING"
+  ],
+  [
+   13,
+   2,
+   1,
+   9,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [
+  {
+   "title": "scene and regions",
+   "bounding": [
+    -20,
+    -60,
+    440,
+    1100
+   ],
+   "color": "#3f789e"
+  },
+  {
+   "title": "ltx 2.5 (12 GB configuration)",
+   "bounding": [
+    -20,
+    1050,
+    440,
+    660
+   ],
+   "color": "#3f789e"
+  },
+  {
+   "title": "kubakub director + plan",
+   "bounding": [
+    420,
+    -60,
+    400,
+    1330
+   ],
+   "color": "#a187b7"
+  },
+  {
+   "title": "video",
+   "bounding": [
+    820,
+    -60,
+    980,
+    1300
+   ],
+   "color": "#f18a58"
+  }
+ ],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub example workflow"
+ },
+ "version": 0.4
+}

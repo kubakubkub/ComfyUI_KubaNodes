@@ -1,0 +1,5 @@
+# Hard needs of the Kub nodes that ComfyUI itself does not install (numpy, scipy, Pillow, torch come with ComfyUI).
+# Optional packages (shapely, scikit-image, PyMuPDF, imageio, trimesh, onnxruntime) are not listed on purpose: only one
+# feature each needs them, and the console tells at startup which ones are missing (see README "Requirements").
+# If another OpenCV build is already installed (opencv-python, opencv-contrib-python), keep that one instead.
+opencv-python-headless>=4.8

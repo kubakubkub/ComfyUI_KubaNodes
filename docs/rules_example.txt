@@ -1,0 +1,26 @@
+[plan]
+order = largest_first
+
+[default]
+prompt = weathered sandstone palace facade at night, baroque detail
+denoise = 0.55
+
+[group:M_Pilasters]
+prompt += carved vines climbing the stone
+
+[group:M_Stone_Frames, group:M_Lintels]
+prompt += ornate carved stone, crisp edges
+denoise = 0.45
+
+[group:Windows]
+prompt = dark glass with faint reflections
+
+[W_F1_*]
+strategy = frame_in_frame
+prompt = an underwater room with {jellyfish|a sunken piano|koi|a diver|a coral chandelier}
+
+[tag:M_FLOOR_F3 group:Windows]
+prompt = candle lit attic room behind old glass
+
+[M_Cornices_Portals]
+strategy = keep

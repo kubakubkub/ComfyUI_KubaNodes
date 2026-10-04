@@ -1,0 +1,995 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 22,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_SceneRender",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    420,
+    560
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "clay",
+     "type": "IMAGE",
+     "links": [
+      2,
+      5,
+      10,
+      20
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "ids_preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "normal",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "coverage",
+     "type": "MASK",
+     "links": [
+      3
+     ],
+     "slot_index": 4
+    },
+    {
+     "name": "folder",
+     "type": "STRING",
+     "links": [
+      1
+     ],
+     "slot_index": 5
+    },
+    {
+     "name": "scene_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 7
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [
+      18
+     ],
+     "slot_index": 8
+    },
+    {
+     "name": "depth_gray",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 9
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneRender"
+   },
+   "widgets_values": [
+    "",
+    0,
+    0,
+    -1,
+    "elements sections floors shelves layers facing",
+    "elements",
+    0.05,
+    3.0,
+    0.02,
+    "-0.5 -0.05 0.05 0.5",
+    "",
+    "",
+    "",
+    1.0,
+    0.5
+   ],
+   "title": "1 · scene render: clay + ID passes (set the file)"
+  },
+  {
+   "id": 2,
+   "type": "KUBA_RegionsFromIDMaps",
+   "pos": [
+    460,
+    0
+   ],
+   "size": [
+    420,
+    380
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "folder",
+     "type": "STRING",
+     "widget": {
+      "name": "folder"
+     },
+     "link": 1
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 2
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      4
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      21
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "reference",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionsFromIDMaps"
+   },
+   "widgets_values": [
+    "",
+    "elements",
+    "facing layers shelves sections floors",
+    "id_map",
+    "",
+    400,
+    true,
+    "auto"
+   ],
+   "title": "2 · regions from the ID passes"
+  },
+  {
+   "id": 3,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    920,
+    0
+   ],
+   "size": [
+    440,
+    520
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 4
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [
+      9,
+      14
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[plan]\norder = largest_first\n\n[default]\nprompt = limestone railway station facade at night, carved stone, warm sodium street light, architectural photograph\ndenoise = 0.8\n\n[tag:front]\nprompt += crisp carved detail catching the light\n\n[tag:recess]\nprompt += deep shadow, warm light glowing from inside\n",
+    0,
+    ""
+   ],
+   "title": "3 · plan: a prompt per region, tags from the 3D (front, recess ...)"
+  },
+  {
+   "id": 10,
+   "type": "UNETLoader",
+   "pos": [
+    0,
+    620
+   ],
+   "size": [
+    320,
+    90
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6,
+      11
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "flux-2-klein-4b.safetensors",
+    "default"
+   ],
+   "title": "flux 2 klein 4b"
+  },
+  {
+   "id": 11,
+   "type": "CLIPLoader",
+   "pos": [
+    0,
+    740
+   ],
+   "size": [
+    320,
+    110
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      7,
+      12
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen_3_4b.safetensors",
+    "flux2",
+    "default"
+   ],
+   "title": "qwen 3 4b"
+  },
+  {
+   "id": 12,
+   "type": "VAELoader",
+   "pos": [
+    0,
+    880
+   ],
+   "size": [
+    320,
+    60
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      8,
+      13
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "flux2-vae.safetensors"
+   ],
+   "title": "flux 2 vae"
+  },
+  {
+   "id": 4,
+   "type": "KUBA_RegionSampler",
+   "pos": [
+    1400,
+    0
+   ],
+   "size": [
+    380,
+    520
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 7
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 8
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 9
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      15,
+      22
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "links": [
+      16
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionSampler"
+   },
+   "widgets_values": [
+    0,
+    0.0,
+    "euler",
+    "simple",
+    1.0,
+    4.0,
+    "auto",
+    0,
+    "auto",
+    ""
+   ],
+   "title": "4 · region sampler: the clay becomes the facade"
+  },
+  {
+   "id": 5,
+   "type": "KUBA_SeamPass",
+   "pos": [
+    1820,
+    0
+   ],
+   "size": [
+    380,
+    520
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 11
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 12
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 13
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 14
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 15
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "link": 16
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      17
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "seam_mask",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SeamPass"
+   },
+   "widgets_values": [
+    24,
+    0.35,
+    0,
+    0.0,
+    "euler",
+    "simple",
+    true,
+    "auto",
+    0,
+    1024,
+    "auto",
+    ""
+   ],
+   "title": "5 · seam pass: heals the borders between regions"
+  },
+  {
+   "id": 6,
+   "type": "KUBA_BrightnessCompensation",
+   "pos": [
+    2240,
+    0
+   ],
+   "size": [
+    380,
+    330
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 17
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 18
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [
+      19
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "gain_map",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_BrightnessCompensation"
+   },
+   "widgets_values": [
+    "dim areas",
+    0.7,
+    1.0,
+    8.0,
+    60.0
+   ],
+   "title": "6 · even light on the building (optional)"
+  },
+  {
+   "id": 7,
+   "type": "SaveImage",
+   "pos": [
+    2660,
+    0
+   ],
+   "size": [
+    440,
+    440
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 19
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "kubakub/clay_to_final"
+   ],
+   "title": "final"
+  },
+  {
+   "id": 8,
+   "type": "PreviewImage",
+   "pos": [
+    460,
+    440
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 20
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "clay"
+  },
+  {
+   "id": 9,
+   "type": "PreviewImage",
+   "pos": [
+    920,
+    560
+   ],
+   "size": [
+    440,
+    300
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 21
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "regions"
+  },
+  {
+   "id": 13,
+   "type": "PreviewImage",
+   "pos": [
+    1400,
+    560
+   ],
+   "size": [
+    380,
+    300
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 22
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "before the seam pass"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    1300,
+    640
+   ],
+   "size": [
+    480,
+    560
+   ],
+   "flags": {},
+   "order": 13,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## kubakub · clay render -> final\n\nFrom a 3D file to a finished facade picture: **scene render** makes the clay view from the file's camera (the\nprojection view) and the ID passes; **regions from id renders** turns them into regions with tags from the 3D\n(front, recess, underside, floors, sections); the **plan** gives each a prompt; **Klein** paints the clay region by\nregion (the clay's light and shape stay: `denoise` 0.7-0.85); the **seam pass** heals the borders; **brightness\ncompensation** evens the projector's light.\n\n**You need:** a scene file with a camera (node 1), Blender 4.x, Flux 2 Klein 4B (nodes 10-12).\nCryptomatte from your own renderer works the same: swap node 2 for *kubakub regions from cryptomatte*.\n"
+   ],
+   "title": "read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   5,
+   2,
+   0,
+   "STRING"
+  ],
+  [
+   2,
+   1,
+   0,
+   2,
+   1,
+   "IMAGE"
+  ],
+  [
+   3,
+   1,
+   4,
+   2,
+   2,
+   "MASK"
+  ],
+  [
+   4,
+   2,
+   0,
+   3,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   5,
+   1,
+   0,
+   3,
+   1,
+   "IMAGE"
+  ],
+  [
+   6,
+   10,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   11,
+   0,
+   4,
+   1,
+   "CLIP"
+  ],
+  [
+   8,
+   12,
+   0,
+   4,
+   2,
+   "VAE"
+  ],
+  [
+   9,
+   3,
+   0,
+   4,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   10,
+   1,
+   0,
+   4,
+   4,
+   "IMAGE"
+  ],
+  [
+   11,
+   10,
+   0,
+   5,
+   0,
+   "MODEL"
+  ],
+  [
+   12,
+   11,
+   0,
+   5,
+   1,
+   "CLIP"
+  ],
+  [
+   13,
+   12,
+   0,
+   5,
+   2,
+   "VAE"
+  ],
+  [
+   14,
+   3,
+   0,
+   5,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   15,
+   4,
+   0,
+   5,
+   4,
+   "IMAGE"
+  ],
+  [
+   16,
+   4,
+   1,
+   5,
+   5,
+   "MASK"
+  ],
+  [
+   17,
+   5,
+   0,
+   6,
+   0,
+   "IMAGE"
+  ],
+  [
+   18,
+   1,
+   8,
+   6,
+   1,
+   "KUBA_SCENE"
+  ],
+  [
+   19,
+   6,
+   0,
+   7,
+   0,
+   "IMAGE"
+  ],
+  [
+   20,
+   1,
+   0,
+   8,
+   0,
+   "IMAGE"
+  ],
+  [
+   21,
+   2,
+   1,
+   9,
+   0,
+   "IMAGE"
+  ],
+  [
+   22,
+   4,
+   0,
+   13,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [
+  {
+   "title": "scene and regions",
+   "bounding": [
+    -20,
+    -60,
+    440,
+    1100
+   ],
+   "color": "#3f789e"
+  },
+  {
+   "title": "ltx 2.5 (12 GB configuration)",
+   "bounding": [
+    -20,
+    1050,
+    440,
+    660
+   ],
+   "color": "#3f789e"
+  },
+  {
+   "title": "kubakub director + plan",
+   "bounding": [
+    420,
+    -60,
+    400,
+    1330
+   ],
+   "color": "#a187b7"
+  },
+  {
+   "title": "video",
+   "bounding": [
+    820,
+    -60,
+    980,
+    1300
+   ],
+   "color": "#f18a58"
+  }
+ ],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub example workflow"
+ },
+ "version": 0.4
+}

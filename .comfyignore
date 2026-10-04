@@ -1,0 +1,4 @@
+# Left out of the Comfy Registry package (gitignore syntax, on top of .gitignore).
+# https://docs.comfy.org/registry/publishing
+tests/
+.github/

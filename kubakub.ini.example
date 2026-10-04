@@ -1,0 +1,22 @@
+# Copy this file to kubakub.ini (same folder) and restart ComfyUI.
+# [menu]: every group is on unless you switch it off here. Keys are menu paths below "kubakub/".
+# A switched-off node is not loaded: workflows that use it show it as missing until you switch it on again.
+
+[menu]
+# 2d = on
+# 2d/motion = on          # LTX and H3 video
+# 3d = on                 # everything that needs a 3D file or render passes
+# 3d/fabricate = on       # relief panels, meshes, STL / OBJ / GLB
+# lab = on                # experiments: mosaic, onnx style
+
+[settings]
+# Remove the # to change a setting. Sizes and caches:
+# region_cache_mb = 4096      # region sampler results kept in memory (0 = off)
+# cond_cache_mb = 2048        # prompt encodings kept in memory (0 = off)
+# director_seq_cache = 2      # director sequence results kept (0 = off)
+# cache_folder =              # scene render / relight / walkthrough cache (empty = ComfyUI/user/kubakub_cache)
+# cache_gb = 20               # size cap of that cache
+# Blender:
+# blender =                   # path to blender.exe (empty = found in Program Files or on PATH)
+# blender_worker = on         # keep one Blender process loaded between jobs (off = start it for every job)
+# blender_idle = 600          # seconds an idle Blender process stays loaded

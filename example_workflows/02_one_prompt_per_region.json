@@ -1,0 +1,602 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 11,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_SampleFacade",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    320,
+    260
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      1,
+      4,
+      9
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "color_matrix",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "silhouette",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "mask_folder",
+     "type": "STRING",
+     "links": [
+      2
+     ],
+     "slot_index": 3
+    },
+    {
+     "name": "sketch_photo",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SampleFacade"
+   },
+   "widgets_values": [
+    1920,
+    1080,
+    3,
+    7,
+    "sandstone",
+    0
+   ],
+   "title": "1 \u00b7 sample facade (or load your own matrix)"
+  },
+  {
+   "id": 2,
+   "type": "KUBA_FacadeMaskAtlas",
+   "pos": [
+    360,
+    0
+   ],
+   "size": [
+    360,
+    520
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 1
+    },
+    {
+     "name": "mask_folder",
+     "type": "STRING",
+     "widget": {
+      "name": "mask_folder"
+     },
+     "link": 2
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      3
+     ],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_FacadeMaskAtlas"
+   },
+   "widgets_values": [
+    "mask_folder",
+    400,
+    true,
+    24,
+    true,
+    0.08,
+    true,
+    "folder",
+    true,
+    0.5,
+    "auto",
+    1,
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "title": "2 \u00b7 regions (one per window, door, cornice \u2026)"
+  },
+  {
+   "id": 3,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    760,
+    0
+   ],
+   "size": [
+    420,
+    520
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 3
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [
+      8
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[plan]\norder = largest_first\n\n[default]\nprompt = weathered sandstone facade, carved stone, soft evening light\ndenoise = 0.55\n\n[W_F*]\nprompt = warm lit rooms behind old glass, curtains, a plant on the sill\ndenoise = 0.8\n\n[M_Door]\nprompt = heavy carved wooden door with brass fittings\n\n[M_Cornice*, M_Sill*]\nprompt = gilded ornament band, carved stone\n",
+    0,
+    ""
+   ],
+   "title": "3 \u00b7 plan: a prompt per region"
+  },
+  {
+   "id": 10,
+   "type": "UNETLoader",
+   "pos": [
+    0,
+    320
+   ],
+   "size": [
+    320,
+    90
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      5
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "flux-2-klein-4b.safetensors",
+    "default"
+   ],
+   "title": "flux 2 klein 4b"
+  },
+  {
+   "id": 11,
+   "type": "CLIPLoader",
+   "pos": [
+    0,
+    440
+   ],
+   "size": [
+    320,
+    110
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen_3_4b.safetensors",
+    "flux2",
+    "default"
+   ],
+   "title": "qwen 3 4b"
+  },
+  {
+   "id": 12,
+   "type": "VAELoader",
+   "pos": [
+    0,
+    580
+   ],
+   "size": [
+    320,
+    60
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      7
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "flux2-vae.safetensors"
+   ],
+   "title": "flux 2 vae"
+  },
+  {
+   "id": 4,
+   "type": "KUBA_RegionSampler",
+   "pos": [
+    1220,
+    0
+   ],
+   "size": [
+    380,
+    520
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 5
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 6
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 7
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 8
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 9
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      10
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      11
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionSampler"
+   },
+   "widgets_values": [
+    0,
+    0.0,
+    "euler",
+    "simple",
+    1.0,
+    4.0,
+    "auto",
+    0,
+    "auto",
+    "W_F1_*"
+   ],
+   "title": "4 \u00b7 region sampler (only the first floor windows: set only empty for all)"
+  },
+  {
+   "id": 5,
+   "type": "SaveImage",
+   "pos": [
+    1640,
+    0
+   ],
+   "size": [
+    420,
+    440
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "kubakub_starter/facade"
+   ],
+   "title": "result"
+  },
+  {
+   "id": 6,
+   "type": "PreviewAny",
+   "pos": [
+    1220,
+    560
+   ],
+   "size": [
+    380,
+    240
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "sampler report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    -560
+   ],
+   "size": [
+    700,
+    460
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## starter 02 \u00b7 one prompt per region\n\n**You need:** Flux 2 Klein 4B: `flux-2-klein-4b.safetensors` (diffusion_models), `qwen_3_4b.safetensors`\n(text_encoders), `flux2-vae.safetensors` (vae) - about 8 GB VRAM. Other names: pick them in nodes 10-12.\n\n**Do:** Queue. The sampler repaints only the first floor windows (`only = W_F1_*`) - about half a minute.\nQueue again after changing one prompt: only the regions whose prompt changed are sampled again (region cache).\n\n**Then try:** empty `only` for the whole facade (a few minutes); `[default] denoise` lower = closer to the\noriginal; your own matrix and rules as in starter 01.\n"
+   ],
+   "title": "read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   0,
+   "IMAGE"
+  ],
+  [
+   2,
+   1,
+   3,
+   2,
+   1,
+   "STRING"
+  ],
+  [
+   3,
+   2,
+   4,
+   3,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   4,
+   1,
+   0,
+   3,
+   1,
+   "IMAGE"
+  ],
+  [
+   5,
+   10,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   6,
+   11,
+   0,
+   4,
+   1,
+   "CLIP"
+  ],
+  [
+   7,
+   12,
+   0,
+   4,
+   2,
+   "VAE"
+  ],
+  [
+   8,
+   3,
+   0,
+   4,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   9,
+   1,
+   0,
+   4,
+   4,
+   "IMAGE"
+  ],
+  [
+   10,
+   4,
+   0,
+   5,
+   0,
+   "IMAGE"
+  ],
+  [
+   11,
+   4,
+   2,
+   6,
+   0,
+   "STRING"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub starter workflow"
+ },
+ "version": 0.4
+}

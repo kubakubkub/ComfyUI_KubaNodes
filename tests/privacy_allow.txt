@@ -1,0 +1,4 @@
+# Lines containing one of these substrings are allowed by tests/check_private.py (generic placeholders only).
+:\\PROJECT\\
+:/.../
+URL-like 'x://'

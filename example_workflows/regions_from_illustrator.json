@@ -1,0 +1,495 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 8,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "LoadImage",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    340,
+    380
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      1,
+      3
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "MASK",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadImage"
+   },
+   "widgets_values": [
+    "facade_matrix.png",
+    "image"
+   ],
+   "title": "Matrix (project PNG, 3200x2160)"
+  },
+  {
+   "id": 2,
+   "type": "KUBA_RegionsFromIllustrator",
+   "pos": [
+    380,
+    0
+   ],
+   "size": [
+    440,
+    520
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 1
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      2
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      4
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "lines",
+     "type": "IMAGE",
+     "links": [
+      6
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "reference",
+     "type": "IMAGE",
+     "links": [
+      7
+     ],
+     "slot_index": 3
+    },
+    {
+     "name": "layer_masks",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 4
+    },
+    {
+     "name": "layer_names",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 5
+    },
+    {
+     "name": "scope_mask",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 7
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      5
+     ],
+     "slot_index": 8
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionsFromIllustrator"
+   },
+   "widgets_values": [
+    "",
+    400,
+    true,
+    1,
+    true,
+    1.0,
+    ""
+   ]
+  },
+  {
+   "id": 3,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    860,
+    0
+   ],
+   "size": [
+    440,
+    620
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 2
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      8
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[default]\nprompt = limestone station facade at night\n\n[tag:JAR]\nprompt = mossy weathered stone, garden side\n\n[tag:COUR]\nprompt = ivy covered stone, courtyard side\n\n[group:OBSTACLES]\n// arches and posts from the OBSTACLES layer stay untouched\nstrategy = keep\n",
+    7,
+    ""
+   ]
+  },
+  {
+   "id": 4,
+   "type": "PreviewImage",
+   "pos": [
+    1340,
+    0
+   ],
+   "size": [
+    560,
+    380
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Regions"
+  },
+  {
+   "id": 5,
+   "type": "PreviewAny",
+   "pos": [
+    380,
+    560
+   ],
+   "size": [
+    440,
+    420
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Report: layers, roles, counts"
+  },
+  {
+   "id": 6,
+   "type": "PreviewImage",
+   "pos": [
+    1340,
+    420
+   ],
+   "size": [
+    560,
+    380
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 6
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Line drawing (control image)"
+  },
+  {
+   "id": 7,
+   "type": "PreviewImage",
+   "pos": [
+    1940,
+    420
+   ],
+   "size": [
+    560,
+    380
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 7
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Placed photo (_IMG layer)"
+  },
+  {
+   "id": 8,
+   "type": "PreviewImage",
+   "pos": [
+    1940,
+    0
+   ],
+   "size": [
+    560,
+    380
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Plan preview"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    1020
+   ],
+   "size": [
+    1300,
+    420
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "# KUBA_Regions From Illustrator\n\n1. `ai_file`: the project .ai (saved PDF compatible, Illustrator's default) or a PDF. Hidden layers are read too.\n2. Matrix: any image of the matrix size (the artboard must have the same aspect; one uniform scale).\n3. Roles are guessed per layer (see the report): stroke layers = **lines** (cells between the lines), filled layers = **shapes** (on top), a MASK/range layer touching the border = **outside**, a full background fill / text / `_` layers = **ignore**, image layers = **reference**.\n4. Override in `layer_roles`, e.g. `MASK = outside`, `CENTRE, COUR, JAR = lines`, `FLOOR_* = tag`.\n5. Cells are named `<LAYER>_001..`, grouped by shape (`<LAYER>_g137` = the repeated windows) and tagged with the layer: rules `[tag:COUR]`, `[group:CENTRE_g137]`.\n\n\n"
+   ],
+   "title": "Read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   0,
+   "IMAGE"
+  ],
+  [
+   2,
+   2,
+   0,
+   3,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   3,
+   1,
+   0,
+   3,
+   1,
+   "IMAGE"
+  ],
+  [
+   4,
+   2,
+   1,
+   4,
+   0,
+   "IMAGE"
+  ],
+  [
+   5,
+   2,
+   8,
+   5,
+   0,
+   "STRING"
+  ],
+  [
+   6,
+   2,
+   2,
+   6,
+   0,
+   "IMAGE"
+  ],
+  [
+   7,
+   2,
+   3,
+   7,
+   0,
+   "IMAGE"
+  ],
+  [
+   8,
+   3,
+   3,
+   8,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "groups": [
+  {
+   "title": "Illustrator layers -> regions -> plan",
+   "bounding": [
+    -20,
+    -60,
+    2540,
+    1100
+   ],
+   "color": "#3f789e"
+  }
+ ],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub example workflow"
+ },
+ "version": 0.4
+}

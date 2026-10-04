@@ -1,0 +1,25 @@
+# Publishes the pack to the Comfy Registry (registry.comfy.org) when pyproject.toml changes on main, e.g. a new
+# version number. From the registry docs: https://docs.comfy.org/registry/publishing
+# The key is the repository secret REGISTRY_ACCESS_TOKEN (Settings > Secrets and variables > Actions).
+name: Publish to Comfy registry
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "pyproject.toml"
+
+jobs:
+  publish-node:
+    name: Publish Custom Node to registry
+    runs-on: ubuntu-latest
+    # never from a private repository: publishing uploads the pack's files to the public registry
+    if: ${{ !github.event.repository.private }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+      - name: Publish Custom Node
+        uses: Comfy-Org/publish-node-action@main
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

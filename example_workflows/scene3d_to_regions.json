@@ -1,0 +1,1322 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 27,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_SceneRender",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    420,
+    560
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "clay",
+     "type": "IMAGE",
+     "links": [
+      1,
+      6,
+      10
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "ids_preview",
+     "type": "IMAGE",
+     "links": [
+      2,
+      17,
+      21,
+      23
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [
+      3
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "normal",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "coverage",
+     "type": "MASK",
+     "links": [
+      7
+     ],
+     "slot_index": 4
+    },
+    {
+     "name": "folder",
+     "type": "STRING",
+     "links": [
+      5
+     ],
+     "slot_index": 5
+    },
+    {
+     "name": "scene_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      4
+     ],
+     "slot_index": 7
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [
+      11,
+      16,
+      20,
+      24
+     ],
+     "slot_index": 8
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneRender"
+   },
+   "widgets_values": [
+    "",
+    0,
+    0,
+    -1,
+    "shelves layers facing planes parts objects materials collections",
+    "shelves",
+    0.05,
+    3.0,
+    0.02,
+    "-0.5 -0.05 0.05 0.5",
+    "",
+    "",
+    "",
+    1.0,
+    0.5
+   ]
+  },
+  {
+   "id": 2,
+   "type": "PreviewImage",
+   "pos": [
+    460,
+    0
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Clay (projection camera)"
+  },
+  {
+   "id": 3,
+   "type": "PreviewImage",
+   "pos": [
+    900,
+    0
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "ID pass preview"
+  },
+  {
+   "id": 4,
+   "type": "PreviewImage",
+   "pos": [
+    1340,
+    0
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 3
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Depth"
+  },
+  {
+   "id": 5,
+   "type": "PreviewAny",
+   "pos": [
+    460,
+    340
+   ],
+   "size": [
+    860,
+    260
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Scene report"
+  },
+  {
+   "id": 6,
+   "type": "KUBA_RegionsFromIDMaps",
+   "pos": [
+    0,
+    640
+   ],
+   "size": [
+    420,
+    380
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "folder",
+     "type": "STRING",
+     "widget": {
+      "name": "folder"
+     },
+     "link": 5
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 6
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": 7
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      9,
+      12
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      8
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "reference",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionsFromIDMaps"
+   },
+   "widgets_values": [
+    "",
+    "parts",
+    "facing layers shelves",
+    "id_map",
+    "",
+    400,
+    true,
+    "auto"
+   ]
+  },
+  {
+   "id": 7,
+   "type": "PreviewImage",
+   "pos": [
+    460,
+    640
+   ],
+   "size": [
+    860,
+    600
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Regions (every loose part)"
+  },
+  {
+   "id": 8,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    1340,
+    640
+   ],
+   "size": [
+    440,
+    560
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 9
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[default]\nprompt = limestone railway station facade at night, projection mapping, crisp architectural detail\ndenoise = 0.55\n\n[tag:underside]\nprompt += deep shadow under the ledges\n\n[tag:recess]\nprompt += warm light glowing from inside\n",
+    7,
+    ""
+   ]
+  },
+  {
+   "id": 10,
+   "type": "KUBA_SceneMeasure",
+   "pos": [
+    0,
+    1320
+   ],
+   "size": [
+    420,
+    330
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 11
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 12
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "viewer",
+     "type": "KUBA_VIEWER",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "map",
+     "type": "IMAGE",
+     "links": [
+      13
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "table",
+     "type": "STRING",
+     "links": [
+      15
+     ],
+     "slot_index": 3
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      14
+     ],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneMeasure"
+   },
+   "widgets_values": [
+    0.0,
+    15.0,
+    1.7,
+    "brightness",
+    60.0
+   ]
+  },
+  {
+   "id": 11,
+   "type": "PreviewImage",
+   "pos": [
+    460,
+    1320
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 13
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Projector brightness on the building"
+  },
+  {
+   "id": 12,
+   "type": "PreviewAny",
+   "pos": [
+    900,
+    1320
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 14
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Measure report"
+  },
+  {
+   "id": 13,
+   "type": "PreviewAny",
+   "pos": [
+    1340,
+    1320
+   ],
+   "size": [
+    440,
+    300
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 15
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Per region: distance, angle, mm/px ..."
+  },
+  {
+   "id": 14,
+   "type": "KUBA_ScenePreview",
+   "pos": [
+    0,
+    1720
+   ],
+   "size": [
+    420,
+    380
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 16
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 17
+    },
+    {
+     "name": "background",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      18
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "shadow",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "views",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      19
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_ScenePreview"
+   },
+   "widgets_values": [
+    "0, 20, 1.7\n-15, 12, 1.7\n12, 8, 1.7",
+    20.0,
+    1280,
+    720,
+    0.15,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "id": 15,
+   "type": "PreviewImage",
+   "pos": [
+    460,
+    1720
+   ],
+   "size": [
+    860,
+    500
+   ],
+   "flags": {},
+   "order": 13,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 18
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Previz from the audience spots"
+  },
+  {
+   "id": 16,
+   "type": "PreviewAny",
+   "pos": [
+    1340,
+    1720
+   ],
+   "size": [
+    440,
+    300
+   ],
+   "flags": {},
+   "order": 14,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 19
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Previz report"
+  },
+  {
+   "id": 17,
+   "type": "KUBA_SceneWalkthrough",
+   "pos": [
+    0,
+    2300
+   ],
+   "size": [
+    420,
+    420
+   ],
+   "flags": {},
+   "order": 15,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 20
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 21
+    },
+    {
+     "name": "background",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "frames",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      22
+     ],
+     "slot_index": 1
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneWalkthrough"
+   },
+   "widgets_values": [
+    "-18, 26, 1.7\n-6, 16, 1.7\n6, 12, 1.7\n16, 18, 1.7",
+    6.0,
+    25,
+    24.0,
+    960,
+    540,
+    0.12,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "id": 18,
+   "type": "PreviewAny",
+   "pos": [
+    460,
+    2300
+   ],
+   "size": [
+    420,
+    200
+   ],
+   "flags": {},
+   "order": 16,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 22
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Walkthrough report"
+  },
+  {
+   "id": 19,
+   "type": "KUBA_BrightnessCompensation",
+   "pos": [
+    0,
+    2800
+   ],
+   "size": [
+    420,
+    330
+   ],
+   "flags": {},
+   "order": 17,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 23
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 24
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [
+      26
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "gain_map",
+     "type": "IMAGE",
+     "links": [
+      25
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      27
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_BrightnessCompensation"
+   },
+   "widgets_values": [
+    "dim areas",
+    1.0,
+    1.0,
+    8.0,
+    60.0
+   ]
+  },
+  {
+   "id": 20,
+   "type": "PreviewImage",
+   "pos": [
+    460,
+    2800
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 18,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 25
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Gain map (dark = darkened)"
+  },
+  {
+   "id": 21,
+   "type": "PreviewImage",
+   "pos": [
+    900,
+    2800
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 19,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 26
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Compensated content"
+  },
+  {
+   "id": 22,
+   "type": "PreviewAny",
+   "pos": [
+    1340,
+    2800
+   ],
+   "size": [
+    440,
+    300
+   ],
+   "flags": {},
+   "order": 20,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 27
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Compensation report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    1800,
+    0
+   ],
+   "size": [
+    560,
+    520
+   ],
+   "flags": {},
+   "order": 21,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## 3D scene -> regions (3D-1)\n\n1. **KUBA_Scene Render**: paste the path of a .blend / .fbx / .obj / .abc / .glb / .usd\n   (project files; .c4d: export FBX or Alembic). Blender 4.x runs headless in the background.\n   The file's active camera is the projection view; width / height 0 = the file's render size\n   (FBX has none: taken from a camera name like `CAM_3200_2160PX`, else set it).\n   Outputs: clay, ID preview, depth, normals, coverage mask and the ID-map folder.\n2. **KUBA_Regions From ID Maps** reads that folder. `regions_pass`:\n   - `parts`: every loose part (stone, frame, cornice ...) one region; slow with hundreds of parts\n   - `shelves`: the facade's depth steps (names like `shelf_+0.35m` = 35 cm in front of the wall)\n   - `layers`, `facing`, `planes`, `objects` / `materials` / `collections` (when the file has them)\n   Other passes become **tags** (`front`, `underside`, `recess` ...) for plan rules.\n3. Continue with the Region Sampler exactly as in `facade_regions_diffusion.json`.\n\n`save_folder` copies the ID maps + legends + clay + scene.json for Houdini / After Effects.\n\n## Real distances (3D-2) and previz (3D-4)\n\n4. **KUBA_Scene Measure**: distance to the projector, angle of incidence, mm per matrix pixel,\n   relative projector brightness and offset from the wall - as a map, per region (table, and\n   written into the regions; steep surfaces get the tag `grazing`) and as a **KUBA_VIEWER** with\n   the real facade width and your audience spot (-> Frame Guide / Frame Compose).\n5. **KUBA_Scene Preview**: connect your matrix (image or video frames; here the shelves ID map as a\n   stand-in) - it is projected from the file's camera onto the model and rendered from the audience\n   spots (`x from the frame centre, distance from the wall, eye height` per line). Dark = projection\n   shadow (also as a mask). Wrong units in a file? `unit_scale` on Scene Render.\n6. **KUBA_Scene Walkthrough**: the same previz as a video along a camera path (keyframes like the\n   spots, plus optional look x / height), matrix frames play in sync (looping), optional\n   `background` image or frames behind the building. Connect `frames` to core Create Video ->\n   Save Video. A batch loader that outputs a *list* (like Load Images From Dir) needs Rebatch\n   Images first, or the node runs once per frame.\n7. **kubakub brightness compensation**: put your finished frames in (here the ID preview stands in),\n   last before the export. Parts the projector lights brighter (near, facing it) are darkened so the\n   content looks even on the building. `strength` 0.6 keeps some natural falloff; `lift_dim_up_to`\n   above 1 also brightens the dim parts (highlights may clip); connect regions for one gain per region.\n\n`min_size_m` (Scene Render, default 0.5): pieces the crowd cannot read merge into neighbours.\n"
+   ],
+   "title": "Read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   0,
+   "IMAGE"
+  ],
+  [
+   2,
+   1,
+   1,
+   3,
+   0,
+   "IMAGE"
+  ],
+  [
+   3,
+   1,
+   2,
+   4,
+   0,
+   "IMAGE"
+  ],
+  [
+   4,
+   1,
+   7,
+   5,
+   0,
+   "STRING"
+  ],
+  [
+   5,
+   1,
+   5,
+   6,
+   0,
+   "STRING"
+  ],
+  [
+   6,
+   1,
+   0,
+   6,
+   1,
+   "IMAGE"
+  ],
+  [
+   7,
+   1,
+   4,
+   6,
+   2,
+   "MASK"
+  ],
+  [
+   8,
+   6,
+   1,
+   7,
+   0,
+   "IMAGE"
+  ],
+  [
+   9,
+   6,
+   0,
+   8,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   10,
+   1,
+   0,
+   8,
+   1,
+   "IMAGE"
+  ],
+  [
+   11,
+   1,
+   8,
+   10,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   12,
+   6,
+   0,
+   10,
+   1,
+   "KUBA_REGIONS"
+  ],
+  [
+   13,
+   10,
+   2,
+   11,
+   0,
+   "IMAGE"
+  ],
+  [
+   14,
+   10,
+   4,
+   12,
+   0,
+   "STRING"
+  ],
+  [
+   15,
+   10,
+   3,
+   13,
+   0,
+   "STRING"
+  ],
+  [
+   16,
+   1,
+   8,
+   14,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   17,
+   1,
+   1,
+   14,
+   1,
+   "IMAGE"
+  ],
+  [
+   18,
+   14,
+   0,
+   15,
+   0,
+   "IMAGE"
+  ],
+  [
+   19,
+   14,
+   3,
+   16,
+   0,
+   "STRING"
+  ],
+  [
+   20,
+   1,
+   8,
+   17,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   21,
+   1,
+   1,
+   17,
+   1,
+   "IMAGE"
+  ],
+  [
+   22,
+   17,
+   1,
+   18,
+   0,
+   "STRING"
+  ],
+  [
+   23,
+   1,
+   1,
+   19,
+   0,
+   "IMAGE"
+  ],
+  [
+   24,
+   1,
+   8,
+   19,
+   1,
+   "KUBA_SCENE"
+  ],
+  [
+   25,
+   19,
+   1,
+   20,
+   0,
+   "IMAGE"
+  ],
+  [
+   26,
+   19,
+   0,
+   21,
+   0,
+   "IMAGE"
+  ],
+  [
+   27,
+   19,
+   2,
+   22,
+   0,
+   "STRING"
+  ]
+ ],
+ "groups": [
+  {
+   "title": "3D scene file -> projection view + ID passes",
+   "bounding": [
+    -20,
+    -60,
+    1800,
+    680
+   ],
+   "color": "#3f789e"
+  },
+  {
+   "title": "Regions and plan",
+   "bounding": [
+    -20,
+    620,
+    1820,
+    640
+   ],
+   "color": "#8A8"
+  },
+  {
+   "title": "Real distances and previz",
+   "bounding": [
+    -20,
+    1270,
+    1820,
+    980
+   ],
+   "color": "#b58b2a"
+  },
+  {
+   "title": "Walkthrough video (-> Create Video / Save Video)",
+   "bounding": [
+    -20,
+    2250,
+    920,
+    500
+   ],
+   "color": "#a1309b"
+  }
+ ],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub example workflow"
+ },
+ "version": 0.4
+}

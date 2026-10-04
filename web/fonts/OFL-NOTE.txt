@@ -1,0 +1,3 @@
+Hanken Grotesk (variable, weights 200-800, latin subset) by Alfredo Marco Pradil / Hanken Design Co.
+Downloaded once from Google Fonts (fonts.gstatic.com) on 2026-09-25 so the kubakub director needs no network.
+License: SIL Open Font License 1.1 (https://openfontlicense.org).

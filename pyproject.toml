@@ -1,0 +1,21 @@
+[project]
+name = "comfyui-kubanodes"
+description = "kubakub nodes for projection mapping: facade regions from masks, Illustrator files and 3D ID maps, region-wise diffusion, the kubakub director (layers, lights, timeline, video, H3 clips) and delivery export."
+version = "0.1.0"
+license = { file = "LICENSE" }                    # GPL-3.0, as ComfyUI
+requires-python = ">=3.10"
+classifiers = [
+    "Operating System :: Microsoft :: Windows",   # built and tested on Windows 11 only
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+dependencies = ["opencv-python-headless>=4.8"]    # keep in step with requirements.txt
+
+[project.urls]
+Repository = "https://github.com/kubakubkub/ComfyUI_KubaNodes"
+
+[tool.comfy]
+PublisherId = "kubakub"
+DisplayName = "kubakub nodes"
+Icon = "https://raw.githubusercontent.com/kubakubkub/ComfyUI_KubaNodes/main/docs/images/icon.png"   # 400x400, the registry allows up to 800x400
+includes = []
+"requires-comfyui" = ">=0.37.0"                   # keep in step with kub_env.MIN_COMFYUI and README "Requirements"
