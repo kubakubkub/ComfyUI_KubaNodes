@@ -425,7 +425,7 @@ class KUBA_RegionsFromIllustrator(io.ComfyNode):
                 "from the content and can be set per layer. The artboard maps onto the matrix with one "
                 "uniform scale. Also outputs the line drawing, the placed photo and every layer as a mask."),
             inputs=[
-                io.String.Input("ai_file", default="", placeholder="D:\\PROJECT\\2D\\facade.ai",
+                io.String.Input("ai_file", default="", placeholder="paste the path of your .ai / .pdf  (empty = a sample)",
                                 tooltip="Path of the .ai or .pdf (Explorer 'Copy as path' quotes are fine)."),
                 io.Image.Input("matrix", optional=True,
                                tooltip="The matrix: sets the output size (the artboard must have its aspect) "
@@ -486,8 +486,11 @@ class KUBA_RegionsFromIllustrator(io.ComfyNode):
         from ...kubakub import illustrator as il
         t0 = time.perf_counter()
         path = fc.clean_folder_path(ai_file)
-        if not path:
-            raise ValueError("ai_file is empty.")
+        sample = not path
+        if sample:                                     # nothing pasted yet: a layered PDF of the sample facade
+            import folder_paths
+            from ...kubakub import samples
+            path = samples.illustrator(folder_paths.get_temp_directory())
         if not os.path.isfile(path):
             raise ValueError(f"ai_file does not exist: {path}")
         width = height = None
@@ -532,7 +535,9 @@ class KUBA_RegionsFromIllustrator(io.ComfyNode):
             f"{W}x{H}, {time.perf_counter() - t0:.1f} s",
             "layer            role       paths / images / in file / covered", *rows,
             "regions per layer: " + ", ".join(f"{k} {v}" for k, v in counts.items()),
-            "", *atlas["notes"]])
+            "", *atlas["notes"],
+            *(["no Illustrator file given: the built-in sample is used. Paste the path of your own .ai / .pdf into 'ai_file'."]
+              if sample else [])])
         log.info("[KUBA regions] %s", report.replace("\n", "\n    "))
         return io.NodeOutput(regions, preview, lines, reference, layer_masks, "\n".join(names), scope_out,
                              json.dumps(atlas, indent=1), report, ui=ui.PreviewImage(preview, cls=cls))
@@ -560,7 +565,7 @@ class KUBA_RegionsFromIDMaps(io.ComfyNode):
                 "Object masks overlap; the ID map decides what is in front. Split parts are numbered "
                 "windows_01, windows_02 ... in reading order."),
             inputs=[
-                io.String.Input("folder", default="", placeholder="D:\\PROJECT\\Setup\\render\\facade_masks",
+                io.String.Input("folder", default="", placeholder="paste the folder of your ID renders  (empty = a sample)",
                                 tooltip="Folder with the ID maps, legends and masks (png/ subfolder too)."),
                 io.Image.Input("matrix", optional=True,
                                tooltip="Sets the output size (masks are resized to it) and is the preview "
@@ -628,6 +633,13 @@ class KUBA_RegionsFromIDMaps(io.ComfyNode):
         sc = None
         if scope is not None:
             sc = (scope[0] if scope.ndim == 3 else scope).cpu().numpy() > 0.5
+        r_note = ""
+        sample = not fc.clean_folder_path(folder)
+        if sample:                                     # nothing pasted or linked: ID renders of the sample facade
+            import folder_paths
+            from ...kubakub import samples
+            folder = samples.id_renders(folder_paths.get_temp_directory())
+            r_note = samples.note("folder of ID renders", "folder")
         r = im.build(folder, regions_pass=regions_pass.strip(), tag_passes=tag_passes, width=width, height=height,
                      overlap=overlap, split_parts=split_parts, min_region_area=min_region_area,
                      merge_small_regions=merge_small_regions, encoding=legend_colors, scope=sc)
@@ -647,7 +659,7 @@ class KUBA_RegionsFromIDMaps(io.ComfyNode):
             f"{time.perf_counter() - t0:.1f} s",
             f"regions per group: {groups}", f"passes: {passes}",
             f"reference: {os.path.basename(r['reference_path']) if r['reference_path'] else '-'}",
-            "", *atlas["notes"]])
+            "", *atlas["notes"], *([r_note] if r_note else [])])
         log.info("[KUBA regions] %s", report.replace("\n", "\n    "))
         return io.NodeOutput(regions, preview, reference, json.dumps(atlas, indent=1), report,
                              ui=ui.PreviewImage(preview, cls=cls))

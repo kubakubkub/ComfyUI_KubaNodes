@@ -10,3 +10,4 @@ SceneType = io.Custom("KUBA_SCENE")              # dict: export folder, ids fold
 DirectorType = io.Custom("KUBA_DIRECTOR")        # nodes_director.DirectorState
 PiecesType = io.Custom("KUBA_PIECES")            # dict: scene, piece labels file, piece stats, operators (scene3d/pieces.py)
 FalloffType = io.Custom("KUBA_FALLOFF")          # dict: a falloff for the pieces operators
+ProjectorType = io.Custom("KUBA_PROJECTOR")      # dict: where a projector stands (scene3d/autocam.py)

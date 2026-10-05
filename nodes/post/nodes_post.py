@@ -1,4 +1,4 @@
-"""kubakub post nodes: colour match, apply lut, deflicker, retime, burn in (logic in post.py)."""
+"""kubakub post nodes: align to source (align.py), colour match, apply lut, deflicker, retime, burn in (post.py)."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import torch
 import folder_paths
 from comfy_api.latest import io
 
+from ...kubakub import align as al
 from ...kubakub import post as pp
 
 log = logging.getLogger("KUBA.regions")
@@ -219,8 +220,68 @@ class KUBA_BurnIn(io.ComfyNode):
         return io.NodeOutput(_map(one, n))
 
 
-NODE_CLASS_MAPPINGS = {"KUBA_ColourMatch": KUBA_ColourMatch, "KUBA_ApplyLUT": KUBA_ApplyLUT,
+class KUBA_AlignToSource(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="KUBA_AlignToSource",
+            display_name="kubakub align to source",
+            category="kubakub/2d/post",
+            search_aliases=['pixel drift', 'registration', 'shift', 'align', 'qwen edit', 'kontext', 'klein'],
+            description=("Puts an edited picture back onto the picture it was made from. An image model that repaints "
+                         "a whole facade returns it a few pixels moved or scaled; on a building that shows. Finds the "
+                         "small shift and scale on the edges both pictures share and undoes it. When the two have too "
+                         "little in common, or the fit is not certain, the picture is returned as it is and the "
+                         "report says why. Not needed after the region sampler (it pastes inside masks)."),
+            inputs=[
+                io.Image.Input("images", tooltip="The edited pictures (one, or the frames of a clip)."),
+                io.Image.Input("source", tooltip="What they were made from: the clay, the matrix, the render. One "
+                                                 "picture for all, or one per image. Another size is fine: the result "
+                                                 "has the size of the source."),
+                io.Combo.Input("fit", options=["move and scale", "move only"], default="move and scale",
+                               tooltip="move and scale: shift, scale and a little shear (what image models do). "
+                                       "move only: a shift, when the size is known to be right."),
+                io.Combo.Input("frames", options=["each on its own", "one fit for all"], default="each on its own",
+                               optional=True, advanced=True,
+                               tooltip="For a batch. one fit for all: the first picture is fitted and every frame gets "
+                                       "the same correction (a clip that drifted as a whole stays steady)."),
+            ],
+            outputs=[io.Image.Output("images", tooltip="The pictures on the source, at its size."),
+                     io.String.Output("report", tooltip="Per picture: how far it sat off, or why it was left as it is.")],
+        )
+
+    @classmethod
+    def execute(cls, images, source, fit, frames="each on its own") -> io.NodeOutput:
+        t0 = time.perf_counter()
+        model = "affine" if fit == "move and scale" else "shift"
+        srcs, imgs = _frames(source), _frames(images)
+        H, W = srcs[0].shape[:2]
+        results = [None] * len(imgs)
+
+        def one(i):
+            src = srcs[i] if i < len(srcs) else srcs[-1]
+            if frames == "one fit for all" and i > 0:
+                r = results[0]
+            else:
+                r = al.estimate(src, imgs[i], model)
+            results[i] = r
+            return al.apply(imgs[i], r["matrix"], (W, H)).astype(np.float32)
+
+        first = one(0)                                   # the first one alone: 'one fit for all' needs its result
+        rest = _map(lambda k: one(k + 1), len(imgs) - 1) if len(imgs) > 1 else None
+        out = torch.from_numpy(first)[None] if rest is None else torch.cat([torch.from_numpy(first)[None], rest])
+        moved = sum(1 for r in results if r["ok"] and r["why"] == "aligned")
+        lines = [f"{moved} of {len(imgs)} pictures moved back onto the source, {time.perf_counter() - t0:.1f} s"]
+        lines += [f"{i + 1}: {al.describe(r)}" for i, r in enumerate(results[:24])]
+        if len(results) > 24:
+            lines.append(f"... and {len(results) - 24} more")
+        report = "\n".join(lines)
+        log.info("[KUBA post] align to source: %s", lines[0])
+        return io.NodeOutput(out, report)
+
+
+NODE_CLASS_MAPPINGS = {"KUBA_AlignToSource": KUBA_AlignToSource, "KUBA_ColourMatch": KUBA_ColourMatch, "KUBA_ApplyLUT": KUBA_ApplyLUT,
                        "KUBA_Deflicker": KUBA_Deflicker, "KUBA_Retime": KUBA_Retime, "KUBA_BurnIn": KUBA_BurnIn}
-NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_ColourMatch": "kubakub colour match", "KUBA_ApplyLUT": "kubakub apply lut",
+NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_AlignToSource": "kubakub align to source", "KUBA_ColourMatch": "kubakub colour match", "KUBA_ApplyLUT": "kubakub apply lut",
                               "KUBA_Deflicker": "kubakub deflicker", "KUBA_Retime": "kubakub retime",
                               "KUBA_BurnIn": "kubakub burn in"}

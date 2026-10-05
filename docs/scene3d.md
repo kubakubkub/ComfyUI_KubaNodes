@@ -7,12 +7,15 @@ The festival's 3D file, read by Blender in the background: the projection view w
 A festival's 3D file -> the projection view, metric depth and ID passes that the region tools
 already read. Example: `example_workflows/scene3d_to_regions.json`.
 
+- **`file` empty** = the built-in sample building (kubakub sample model with its default size), so the node
+  runs as it is; paste the path of your own file to replace it.
 - **Files**: .blend .fbx .obj .abc .glb .gltf .stl .ply .usd(a/c/z). Blender 4.x runs headless as a
   subprocess (found in `C:\Program Files\Blender Foundation`, or the `blender_path` input / `blender = ...` in kubakub.ini);
   it is not imported into ComfyUI's Python. **.c4d** cannot be read outside Cinema 4D: ask for FBX or
   Alembic. The source file is only read, never saved.
-- **Camera**: `camera` by name, else the file's active camera, else the first one, else a front camera
-  framing the model. Resolution 0 = the file's render size; FBX / OBJ / Alembic carry none, so a size
+- **Camera**: a connected **kubakub projector** (below), else `camera` by name, else the file's active camera,
+  else the first one, else a front camera framing the model: it stands in front of the side the model is widest
+  across (a facade is wide and shallow), level with its middle. Resolution 0 = the file's render size; FBX / OBJ / Alembic carry none, so a size
   in the camera name (`RENDER_CAM_3200_2160PX`) is used, else 1920x1080 with a note. FBX round trips
   can flip the lens shift: when the imported camera sees almost none of the model and the flipped shift
   frames it, the flipped one is used and the report says so.
@@ -63,6 +66,47 @@ by class) and **sections floors** (plus shelves / facing / layers if wanted) as 
 groups, the tags and these combinations. What "shelf_+0.30m" means: a depth slice 30 cm in front of the main wall
 (the shelves pass; -0.46 m = 46 cm behind it). 3200x2160 test facade: 27 windows (7 arches, 7 + 7 upper, 2 attic, 4 dormers),
 left / centre / right at the avant-corps, ground floor / floor 1 / floor 2 / roof.
+
+## kubakub projector: where the projector stands
+
+For a file without a camera, and for trying another spot or lens on a file that has one. Connect it to
+`projector` of scene render; the file's camera is then not used. Set scene render's `width` / `height` to the
+projector's resolution.
+
+| input | |
+|---|---|
+| distance_m | metres from the wall. 0 = as far as the throw ratio needs to cover the model |
+| offset_m | metres along the wall from the middle of the facade, + = to the right as the audience sees it |
+| height_m | metres above the ground (the lowest point of the model): a tower, a balcony, a roof |
+| throw_ratio | distance / picture width, as on a lens data sheet. 0 = the picture just covers the model |
+| aim | **lens shift**: square to the wall, the picture shifted onto the model, verticals stay vertical. **tilt**: turned to the middle of the model (keystone). **straight**: square to the wall, no shift |
+| side (advanced) | which side of the model is the facade: auto, or front / back / left / right (Blender's axes) |
+| turn_deg (advanced) | the projector's direction turned around the building, for a spot at an angle to the facade |
+| margin (advanced) | free border around the model when the picture is fitted |
+
+The wall is the depth where most of the surface facing that side lies. The scene report says where the projector
+ended up, its picture on the wall in metres, the lens, and how much of the model the picture covers when a given
+throw ratio is too long. Everything after scene render (measure, preview, relight, pieces, compensation) uses
+that projector. Logic and test: `kubakub/scene3d/autocam.py`, `tests/test_autocam.py`.
+
+## kubakub projector blend: several projectors
+
+One **kubakub projector** and one **kubakub scene render** per projector, all on the same file; connect their
+`scene` outputs (2 to 4). Where two or more projectors reach the same surface, each one's share falls off towards
+the border of its own picture over `ramp` (a share of the picture's short side), and the shares add up to 1 in
+light; `gamma` (2.2) turns that into pixel values. A surface only one projector reaches (the side of a window
+reveal) keeps that projector's full picture. Outputs: one mask per projector in its own picture size (multiply
+your frames with it, or load it as the blend mask in the media server), a preview per projector (orange = shared)
+and a report with the shares. The regions, plan and sampler run once per projector, on its own scene render.
+Example: `example_workflows/projector_blend.json`.
+
+## kubakub sample model
+
+In the project menu: the sample facade as a 3D file in metres (an .obj in ComfyUI's temp folder), to try all of
+this without a file. Stones in courses, arches with voussoirs, framed windows with glass behind the wall,
+pilasters, sill bands, cornices and a door: about 640 loose parts, objects named by element (`wall_F1`,
+`window_F2_C03`, `pilaster_04`), four materials. It has no camera. Scene render uses it by itself when its
+`file` is empty (starters `07_3d_model_to_regions` and `08_moving_pieces`); the node is for other sizes. Test: `tests/test_sample_model.py`.
 
 ## kubakub scene measure: real distances
 

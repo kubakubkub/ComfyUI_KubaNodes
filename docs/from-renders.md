@@ -1,6 +1,32 @@
 # Regions from renders (3d / from renders)
 
-Regions from your own 3D renders: an ID pass from any renderer, or a cryptomatte EXR.
+Your own 3D renders as the start: plain render passes, an ID pass from any renderer, or a cryptomatte EXR.
+All three nodes run on a built-in sample when their folder / file field is empty.
+
+## kubakub render passes
+
+A folder of passes written by any 3D tool as PNG (also JPG, TIFF, WebP; 16 bit keeps its range):
+
+- `<render>_beauty.png`: the picture (also `_rgb`, `_combined`, `_color`, `_clay`, `_render`).
+- `<render>_depth.png`, `<render>_normal.png`: come out as pictures (black when missing).
+- every other pass of that render is a **mask**, named by its pass: `<render>_cut.png`, `<render>_windows.png`.
+  White = inside; `invert` lists the ones where black is inside. A mask kept in the alpha channel works too.
+- a file that belongs to no render (`facade_mask.png` next to `facade_a_beauty.png`, `facade_b_beauty.png`) is a
+  mask for every render of the folder. Plain names (`beauty.png`, `windows.png`) work for a folder with one render.
+- several renders in one folder: `render` picks one (empty = the first; the report lists them).
+- colour pictures among the passes (an ID map) are left out with a note: **regions from id renders** reads those.
+  EXR files and files starting with `_` are not read.
+
+Outputs: `beauty`, `depth`, `normal`, `masks` (a batch) and `names` (one per line), which go straight into
+**kubakub regions from masks** (`masks`, `names`, `matrix` = beauty). With `split_masks = cut` every separate
+shape of the cut mask becomes its own region (`cut_01`, `cut_02` ...); where masks overlap the smaller one wins,
+so the openings are cut out of a wall mask around them. Then a region plan and the region sampler (or versions)
+repaint the regions; outside them your render stays as it is (a region grows over its edge by the plan's
+`dilate_px`, 4 pixels by default).
+
+Example workflow `example_workflows/render_passes_to_final.json`: the places you opened or redesigned in 3D
+(a `cut` pass) each get their own idea, the wall around them one calm material first. Test without a model:
+`tests/test_render_passes.py`.
 
 ## kubakub regions from id renders
 

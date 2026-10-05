@@ -323,6 +323,53 @@ def main_plane_and_ground(scene):
 
 
 # --------------------------------------------------------------------------
+# several projectors: who reaches what, soft-edge blend masks
+# --------------------------------------------------------------------------
+
+def _edge_weight(u, v, W, H, ramp_px):
+    """0 at the border of a projector's picture, 1 from ramp_px inside (u, v in pixels of that picture)."""
+    d = np.minimum(np.minimum(u, W - u), np.minimum(v, H - v))
+    return np.clip(d / max(ramp_px, 1e-6), 0.0, 1.0)
+
+
+def projector_blend(scenes, ramp=0.1, gamma=2.2):
+    """
+    Soft-edge blend masks for projectors that light the same model. scenes: the loaded projection views
+    (scene_ids.load), one per projector. Where two or more projectors reach the same surface, each one's share falls
+    off towards the border of its own picture (over ramp x its short side) and the shares add up to 1 in light;
+    gamma turns that into the pixel value the projector needs (2.2 for video content, 1 = linear).
+    -> one dict per projector: mask (H, W) float32, shared (H, W) bool, counts {model, shared, alone} in pixels,
+       partners (how many of its pixels each other projector also reaches).
+    """
+    out = []
+    for i, s in enumerate(scenes):
+        cam = Camera(s["info"])
+        fg = s["faceid"] > 0
+        uu, vv = np.meshgrid(np.arange(cam.W) + 0.5, np.arange(cam.H) + 0.5)
+        own = _edge_weight(uu, vv, cam.W, cam.H, ramp * min(cam.W, cam.H))
+        total = own.copy()
+        shared = np.zeros(fg.shape, bool)
+        partners = []
+        for j, o in enumerate(scenes):
+            if j == i:
+                partners.append(0)
+                continue
+            rp = reprojection(s, o)
+            oc = Camera(o["info"])
+            w = _edge_weight(rp["map_x"] + 0.5, rp["map_y"] + 0.5, oc.W, oc.H, ramp * min(oc.W, oc.H)) * rp["lit"]
+            total += w
+            shared |= rp["lit"]
+            partners.append(int(rp["lit"].sum()))
+        share = np.where(total > 1e-6, own / np.maximum(total, 1e-6), 1.0)
+        share = np.where(shared, share, 1.0)                 # alone: the full picture, up to its border
+        mask = np.power(np.clip(share, 0.0, 1.0), 1.0 / max(gamma, 1e-3)).astype(np.float32)
+        out.append({"mask": mask, "shared": shared & fg, "partners": partners,
+                    "counts": {"model": int(fg.sum()), "shared": int((shared & fg).sum()),
+                               "alone": int((fg & ~shared).sum())}})
+    return out
+
+
+# --------------------------------------------------------------------------
 # relight (3D-3): light rigs in facade coordinates, masks -> emissive faces
 # --------------------------------------------------------------------------
 

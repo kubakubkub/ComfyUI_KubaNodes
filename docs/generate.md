@@ -264,7 +264,9 @@ my_project/renders/maps           // every image in the folder (canny, cryptomat
 its elements, a window stays a window. With `generate = whole picture` the picture is made in one free sample
 from nothing, at about `draft_mp` megapixels: the starting image is only the model's reference image 1, the
 style image is image 2, and there is no mask. Forms can grow across the whole facade, break through it and leave
-it; the background is whatever the prompt says. This is the way to large sculptural interventions. Three things
+it; the background is whatever the prompt says. This is the way to large sculptural interventions. A free sample
+comes back a few pixels moved or scaled; the node puts it back onto the starting image by itself (as **kubakub
+align to source** does, see [post.md](post.md)), and leaves it alone when that fit is not certain. Three things
 decide the result: the prompt must say what happens (a prompt that only asks for a texture repaints the facade),
 the style image sets most of the look, and `draft_mp` around 1.5 gives the model room. Rules for single regions
 only add their words to the one prompt. The final scales the draft up and adds full-size detail inside the

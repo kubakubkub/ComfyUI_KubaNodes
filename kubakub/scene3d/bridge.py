@@ -22,6 +22,7 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "blender_export.py")
+SCRIPTS = (SCRIPT, os.path.join(HERE, "autocam.py"))      # what runs inside Blender: a change is a new cache key
 FORMATS = (".blend", ".fbx", ".obj", ".abc", ".glb", ".gltf", ".stl", ".ply", ".usd", ".usda", ".usdc", ".usdz")
 STAGE = ".part-"                                      # marks a folder / file that is still being written
 
@@ -100,14 +101,17 @@ def _file_stamps(obj, out):
 
 
 def cache_key(path: str, camera: str, width: int, height: int, frame: int, unit_scale: float = 1.0,
-              view: dict | None = None, views: list | None = None, relight: dict | None = None) -> str:
+              view: dict | None = None, views: list | None = None, relight: dict | None = None,
+              projector: dict | None = None) -> str:
     st = os.stat(path)
     h = hashlib.sha1()
     for part in (os.path.abspath(path).lower(), st.st_size, st.st_mtime_ns, camera, width, height, frame,
                  unit_scale, json.dumps(view, sort_keys=True) if view else "",
                  json.dumps(views, sort_keys=True) if views else "",
-                 json.dumps(relight, sort_keys=True) if relight else "", os.stat(SCRIPT).st_mtime_ns):
+                 json.dumps(relight, sort_keys=True) if relight else "", *(os.stat(f).st_mtime_ns for f in SCRIPTS)):
         h.update(str(part).encode("utf-8", "replace") + b"|")
+    if projector:                                         # kubakub projector: another camera on the same file
+        h.update(json.dumps(projector, sort_keys=True).encode("utf-8", "replace") + b"|")
     for s in _file_stamps(relight, []) if relight else ():     # an edited HDRI is a new job
         h.update(s.encode("utf-8", "replace") + b"|")
     return h.hexdigest()[:16]
@@ -132,18 +136,20 @@ def folder_token(folder: str, ok: bool | None = None) -> bytes:
 
 
 def cache_folder(path, cache_root, camera="", width=0, height=0, frame=-1, unit_scale=1.0, view=None, views=None,
-                 relight=None) -> str:
+                 relight=None, projector=None) -> str:
     """Where export() keeps (or finds) the result for these settings."""
     path = clean_path(path)
     cache_root = os.path.abspath(cache_root)      # Blender runs from its own working directory
     stem = re.sub(r"[^\w.\-]+", "_", os.path.splitext(os.path.basename(path))[0])[:40]
-    return os.path.join(cache_root, f"{stem}_{cache_key(path, camera, width, height, frame, unit_scale, view, views, relight)}")
+    return os.path.join(cache_root, f"{stem}_{cache_key(path, camera, width, height, frame, unit_scale, view, views, relight, projector)}")
 
 
-def job_dict(path, out, camera="", width=0, height=0, frame=-1, unit_scale=1.0, view=None, views=None, relight=None):
+def job_dict(path, out, camera="", width=0, height=0, frame=-1, unit_scale=1.0, view=None, views=None, relight=None,
+             projector=None):
     """The job file blender_export.py reads (the worker keeps a loaded scene per file / camera / frame / scale)."""
     return {"file": clean_path(path), "out": out, "camera": camera, "width": int(width), "height": int(height),
-            "frame": int(frame), "unit_scale": float(unit_scale), "view": view, "views": views, "relight": relight}
+            "frame": int(frame), "unit_scale": float(unit_scale), "view": view, "views": views, "relight": relight,
+            "projector": projector or None}
 
 
 def done_files(view=None, views=None, relight=None):
@@ -192,13 +198,14 @@ def stage_path(final) -> str:
 def export(path: str, cache_root: str, camera: str = "", width: int = 0, height: int = 0, frame: int = -1,
            blender: str = "", timeout: int = 900, force: bool = False, unit_scale: float = 1.0,
            view: dict | None = None, views: list | None = None, relight: dict | None = None,
-           transient: bool = False):
+           transient: bool = False, projector: dict | None = None):
     """
     -> (folder with scene.json / faceid.npy / ..., cached: bool, blender log tail).
     transient: always render, into a folder of this call's own (the caller moves the files on and deletes it).
     view: {"location": [x, y, z], "look_at": [x, y, z], "lens": mm, "name": str} renders from that camera
     instead of the file's (audience spots; metres after unit_scale). views: a list of such cameras,
-    rendered in one Blender session into v_0000, v_0001 ... (walkthroughs).
+    rendered in one Blender session into v_0000, v_0001 ... (walkthroughs). projector: the dict of kubakub projector
+    (autocam.py): the projection camera is placed in front of the facade instead of taken from the file.
     """
     path = clean_path(path)
     if not os.path.isfile(path):
@@ -208,7 +215,7 @@ def export(path: str, cache_root: str, camera: str = "", width: int = 0, height:
         raise ValueError("Blender cannot read .c4d files: export FBX or Alembic from Cinema 4D")
     if ext not in FORMATS:
         raise ValueError(f"unsupported file type {ext} (supported: {' '.join(FORMATS)})")
-    out = cache_folder(path, cache_root, camera, width, height, frame, unit_scale, view, views, relight)
+    out = cache_folder(path, cache_root, camera, width, height, frame, unit_scale, view, views, relight, projector)
     done = done_files(view, views, relight)
     if not force and not transient and is_done(out, done):
         touch(out)
@@ -216,7 +223,7 @@ def export(path: str, cache_root: str, camera: str = "", width: int = 0, height:
     stage = stage_path(out)
     os.makedirs(stage, exist_ok=True)
     try:
-        tail = _run_job(job_dict(path, stage, camera, width, height, frame, unit_scale, view, views, relight),
+        tail = _run_job(job_dict(path, stage, camera, width, height, frame, unit_scale, view, views, relight, projector),
                         stage, done, blender, timeout)
         if transient:
             return stage, False, tail

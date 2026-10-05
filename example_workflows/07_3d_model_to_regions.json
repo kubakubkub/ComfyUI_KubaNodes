@@ -1,0 +1,829 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 16,
+ "nodes": [
+  {
+   "id": 2,
+   "type": "KUBA_Projector",
+   "pos": [
+    0,
+    260
+   ],
+   "size": [
+    320,
+    240
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "projector",
+     "type": "KUBA_PROJECTOR",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Projector"
+   },
+   "widgets_values": [
+    30.0,
+    0.0,
+    1.5,
+    0.0,
+    "lens shift",
+    "auto",
+    0.0,
+    0.05,
+    ""
+   ],
+   "title": "1 \u00b7 projector: 30 m from the wall, 1.5 m up"
+  },
+  {
+   "id": 3,
+   "type": "KUBA_SceneRender",
+   "pos": [
+    360,
+    0
+   ],
+   "size": [
+    380,
+    560
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "projector",
+     "type": "KUBA_PROJECTOR",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "clay",
+     "type": "IMAGE",
+     "links": [
+      3,
+      6,
+      11
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "ids_preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "normal",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "coverage",
+     "type": "MASK",
+     "links": [
+      4
+     ],
+     "slot_index": 4
+    },
+    {
+     "name": "folder",
+     "type": "STRING",
+     "links": [
+      2
+     ],
+     "slot_index": 5
+    },
+    {
+     "name": "scene_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      16
+     ],
+     "slot_index": 7
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [
+      7,
+      9
+     ],
+     "slot_index": 8
+    },
+    {
+     "name": "depth_gray",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 9
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneRender"
+   },
+   "widgets_values": [
+    "",
+    1920,
+    1080,
+    -1,
+    "elements sections floors shelves facing parts objects materials",
+    "elements",
+    0.05,
+    3.0,
+    0.02,
+    "-0.5 -0.05 0.05 0.5",
+    "",
+    "",
+    "",
+    1.0,
+    0.5
+   ],
+   "title": "2 \u00b7 scene render (Blender): paste your file, or leave empty for the sample"
+  },
+  {
+   "id": 4,
+   "type": "KUBA_RegionsFromIDMaps",
+   "pos": [
+    780,
+    0
+   ],
+   "size": [
+    360,
+    380
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "folder",
+     "type": "STRING",
+     "widget": {
+      "name": "folder"
+     },
+     "link": 2
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 3
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      5,
+      8
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      12
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "reference",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionsFromIDMaps"
+   },
+   "widgets_values": [
+    "",
+    "elements",
+    "sections floors facing",
+    "id_map",
+    "*",
+    400,
+    true,
+    "auto"
+   ],
+   "title": "3 \u00b7 regions: every window, column, cornice (tags: left / centre / right, floors)"
+  },
+  {
+   "id": 5,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    1180,
+    0
+   ],
+   "size": [
+    420,
+    520
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 5
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 6
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      10,
+      13
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[plan]\norder = largest_first\n\n[default]\nprompt = weathered sandstone facade, carved stone, soft evening light\ndenoise = 0.55\n\n[group:windows]\nprompt = warm lit rooms behind old glass, curtains, a plant on the sill\ndenoise = 0.8\n\n[tag:ground_floor group:windows]\nprompt = a shop window at night, glowing objects on display\n\n[group:columns, group:cornices]\nprompt = gilded ornament, carved stone\n\n[tag:left group:windows]\nprompt += , blue light\n",
+    0,
+    ""
+   ],
+   "title": "4 \u00b7 plan: a prompt per region"
+  },
+  {
+   "id": 6,
+   "type": "KUBA_SceneMeasure",
+   "pos": [
+    780,
+    420
+   ],
+   "size": [
+    360,
+    300
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 7
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "viewer",
+     "type": "KUBA_VIEWER",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "map",
+     "type": "IMAGE",
+     "links": [
+      14
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "table",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneMeasure"
+   },
+   "widgets_values": [
+    0.0,
+    15.0,
+    1.7,
+    "pixel_mm",
+    60.0
+   ],
+   "title": "5 \u00b7 real distances: mm per pixel, brightness"
+  },
+  {
+   "id": 7,
+   "type": "KUBA_ScenePreview",
+   "pos": [
+    1640,
+    0
+   ],
+   "size": [
+    360,
+    380
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 9
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 10
+    },
+    {
+     "name": "background",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      15
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "shadow",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "views",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_ScenePreview"
+   },
+   "widgets_values": [
+    "0, 20, 1.7\n-14, 10, 1.7",
+    20.0,
+    1280,
+    720,
+    0.15,
+    1.0,
+    1.0
+   ],
+   "title": "6 \u00b7 previz: the plan projected, seen from two audience spots"
+  },
+  {
+   "id": 20,
+   "type": "PreviewImage",
+   "pos": [
+    360,
+    600
+   ],
+   "size": [
+    380,
+    280
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "clay"
+  },
+  {
+   "id": 21,
+   "type": "PreviewImage",
+   "pos": [
+    780,
+    760
+   ],
+   "size": [
+    360,
+    280
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 12
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "regions"
+  },
+  {
+   "id": 22,
+   "type": "PreviewImage",
+   "pos": [
+    1180,
+    560
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 13
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "plan"
+  },
+  {
+   "id": 23,
+   "type": "PreviewImage",
+   "pos": [
+    1180,
+    900
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 14
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "mm per matrix pixel"
+  },
+  {
+   "id": 24,
+   "type": "PreviewImage",
+   "pos": [
+    1640,
+    420
+   ],
+   "size": [
+    520,
+    420
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 15
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "previz"
+  },
+  {
+   "id": 25,
+   "type": "PreviewAny",
+   "pos": [
+    0,
+    540
+   ],
+   "size": [
+    320,
+    340
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 16
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "scene report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    -600
+   ],
+   "size": [
+    760,
+    500
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## starter 07 \u00b7 3d model to regions\n\n**You need:** Blender 4.x installed (it runs in the background). No AI models.\n\n**Your own model:** paste the path of your .blend / .fbx / .obj / .abc / .glb / .usd into `file` of **scene render** (Explorer: right click the file, Copy as path). Empty = the sample building.\n\n**Do:** Queue. The sample building (a 24 x 16 m facade, every stone a part of its own) is rendered from the projector\n(30 m from the wall, 1.5 m up, the picture fitted to the model by lens shift). Scene render gives clay, depth\nand ID passes; every window, column and cornice becomes a region, tagged left / centre / right and by floor. The plan\ngives them prompts, scene measure the real size of a pixel on the wall, and the previz shows the picture on the\nbuilding from two audience spots.\n\n**Camera of your own model:** a file with a projection camera: unplug the projector node and set width / height\nto 0, then the file's camera and render size are used. A file without one: keep the projector and put your\nprojector's resolution into width / height.\n\n**Then try:** `throw_ratio` 1.2 on the projector (a real lens: the report says how much of the model the picture\ncovers); `aim = tilt`; `preview_pass = parts`; connect the plan to a **region sampler** as in starter 02\n(image = clay) to paint the facade.\n"
+   ],
+   "title": "read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   2,
+   0,
+   3,
+   0,
+   "KUBA_PROJECTOR"
+  ],
+  [
+   2,
+   3,
+   5,
+   4,
+   0,
+   "STRING"
+  ],
+  [
+   3,
+   3,
+   0,
+   4,
+   1,
+   "IMAGE"
+  ],
+  [
+   4,
+   3,
+   4,
+   4,
+   2,
+   "MASK"
+  ],
+  [
+   5,
+   4,
+   0,
+   5,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   6,
+   3,
+   0,
+   5,
+   1,
+   "IMAGE"
+  ],
+  [
+   7,
+   3,
+   8,
+   6,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   8,
+   4,
+   0,
+   6,
+   1,
+   "KUBA_REGIONS"
+  ],
+  [
+   9,
+   3,
+   8,
+   7,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   10,
+   5,
+   3,
+   7,
+   1,
+   "IMAGE"
+  ],
+  [
+   11,
+   3,
+   0,
+   20,
+   0,
+   "IMAGE"
+  ],
+  [
+   12,
+   4,
+   1,
+   21,
+   0,
+   "IMAGE"
+  ],
+  [
+   13,
+   5,
+   3,
+   22,
+   0,
+   "IMAGE"
+  ],
+  [
+   14,
+   6,
+   2,
+   23,
+   0,
+   "IMAGE"
+  ],
+  [
+   15,
+   7,
+   0,
+   24,
+   0,
+   "IMAGE"
+  ],
+  [
+   16,
+   3,
+   7,
+   25,
+   0,
+   "STRING"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub starter workflow"
+ },
+ "version": 0.4
+}

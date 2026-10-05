@@ -22,6 +22,9 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import autocam  # noqa: E402  (numpy only: where the projector stands)
+
 IMPORTERS = {
     ".fbx": lambda p: bpy.ops.import_scene.fbx(filepath=p),
     ".obj": lambda p: bpy.ops.wm.obj_import(filepath=p),
@@ -555,8 +558,19 @@ def main(job=None):
                         loop_vert=np.concatenate(verts_idx), vert=V)
     lo, hi = V.min(0), V.max(0)
 
-    # camera: the file's, or a front camera framing the bbox (3D-2 brings a smarter one)
+    # camera: an audience view, the projector of kubakub projector, the file's own, or a front camera framing the model
     view = job.get("view")
+    projector = job.get("projector")
+
+    def placed(c, name):
+        cd = bpy.data.cameras.new(name)
+        cd.lens, cd.sensor_width, cd.sensor_fit = float(c["lens"]), 36.0, "AUTO"
+        cd.shift_x, cd.shift_y = float(c["shift_x"]), float(c["shift_y"])
+        cd.clip_start, cd.clip_end = 0.05, 100000.0
+        notes.append(c["note"])
+        return cd, Matrix([list(map(float, row)) for row in c["matrix"]])
+
+    mesh_np = (V, np.concatenate(normals), np.concatenate(areas), np.concatenate(centres))
     if view:
         how = "view"
         cam_name = view.get("name", "view")
@@ -566,21 +580,18 @@ def main(job=None):
         loc, look = Vector(view["location"]), Vector(view["look_at"])
         rot = (look - loc).to_track_quat("-Z", "Y").to_matrix().to_4x4()
         cmat = Matrix.Translation(loc) @ rot
+    elif projector:
+        how = "projector"
+        cam_name = projector.get("name") or "projector"
+        cdata, cmat = placed(autocam.projector_camera(*mesh_np, W, H, projector), "kuba_projector")
+        cam_copy = None                                   # no lens shift flip: this camera is not an import
     elif cam_copy is not None:
         cdata, cmat = cam_copy
         cmat = S @ cmat
         cdata.clip_end = max(cdata.clip_end, cdata.clip_end * unit_scale)
     else:
         how = "auto front"
-        cdata = bpy.data.cameras.new("kuba_auto")
-        cdata.lens, cdata.sensor_width, cdata.sensor_fit = 36.0, 36.0, "AUTO"
-        size = hi - lo
-        centre = (lo + hi) / 2
-        tan_h = 18.0 / 36.0 if W >= H else 18.0 / 36.0 * W / H      # sensor fit AUTO: the long side
-        tan_v = tan_h * H / W
-        dist = 1.1 * max(size[0] / 2 / tan_h, size[2] / 2 / tan_v) + size[1] / 2
-        cmat = Matrix.Translation(Vector((centre[0], centre[1] - dist, centre[2]))) @ Matrix.Rotation(math.pi / 2, 4, "X")
-        notes.append(f"no camera in the file: front camera {dist:.1f} m in front of the bbox")
+        cdata, cmat = placed(autocam.front_camera(*mesh_np, W, H), "kuba_auto")
     # a tiny near clip (FBX cameras often come with 1e-5) wrecks Workbench's depth buffer: recessed details
     # vanish behind the wall in the clay render. Cycles is unaffected, the clay is not.
     far = max(float(np.linalg.norm(c - np.array(cmat.translation))) for c in (lo, hi)) * 1.5 + 1.0
@@ -752,7 +763,8 @@ LOADED = {}
 
 
 def _scene_key(job):
-    return json.dumps([job.get("file"), job.get("camera"), job.get("frame"), job.get("unit_scale"), job.get("view")])
+    return json.dumps([job.get("file"), job.get("camera"), job.get("frame"), job.get("unit_scale"), job.get("view"),
+                       job.get("projector")])
 
 
 def serve(idle_s=600.0):

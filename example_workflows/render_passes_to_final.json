@@ -1,0 +1,701 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 14,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_RenderPasses",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    320,
+    240
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "beauty",
+     "type": "IMAGE",
+     "links": [
+      3,
+      5,
+      10
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "normal",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": [
+      1
+     ],
+     "slot_index": 3
+    },
+    {
+     "name": "names",
+     "type": "STRING",
+     "links": [
+      2
+     ],
+     "slot_index": 4
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      13
+     ],
+     "slot_index": 5
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RenderPasses"
+   },
+   "widgets_values": [
+    "",
+    "",
+    "cut",
+    "",
+    "as rendered"
+   ],
+   "title": "1 \u00b7 render passes: paste your folder, or leave empty for the sample"
+  },
+  {
+   "id": 2,
+   "type": "KUBA_RegionsFromMasks",
+   "pos": [
+    360,
+    0
+   ],
+   "size": [
+    360,
+    420
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "masks",
+     "type": "MASK",
+     "link": 1
+    },
+    {
+     "name": "names",
+     "type": "STRING",
+     "widget": {
+      "name": "names"
+     },
+     "link": 2
+    },
+    {
+     "name": "base_regions",
+     "type": "KUBA_REGIONS",
+     "link": null
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 3
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      4
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "region_masks",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      12
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionsFromMasks"
+   },
+   "widgets_values": [
+    "",
+    "on_top",
+    400,
+    true,
+    "",
+    "cut, windows",
+    ""
+   ],
+   "title": "2 \u00b7 regions: one per opening of the cut mask, the wall around them"
+  },
+  {
+   "id": 3,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    760,
+    0
+   ],
+   "size": [
+    440,
+    560
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 4
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [
+      9
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[plan]\norder = plan\n\n[default]\nstrategy = keep\n\n// the wall around the openings: one calm material, so the openings read\n[*mask*, wall*, facade*]\nstrategy = inpaint\nprompt = smooth white plaster wall, soft daylight, fine surface detail\ndenoise = 0.6\norder = 0\n\n// every opening gets its own idea (cut = your cut mask; windows and door = the sample passes)\n[group:cut, group:windows, door]\nstrategy = inpaint\nprompt = inside the opening {folded sheets|stacked plates|woven ribbons|faceted shards} of {violet lacquer|bright orange lacquer|polished brass}, sculptural, deep shadows\ndenoise = 0.85\ncolor_match = none\norder = 1\n",
+    1,
+    ""
+   ],
+   "title": "3 \u00b7 plan: white wall first, then an idea per opening"
+  },
+  {
+   "id": 10,
+   "type": "UNETLoader",
+   "pos": [
+    0,
+    620
+   ],
+   "size": [
+    320,
+    90
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "flux-2-klein-4b.safetensors",
+    "default"
+   ],
+   "title": "flux 2 klein 4b"
+  },
+  {
+   "id": 11,
+   "type": "CLIPLoader",
+   "pos": [
+    0,
+    740
+   ],
+   "size": [
+    320,
+    110
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      7
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen_3_4b.safetensors",
+    "flux2",
+    "default"
+   ],
+   "title": "qwen 3 4b"
+  },
+  {
+   "id": 12,
+   "type": "VAELoader",
+   "pos": [
+    0,
+    880
+   ],
+   "size": [
+    320,
+    60
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      8
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "flux2-vae.safetensors"
+   ],
+   "title": "flux 2 vae"
+  },
+  {
+   "id": 4,
+   "type": "KUBA_RegionSampler",
+   "pos": [
+    1240,
+    0
+   ],
+   "size": [
+    380,
+    520
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 7
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 8
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 9
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      11
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      14
+     ],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionSampler"
+   },
+   "widgets_values": [
+    0,
+    0.0,
+    "euler",
+    "simple",
+    1.0,
+    4.0,
+    "auto",
+    0,
+    "auto",
+    ""
+   ],
+   "title": "4 \u00b7 region sampler: the render stays, the regions are painted"
+  },
+  {
+   "id": 5,
+   "type": "SaveImage",
+   "pos": [
+    1660,
+    0
+   ],
+   "size": [
+    460,
+    460
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "kubakub/render_passes"
+   ],
+   "title": "result"
+  },
+  {
+   "id": 20,
+   "type": "PreviewImage",
+   "pos": [
+    360,
+    460
+   ],
+   "size": [
+    360,
+    280
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 12
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "regions"
+  },
+  {
+   "id": 21,
+   "type": "PreviewAny",
+   "pos": [
+    0,
+    280
+   ],
+   "size": [
+    320,
+    300
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 13
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "what is in the folder"
+  },
+  {
+   "id": 22,
+   "type": "PreviewAny",
+   "pos": [
+    1240,
+    560
+   ],
+   "size": [
+    380,
+    240
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 14
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "sampler report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    -600
+   ],
+   "size": [
+    760,
+    500
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## render passes -> final\n\n**You need:** Flux 2 Klein 4B (as in starter 02). With `folder` empty it runs on built-in sample passes; your own\nrender: paste its folder into node 1.\n\n**The folder:** `<name>_beauty.png` is the picture. Every other pass of that name is a mask: `<name>_cut.png`,\n`<name>_windows.png` \u2026 (white = inside). `<name>_depth.png` and `<name>_normal.png` come out as pictures. A file of\nno render (`facade_mask.png`) is a mask for every render in the folder. Any renderer: write the passes as PNG.\n\n**Do:** Queue. In your own render a pass named *cut* marks the places you opened or redesigned in 3D\n(black in the render, so `invert = cut`). Every separate shape of it becomes a region (`split_masks`: cut_01,\ncut_02 \u2026; in the sample windows_01 \u2026), cut out of the wall mask around it. The plan paints the wall first as one calm material, then\ngives every opening one of the ideas in `{a|b|c}`; another `seed` deals them out anew. Outside the regions your render\nstays as it is (a region grows over its edge by `dilate_px`, 4 pixels).\n\n**Then try:** your own pass names in the rules (`[group:windows]`); `reference = none` on the openings for freer\nforms; the **versions** node in place of the sampler for a sheet of looks, then the picks at full size; a **seam\npass** after the sampler; depth and normal as the starting image of a version (`[image]`).\n"
+   ],
+   "title": "read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   3,
+   2,
+   0,
+   "MASK"
+  ],
+  [
+   2,
+   1,
+   4,
+   2,
+   1,
+   "STRING"
+  ],
+  [
+   3,
+   1,
+   0,
+   2,
+   3,
+   "IMAGE"
+  ],
+  [
+   4,
+   2,
+   0,
+   3,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   5,
+   1,
+   0,
+   3,
+   1,
+   "IMAGE"
+  ],
+  [
+   6,
+   10,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   11,
+   0,
+   4,
+   1,
+   "CLIP"
+  ],
+  [
+   8,
+   12,
+   0,
+   4,
+   2,
+   "VAE"
+  ],
+  [
+   9,
+   3,
+   0,
+   4,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   10,
+   1,
+   0,
+   4,
+   4,
+   "IMAGE"
+  ],
+  [
+   11,
+   4,
+   0,
+   5,
+   0,
+   "IMAGE"
+  ],
+  [
+   12,
+   2,
+   3,
+   20,
+   0,
+   "IMAGE"
+  ],
+  [
+   13,
+   1,
+   5,
+   21,
+   0,
+   "STRING"
+  ],
+  [
+   14,
+   4,
+   2,
+   22,
+   0,
+   "STRING"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub starter workflow"
+ },
+ "version": 0.4
+}

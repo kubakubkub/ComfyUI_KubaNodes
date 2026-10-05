@@ -37,6 +37,7 @@ import comfy.utils
 import folder_paths
 
 from ...kubakub import adapters
+from ...kubakub import align
 from ...kubakub import ops
 from ...kubakub import plan as rp
 from ...kubakub import region_cache as rc
@@ -435,7 +436,16 @@ class KUBA_Versions(io.ComfyNode):
         gw, gh = st.fif_size([0, 0, dw, dh], mp * 1024 * 1024, ad.grid)
         out = ad.sample(ad.empty_latent(gw, gh), pos, neg, denoise=1.0, pixel_size=(gw, gh),
                         **st._entry_sampling(e, settings))
-        return ops.resize(ad.decode(out)[:1, ..., :3].float().cpu(), dw, dh)
+        pic = ops.resize(ad.decode(out)[:1, ..., :3].float().cpu(), dw, dh)
+        try:        # a free sample comes back a few pixels moved or scaled: back onto the starting image (align.py)
+            src = ops.resize(start[:1, ..., :3].float().cpu(), dw, dh)[0].numpy()
+            fixed, r = align.align(src, pic[0].numpy())
+            log.info("[KUBA versions] whole picture, registration: %s", align.describe(r))
+            if r["ok"] and r["why"] == "aligned":
+                pic = torch.from_numpy(np.ascontiguousarray(fixed, dtype=np.float32))[None]
+        except Exception as e:  # noqa: BLE001  (the picture is worth more than its registration)
+            log.warning("[KUBA versions] whole picture: registration skipped (%s)", e)
+        return pic
 
     @classmethod
     def _save(cls, outs: dict, by_number: dict, recipes: dict, save_folder: str, final: bool,

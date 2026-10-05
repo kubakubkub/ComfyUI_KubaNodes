@@ -1,0 +1,679 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 10,
+ "nodes": [
+  {
+   "id": 2,
+   "type": "KUBA_Projector",
+   "pos": [
+    0,
+    260
+   ],
+   "size": [
+    320,
+    240
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "projector",
+     "type": "KUBA_PROJECTOR",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Projector"
+   },
+   "widgets_values": [
+    30.0,
+    0.0,
+    1.5,
+    0.0,
+    "lens shift",
+    "auto",
+    0.0,
+    0.05,
+    ""
+   ],
+   "title": "1 \u00b7 projector"
+  },
+  {
+   "id": 3,
+   "type": "KUBA_SceneRender",
+   "pos": [
+    360,
+    0
+   ],
+   "size": [
+    380,
+    560
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "projector",
+     "type": "KUBA_PROJECTOR",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "clay",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "ids_preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "normal",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "coverage",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 4
+    },
+    {
+     "name": "folder",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 5
+    },
+    {
+     "name": "scene_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 7
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [
+      2
+     ],
+     "slot_index": 8
+    },
+    {
+     "name": "depth_gray",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 9
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneRender"
+   },
+   "widgets_values": [
+    "",
+    1920,
+    1080,
+    -1,
+    "shelves parts",
+    "parts",
+    0.05,
+    3.0,
+    0.02,
+    "-0.5 -0.05 0.05 0.5",
+    "",
+    "",
+    "",
+    1.0,
+    0.5
+   ],
+   "title": "2 \u00b7 scene render: paste your file, or leave empty for the sample"
+  },
+  {
+   "id": 4,
+   "type": "KUBA_ScenePieces",
+   "pos": [
+    780,
+    0
+   ],
+   "size": [
+    340,
+    260
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 2
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "pieces",
+     "type": "KUBA_PIECES",
+     "links": [
+      3
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      9
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_ScenePieces"
+   },
+   "widgets_values": [
+    0.2,
+    4.0,
+    false,
+    "loose parts",
+    ""
+   ],
+   "title": "3 \u00b7 pieces: every stone, frame, voussoir (parts over 4 m stay)"
+  },
+  {
+   "id": 5,
+   "type": "KUBA_PiecesFalloff",
+   "pos": [
+    780,
+    300
+   ],
+   "size": [
+    340,
+    400
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "falloff",
+     "type": "KUBA_FALLOFF",
+     "links": [
+      4
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_PiecesFalloff"
+   },
+   "widgets_values": [
+    "pulse",
+    "left to right",
+    0.0,
+    8.0,
+    5.0,
+    2.0,
+    1.0,
+    -1.0,
+    4.0,
+    0.5,
+    1,
+    "fixed",
+    1.0,
+    false
+   ],
+   "title": "4 \u00b7 falloff: a band runs across and loops"
+  },
+  {
+   "id": 6,
+   "type": "KUBA_PiecesTransform",
+   "pos": [
+    1160,
+    0
+   ],
+   "size": [
+    340,
+    400
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "pieces",
+     "type": "KUBA_PIECES",
+     "link": 3
+    },
+    {
+     "name": "falloff",
+     "type": "KUBA_FALLOFF",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "pieces",
+     "type": "KUBA_PIECES",
+     "links": [
+      5
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_PiecesTransform"
+   },
+   "widgets_values": [
+    0.7,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    14.0,
+    1.0,
+    0.0,
+    1,
+    "fixed"
+   ],
+   "title": "5 \u00b7 transform: push out, a little rotation"
+  },
+  {
+   "id": 7,
+   "type": "KUBA_PiecesRender",
+   "pos": [
+    1540,
+    0
+   ],
+   "size": [
+    360,
+    520
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "pieces",
+     "type": "KUBA_PIECES",
+     "link": 5
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "frames",
+     "type": "IMAGE",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "alpha",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": [
+      7
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      10
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_PiecesRender"
+   },
+   "widgets_values": [
+    4.0,
+    25.0,
+    "clay",
+    1.0,
+    "sunset",
+    1.2,
+    0.8,
+    "black",
+    0.5,
+    16,
+    "audience",
+    22.0,
+    -9.0,
+    1.7,
+    24.0
+   ],
+   "title": "6 \u00b7 render (Cycles): seen from the audience"
+  },
+  {
+   "id": 8,
+   "type": "CreateVideo",
+   "pos": [
+    1940,
+    0
+   ],
+   "size": [
+    300,
+    100
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 6
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": 7
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "VIDEO",
+     "type": "VIDEO",
+     "links": [
+      8
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CreateVideo"
+   },
+   "widgets_values": [
+    "",
+    "auto",
+    "sRGB",
+    "none"
+   ],
+   "title": "frames"
+  },
+  {
+   "id": 9,
+   "type": "SaveVideo",
+   "pos": [
+    1940,
+    140
+   ],
+   "size": [
+    420,
+    460
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "link": 8
+    },
+    {
+     "name": "format",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null
+    },
+    {
+     "name": "codec",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveVideo"
+   },
+   "widgets_values": [
+    "kubakub_starter/pieces"
+   ],
+   "title": "the clip"
+  },
+  {
+   "id": 20,
+   "type": "PreviewImage",
+   "pos": [
+    780,
+    740
+   ],
+   "size": [
+    340,
+    260
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 9
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "the pieces"
+  },
+  {
+   "id": 21,
+   "type": "PreviewAny",
+   "pos": [
+    1540,
+    560
+   ],
+   "size": [
+    360,
+    200
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "render report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    -600
+   ],
+   "size": [
+    760,
+    500
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## starter 08 \u00b7 moving pieces\n\n**You need:** Blender 4.x. No AI models.\n\n**Your own model:** paste the path of your .blend / .fbx / .obj / .abc / .glb / .usd into `file` of **scene render** (Explorer: right click the file, Copy as path). Empty = the sample building.\n\n**Do:** Queue. Every stone, window frame and voussoir of the sample model is a piece. A band runs across the facade\n(falloff: pulse, left to right, looping every 4 s), the pieces it reaches are pushed out of the wall and turn a little, then\ncome back. Cycles renders 4 seconds from an audience spot; the first run takes about a minute, a changed setting\nrenders only what changed.\n\n**Then try:** falloff `type = stagger` with `direction = from the centre`; a second transform chained after the first\n(they add up) with its own falloff `noise`; `look = projected matrix` with an image on `matrix` (the picture is cast\nfrom the projector onto the moving pieces); `view = projector` for the frames you would actually project.\nWith regions connected to scene pieces (starter 07) and `source = regions: one piece each`, whole windows or floors move\nas one block; **pieces beat falloff** makes them jump on the beats of the director's timeline.\n"
+   ],
+   "title": "read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   2,
+   0,
+   3,
+   0,
+   "KUBA_PROJECTOR"
+  ],
+  [
+   2,
+   3,
+   8,
+   4,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   3,
+   4,
+   0,
+   6,
+   0,
+   "KUBA_PIECES"
+  ],
+  [
+   4,
+   5,
+   0,
+   6,
+   1,
+   "KUBA_FALLOFF"
+  ],
+  [
+   5,
+   6,
+   0,
+   7,
+   0,
+   "KUBA_PIECES"
+  ],
+  [
+   6,
+   7,
+   0,
+   8,
+   0,
+   "IMAGE"
+  ],
+  [
+   7,
+   7,
+   2,
+   8,
+   1,
+   "FLOAT"
+  ],
+  [
+   8,
+   8,
+   0,
+   9,
+   0,
+   "VIDEO"
+  ],
+  [
+   9,
+   4,
+   1,
+   20,
+   0,
+   "IMAGE"
+  ],
+  [
+   10,
+   7,
+   3,
+   21,
+   0,
+   "STRING"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub starter workflow"
+ },
+ "version": 0.4
+}

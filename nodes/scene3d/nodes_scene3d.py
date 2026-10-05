@@ -29,10 +29,11 @@ from comfy_api.latest import io, ui
 
 from ...kubakub import save_paths as sp
 from ...kubakub import viewer as vw
-from ...kubakub.io_types import RegionsType, SceneType, ViewerType
-from ...kubakub.scene3d import bridge, scene_ids, scene_view as sv
+from ...kubakub.io_types import ProjectorType, RegionsType, SceneType, ViewerType
+from ...kubakub.scene3d import autocam, bridge, scene_ids, scene_view as sv
 from ...kubakub.types import Regions
 from ...kubakub import imio
+from ...kubakub import samples
 
 log = logging.getLogger("KUBA.regions")
 
@@ -130,11 +131,13 @@ class KUBA_SceneRender(io.ComfyNode):
                 "kubakub regions from id maps (regions_pass e.g. shelves or parts). Needs Blender 4.x "
                 "(runs headless). .c4d: export FBX or Alembic from Cinema 4D."),
             inputs=[
-                io.String.Input("file", default="", placeholder="D:\\PROJECT\\3D\\facade.blend",
-                                tooltip="Scene file. Explorer's 'Copy as path' quotes are fine."),
+                io.String.Input("file", default="", placeholder="paste the path of your .blend / .fbx / .obj  (empty = the sample building)",
+                                tooltip="Your scene file: paste its path (Explorer: right click, Copy as path; the quotes "
+                                        "are fine). Empty: the built-in sample building, so the node runs as it is."),
                 io.String.Input("camera", default="", optional=True,
                                 tooltip="Camera object name. Empty: the file's active camera, else the first "
-                                        "camera, else a front camera framing the model."),
+                                        "camera, else a front camera framing the model (it finds the facade side by "
+                                        "itself). A connected projector replaces the file's camera."),
                 io.Int.Input("width", default=0, min=0, max=16384, step=8,
                              tooltip="Render width; 0 = the file's render resolution (the matrix size)."),
                 io.Int.Input("height", default=0, min=0, max=16384, step=8,
@@ -170,6 +173,10 @@ class KUBA_SceneRender(io.ComfyNode):
                                tooltip="Pieces smaller than this across the wall (largest of width / height, m) "
                                        "merge into the neighbour they share the longest border with - the crowd "
                                        "cannot read them anyway. 0 = keep everything."),
+                ProjectorType.Input("projector", optional=True,
+                                    tooltip="From kubakub projector: where the projector stands (metres from the wall, "
+                                            "height, throw). Used instead of the file's camera; set width / height to "
+                                            "the projector's resolution."),
             ],
             outputs=[
                 io.Image.Output("clay", tooltip="Workbench clay render from the projection camera."),
@@ -190,7 +197,7 @@ class KUBA_SceneRender(io.ComfyNode):
     @classmethod
     def fingerprint_inputs(cls, file="", **kwargs):
         h = hashlib.sha256(json.dumps(kwargs, sort_keys=True, default=str).encode())
-        p = bridge.clean_path(file)                    # the same %VAR% / ~ expansion as the export
+        p = bridge.clean_path(file) or samples.model(folder_paths.get_temp_directory())   # as in execute
         try:
             st = os.stat(p)
             h.update(f"{p}|{st.st_size}|{st.st_mtime_ns}".encode("utf-8", "replace"))
@@ -199,7 +206,7 @@ class KUBA_SceneRender(io.ComfyNode):
             folder = bridge.cache_folder(p, cache_root(),
                                          (kwargs.get("camera") or "").strip(), int(kwargs.get("width") or 0),
                                          int(kwargs.get("height") or 0), int(kwargs.get("frame", -1)),
-                                         float(kwargs.get("unit_scale") or 1.0))
+                                         float(kwargs.get("unit_scale") or 1.0), projector=kwargs.get("projector"))
             ok = os.path.isfile(os.path.join(folder, "scene.json")) and any(
                 f.startswith("ids_") for f in os.listdir(folder))
             h.update(bridge.folder_token(folder, ok))
@@ -210,10 +217,14 @@ class KUBA_SceneRender(io.ComfyNode):
     @classmethod
     def execute(cls, file, width, height, frame, passes, preview_pass, shelf_min_step_m, plane_angle_deg,
                 plane_offset_m, layer_bands_m, camera="", save_folder="", blender_path="",
-                unit_scale=1.0, min_size_m=0.5) -> io.NodeOutput:
+                unit_scale=1.0, min_size_m=0.5, projector=None) -> io.NodeOutput:
         t0 = time.perf_counter()
+        projector = autocam.spec(projector) if projector else None
+        sample = not bridge.clean_path(file)
+        if sample:                                     # nothing pasted yet: the sample building
+            file = samples.model(folder_paths.get_temp_directory())
         folder, cached, _ = bridge.export(file, cache_root(), camera=camera.strip(), width=width, height=height,
-                                          frame=frame, blender=blender_path, unit_scale=unit_scale)
+                                          frame=frame, blender=blender_path, unit_scale=unit_scale, projector=projector)
         t_export = time.perf_counter() - t0
         wanted = [p for p in passes.replace(",", " ").split() if p]
         bad = [p for p in wanted if p not in scene_ids.PASSES]
@@ -284,7 +295,8 @@ class KUBA_SceneRender(io.ComfyNode):
             f"shelves (m from the main plane): {summary.get('shelves_m', '-')}",
             f"ID passes: {passes_txt}",
             f"export {export_txt}, ID passes {'reused' if reused else 'built'}, total {time.perf_counter() - t0:.1f} s",
-            f"folder: {ids_dir}", *summary["notes"], *info.get("notes", [])])
+            f"folder: {ids_dir}", *summary["notes"], *info.get("notes", []),
+            *([samples.note("3D file", "file")] if sample else [])])
         size = np.array(info["bbox_max"]) - np.array(info["bbox_min"])
         if size.max() < 2.0 or size.max() > 2000.0:
             report += (f"\nWARNING: the model is {size.max():.3g} m at its largest - wrong units? Distances need "
@@ -292,11 +304,139 @@ class KUBA_SceneRender(io.ComfyNode):
         log.info("[KUBA scene3d] %s", report.replace("\n", "\n    "))
         preview = _img(prev)
         scene_out = {"folder": folder, "ids": ids_dir, "file": info["file"], "blender": blender_path,
-                     "unit_scale": float(unit_scale), "frame": int(frame), "camera": camera.strip()}
+                     "unit_scale": float(unit_scale), "frame": int(frame), "camera": camera.strip(),
+                     "projector": projector}
         return io.NodeOutput(_img(clay), preview, _img(_depth_vis(depth)), _img(nrm),
                              torch.from_numpy(fg.astype(np.float32))[None], ids_dir,
                              json.dumps(info, indent=1), report, scene_out, _img(_depth_gray(depth)),
                              ui=ui.PreviewImage(preview, cls=cls))
+
+
+class KUBA_Projector(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="KUBA_Projector",
+            display_name="kubakub projector",
+            category="kubakub/3d/scene",
+            search_aliases=['camera', 'throw ratio', 'lens shift', 'beamer'],
+            description=(
+                "Where the projector stands, as on site: metres from the wall, along it and above the ground, and its "
+                "throw ratio. Connect it to kubakub scene render: the model is rendered from there instead of from the "
+                "file's camera, so a file without a camera works, and so does trying another spot or lens. For several "
+                "projectors use one projector and one scene render each, then kubakub projector blend."),
+            inputs=[
+                io.Float.Input("distance_m", default=0.0, min=0.0, max=2000.0, step=0.5,
+                               tooltip="Metres from the wall. 0 = as far as the throw ratio needs to cover the model "
+                                       "(throw 1.5 when that is 0 too)."),
+                io.Float.Input("offset_m", default=0.0, min=-1000.0, max=1000.0, step=0.5,
+                               tooltip="Metres along the wall from the middle of the facade, + = to the right as the "
+                                       "audience sees it."),
+                io.Float.Input("height_m", default=1.5, min=-100.0, max=500.0, step=0.1,
+                               tooltip="Metres above the ground (the lowest point of the model): a tower, a balcony, a roof."),
+                io.Float.Input("throw_ratio", default=0.0, min=0.0, max=20.0, step=0.05,
+                               tooltip="Distance / picture width, as on the lens data sheet (0.8 = wide, 2 = long). "
+                                       "0 = the picture just covers the model."),
+                io.Combo.Input("aim", options=list(autocam.AIMS), default="lens shift",
+                               tooltip="lens shift: square to the wall, the picture shifted onto the model (verticals stay "
+                                       "vertical). tilt: turned to the middle of the model (keystone). straight: square "
+                                       "to the wall, no shift."),
+                io.Combo.Input("side", options=list(autocam.SIDE_OPTIONS), default="auto", advanced=True,
+                               tooltip="Which side of the model is the facade. auto: the side the model is widest "
+                                       "across; front = Blender's front view."),
+                io.Float.Input("turn_deg", default=0.0, min=-89.0, max=89.0, step=1.0, advanced=True,
+                               tooltip="The projector's direction turned around the building, for a spot at an angle "
+                                       "to the facade (+ = towards the right, seen from the audience)."),
+                io.Float.Input("margin", default=0.05, min=0.0, max=1.0, step=0.01, advanced=True,
+                               tooltip="Free border around the model when the picture is fitted (throw ratio 0), as a "
+                                       "share of the picture."),
+                io.String.Input("name", default="", optional=True, advanced=True,
+                                tooltip="A name for the reports (left tower, roof ...)."),
+            ],
+            outputs=[ProjectorType.Output("projector", tooltip="-> kubakub scene render, projector.")],
+        )
+
+    @classmethod
+    def execute(cls, distance_m, offset_m, height_m, throw_ratio, aim, side="auto", turn_deg=0.0, margin=0.05,
+                name="") -> io.NodeOutput:
+        return io.NodeOutput(autocam.spec({"distance_m": distance_m, "offset_m": offset_m, "height_m": height_m,
+                                           "throw_ratio": throw_ratio, "aim": aim, "side": side, "turn_deg": turn_deg,
+                                           "margin": margin, "name": (name or "").strip()}))
+
+
+class KUBA_ProjectorBlend(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="KUBA_ProjectorBlend",
+            display_name="kubakub projector blend",
+            category="kubakub/3d/scene",
+            search_aliases=['edge blend', 'soft edge', 'overlap', 'multi projector'],
+            description=(
+                "Several projectors on one building: where their pictures overlap on the model, each one fades out "
+                "towards the border of its own picture, so the light adds up evenly. Connect the scene of one kubakub "
+                "scene render per projector (same file, each with its own kubakub projector). Gives one blend mask per "
+                "projector, in that projector's picture size: multiply your frames with it, or load it as the blend "
+                "mask in the media server."),
+            inputs=[
+                SceneType.Input("scene_1", tooltip="Projector 1: the scene of its kubakub scene render."),
+                SceneType.Input("scene_2", tooltip="Projector 2."),
+                SceneType.Input("scene_3", optional=True, tooltip="Projector 3."),
+                SceneType.Input("scene_4", optional=True, tooltip="Projector 4."),
+                io.Float.Input("ramp", default=0.1, min=0.005, max=0.5, step=0.005,
+                               tooltip="How far from its border a picture reaches full strength, as a share of its "
+                                       "short side. Larger = softer blends (the overlap must be at least this wide)."),
+                io.Float.Input("gamma", default=2.2, min=1.0, max=3.0, step=0.05,
+                               tooltip="The projectors' gamma: the masks are made so that the light adds up, not the "
+                                       "pixel values. 1 = masks in linear light."),
+            ],
+            outputs=[
+                io.Mask.Output("mask_1", tooltip="Blend mask of projector 1 (its picture size): 1 = full, less in overlaps."),
+                io.Mask.Output("mask_2"), io.Mask.Output("mask_3"), io.Mask.Output("mask_4"),
+                io.Image.Output("preview", tooltip="One picture per projector, at the size of the first: the clay with "
+                                                   "what it lights alone and what it shares (orange)."),
+                io.String.Output("report", tooltip="Per projector: how much of the model it lights alone and shares."),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, scene_1, scene_2, ramp, gamma, scene_3=None, scene_4=None) -> io.NodeOutput:
+        t0 = time.perf_counter()
+        given = [s for s in (scene_1, scene_2, scene_3, scene_4) if s is not None]
+        files = {os.path.normcase(bridge.clean_path(s["file"])) for s in given}
+        if len(files) > 1:
+            raise ValueError("kubakub projector blend: the scenes come from different files; every projector needs "
+                             "the same model (one kubakub scene render per projector on the same file).")
+        loaded = [scene_ids.load(s["folder"]) for s in given]
+        res = sv.projector_blend(loaded, ramp=float(ramp), gamma=float(gamma))
+        H0, W0 = loaded[0]["faceid"].shape
+        masks, previews, lines = [], [], []
+        for k, (s, sc, r) in enumerate(zip(given, loaded, res)):
+            masks.append(torch.from_numpy(r["mask"])[None])
+            clay = imio.imread(os.path.join(s["folder"], "clay.png"))[..., ::-1] / 255.0
+            fg = sc["faceid"] > 0
+            pic = clay * 0.25
+            pic[fg & ~r["shared"]] = clay[fg & ~r["shared"]] * 0.9
+            pic[r["shared"]] = clay[r["shared"]] * np.array([0.95, 0.54, 0.35])           # shared: orange
+            pic = pic * (0.35 + 0.65 * r["mask"][..., None])
+            if pic.shape[:2] != (H0, W0):
+                pic = cv2.resize(pic, (W0, H0), interpolation=cv2.INTER_AREA)
+            previews.append(pic)
+            c = r["counts"]
+            name = (s.get("projector") or {}).get("name") or f"projector {k + 1}"
+            with_whom = ", ".join(f"{n * 100 // max(c['model'], 1)} % with {j + 1}" for j, n in enumerate(r["partners"]) if n)
+            lines.append(f"{name}: {sc['info']['width']}x{sc['info']['height']}, lights {c['model'] * 100 // max(sc['faceid'].size, 1)} % "
+                         f"of its picture with the model; {c['alone'] * 100 // max(c['model'], 1)} % of that alone, "
+                         f"{c['shared'] * 100 // max(c['model'], 1)} % shared" + (f" ({with_whom})" if with_whom else ""))
+        if not any(r["counts"]["shared"] for r in res):
+            lines.append("NOTE: the pictures do not overlap on the model: nothing to blend (every mask is 1).")
+        empty = torch.zeros((1, 64, 64), dtype=torch.float32)
+        masks += [empty] * (4 - len(masks))
+        lines.append(f"ramp {ramp:g} of the short side, gamma {gamma:g}, {time.perf_counter() - t0:.1f} s")
+        report = "\n".join(lines)
+        log.info("[KUBA scene3d] projector blend: %s", report.replace("\n", " | "))
+        preview = torch.from_numpy(np.ascontiguousarray(np.stack(previews), dtype=np.float32))
+        return io.NodeOutput(*masks, preview, report, ui=ui.PreviewImage(preview, cls=cls))
 
 
 MAPS = {  # output map -> (key, invert colours, label)
@@ -831,7 +971,7 @@ def relight_frame_key(scene, rw, rh, samples, part):
     """
     return bridge.cache_key(bridge.clean_path(scene["file"]), scene.get("camera", ""), int(rw), int(rh),
                             int(scene.get("frame", -1)), float(scene.get("unit_scale", 1.0)),
-                            relight={"samples": int(samples), "denoise": True, **part})
+                            relight={"samples": int(samples), "denoise": True, **part}, projector=scene.get("projector"))
 
 
 def relight_frames(scene, parts, rw, rh, samples, timeout=900):
@@ -853,7 +993,7 @@ def relight_frames(scene, parts, rw, rh, samples, timeout=900):
         folder, _, _ = bridge.export(scene["file"], root, camera=scene.get("camera", ""), width=rw, height=rh,
                                      frame=scene.get("frame", -1), blender=scene.get("blender", ""),
                                      unit_scale=scene.get("unit_scale", 1.0), relight=job, timeout=timeout,
-                                     transient=True)
+                                     transient=True, projector=scene.get("projector"))
         try:
             with open(os.path.join(folder, "relight.json"), encoding="utf-8") as f:
                 rj = json.load(f)
@@ -953,7 +1093,8 @@ def prestart_relight(scene):
         with open(os.path.join(scene["folder"], "scene.json"), encoding="utf-8") as f:
             info = json.load(f)
         job = bridge.job_dict(scene["file"], "", scene.get("camera", ""), info["width"], info["height"],
-                              scene.get("frame", -1), scene.get("unit_scale", 1.0), relight={"warm": True})
+                              scene.get("frame", -1), scene.get("unit_scale", 1.0), relight={"warm": True},
+                              projector=scene.get("projector"))
         return bridge.worker_prestart(job, os.path.join(cache_root(), "warm"), blender=scene.get("blender", ""))
     except Exception as e:  # noqa: BLE001
         log.info("[KUBA scene3d] Blender pre-start skipped: %s", e)
@@ -966,6 +1107,8 @@ NODE_CLASS_MAPPINGS = {
     "KUBA_ScenePreview": KUBA_ScenePreview,
     "KUBA_SceneWalkthrough": KUBA_SceneWalkthrough,
     "KUBA_SceneRelight": KUBA_SceneRelight,
+    "KUBA_Projector": KUBA_Projector,
+    "KUBA_ProjectorBlend": KUBA_ProjectorBlend,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KUBA_SceneRender": "kubakub scene render",
@@ -973,4 +1116,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "KUBA_ScenePreview": "kubakub scene preview",
     "KUBA_SceneWalkthrough": "kubakub scene walkthrough",
     "KUBA_SceneRelight": "kubakub scene relight",
+    "KUBA_Projector": "kubakub projector",
+    "KUBA_ProjectorBlend": "kubakub projector blend",
 }

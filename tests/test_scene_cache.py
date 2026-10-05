@@ -155,7 +155,7 @@ try:
     real_export = bridge.export
 
     def fake_export(path, cache_root, camera="", width=0, height=0, frame=-1, blender="", timeout=900, force=False,
-                    unit_scale=1.0, view=None, views=None, relight=None, transient=False):
+                    unit_scale=1.0, view=None, views=None, relight=None, transient=False, projector=None):
         """Writes what Blender would: relit_XXXX.png per frame + relight.json, or v_XXXX view folders."""
         calls.append({"relight": relight, "views": views, "view": view, "transient": transient})
         out = bridge.stage_path(bridge.cache_folder(path, cache_root, camera, width, height, frame, unit_scale,

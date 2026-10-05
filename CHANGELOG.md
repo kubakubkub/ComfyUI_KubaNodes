@@ -1,5 +1,42 @@
 # Changelog
 
+Newest first. The numbered versions (0.1.1 and later) are the published ones, written for people who use the nodes.
+The dated entries below them are working notes from before the first release: file names and node names in them
+may have changed since.
+
+## 0.1.2 (2026-10-05)
+
+For 3D artists:
+- **kubakub sample model** (project): the sample facade as a 3D file in metres, written by a node (no file to
+  download): about 640 loose parts, named objects, materials. Starters **07 3d model to regions** and
+  **08 moving pieces** run on it with Blender and nothing else. `kubakub/sample_model.py`, `tests/test_sample_model.py`.
+- **kubakub projector** (3d / scene): where the projector stands, in metres from the wall, along it and above the
+  ground, with a throw ratio and lens shift / tilt / straight. Connected to scene render it replaces the file's
+  camera, so files without a camera work and another spot or lens is one number. Relight, pieces, measure, preview
+  and compensation follow it. `kubakub/scene3d/autocam.py`, `tests/test_autocam.py`.
+- **A file without a camera** is framed from the side the model is widest across, not always from Blender's front
+  view. A model that faces -y gets the same camera as before.
+- **kubakub projector blend** (3d / scene): soft-edge blend masks for 2 to 4 projectors on one model, from what
+  each one really reaches on the surface. Example `projector_blend.json`.
+- **kubakub render passes** (3d / from renders): a folder of passes from any renderer (`name_beauty.png`,
+  `name_depth.png`, `name_cut.png` ...) as picture, depth, normals and named masks for regions from masks. Example
+  `render_passes_to_final.json`. `kubakub/render_passes.py`, `tests/test_render_passes.py`.
+- Scene caches are rebuilt once after this update (the Blender script changed).
+
+Registration:
+- **kubakub align to source** (2d / post): an edited picture back onto the picture it was made from. Whole-picture
+  edits come back a few pixels moved and one to two percent scaled; the node finds that on the edges both pictures
+  share and undoes it, and refuses when the fit is not certain. `kubakub/align.py`, `tests/test_align.py`.
+- kubakub versions, `generate = whole picture`: the draft is put back onto its starting image in the same way.
+
+Easier to start:
+- **An empty file or folder field is the sample.** scene render, render passes, regions from id renders, regions
+  from cryptomatte, regions from illustrator and the mask folder of regions from matrix / masks run on a built-in
+  sample of the sample facade when nothing is pasted (a 3D file, render passes, ID renders, a cryptomatte EXR, a
+  layered PDF, mask PNGs), and the report says so. Before, an empty field was an error. The field's placeholder says
+  what to paste. `kubakub/samples.py`, `tests/test_samples.py`.
+- The 3D starters have no sample node to unplug: the path field of scene render is empty.
+
 ## 0.1.1 (2026-10-04)
 
 Security, after a review of the published code:

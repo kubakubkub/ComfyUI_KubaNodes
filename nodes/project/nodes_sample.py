@@ -1,8 +1,10 @@
-"""kubakub sample facade: a synthetic facade to try every node without files (logic in sample_facade.py)."""
+"""kubakub sample facade / sample model: a synthetic facade, as a picture and as a 3D file, to try every node without
+files (logic in sample_facade.py, sample_model.py)."""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 
 import torch
@@ -11,6 +13,7 @@ import folder_paths
 from comfy_api.latest import io
 
 from ...kubakub import sample_facade as sf
+from ...kubakub import sample_model as sm
 
 CATEGORY = "kubakub/project"
 
@@ -60,5 +63,50 @@ class KUBA_SampleFacade(io.ComfyNode):
                              torch.from_numpy(r["silhouette"])[None], folder, torch.from_numpy(photo)[None])
 
 
-NODE_CLASS_MAPPINGS = {"KUBA_SampleFacade": KUBA_SampleFacade}
-NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_SampleFacade": "kubakub sample facade"}
+class KUBA_SampleModel(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="KUBA_SampleModel",
+            display_name="kubakub sample model",
+            category="kubakub/project",
+            search_aliases=['demo', 'example', '3d', 'obj', 'test model'],
+            description=("A 3D model of the sample facade to try the 3d nodes without your own file: stones in "
+                         "courses, arches, framed windows, pilasters and cornices, in metres. Connect 'file' to "
+                         "kubakub scene render. Every stone is a part of its own (kubakub scene pieces moves them); "
+                         "objects are named by element and have materials. The file has no camera: add kubakub "
+                         "projector, or scene render frames the model by itself."),
+            inputs=[
+                io.Int.Input("floors", default=3, min=1, max=10, tooltip="Upper floors (above the ground floor)."),
+                io.Int.Input("bays", default=7, min=2, max=20, tooltip="Window columns."),
+                io.Float.Input("width_m", default=24.0, min=4.0, max=200.0, step=0.5, tooltip="Width of the facade in metres."),
+                io.Float.Input("height_m", default=16.0, min=4.0, max=200.0, step=0.5, tooltip="Height of the facade in metres."),
+                io.Float.Input("relief_m", default=0.015, min=0.0, max=0.5, step=0.005, advanced=True,
+                               tooltip="How far single stones stand out of the wall (rustication)."),
+                io.Int.Input("seed", default=0, min=0, max=2 ** 31 - 1, control_after_generate=False,
+                             tooltip="Which stones stand out."),
+            ],
+            outputs=[
+                io.String.Output("file", tooltip="The model as an .obj (in ComfyUI's temp folder) -> kubakub scene render, file."),
+                io.String.Output("report", tooltip="Size, objects, parts and faces."),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, floors, bays, width_m, height_m, relief_m, seed) -> io.NodeOutput:
+        key = hashlib.sha1(f"{floors}|{bays}|{width_m}|{height_m}|{relief_m}|{seed}|{sm.VERSION}".encode()).hexdigest()[:12]
+        path = os.path.join(folder_paths.get_temp_directory(), "kubakub_sample", key, "sample_facade.obj")
+        if os.path.isfile(path) and os.path.isfile(path[:-4] + ".json"):     # written once: scene render keeps its cache
+            with open(path[:-4] + ".json", encoding="utf-8") as f:
+                info = json.load(f)
+        else:
+            info = sm.write_obj(path, int(floors), int(bays), float(width_m), float(height_m), float(relief_m), int(seed))
+            with open(path[:-4] + ".json", "w", encoding="utf-8") as f:
+                json.dump(info, f)
+        report = (f"sample facade {info['width_m']:.1f} x {info['height_m']:.1f} m: {info['objects']} objects, "
+                  f"{info['pieces']} parts, {info['faces']} faces\n{path}")
+        return io.NodeOutput(path, report)
+
+
+NODE_CLASS_MAPPINGS = {"KUBA_SampleFacade": KUBA_SampleFacade, "KUBA_SampleModel": KUBA_SampleModel}
+NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_SampleFacade": "kubakub sample facade", "KUBA_SampleModel": "kubakub sample model"}

@@ -73,8 +73,10 @@ class KUBA_FacadeMaskAtlas(io.ComfyNode):
                                 tooltip="color_regions: name the groups by matrix colour. Every region "
                                         "of that colour gets the name as group_id."),
                 io.String.Input("mask_folder", default="", optional=True,
+                                placeholder="paste your mask folder  (empty = the sample facade's masks)",
                                 tooltip="mask_folder: folder of PNG masks (alpha or white = inside). "
-                                        "'windows_03.png' becomes region 'windows_03' in group 'windows'."),
+                                        "'windows_03.png' becomes region 'windows_03' in group 'windows'. Empty: the "
+                                        "sample facade's masks at the matrix size, so the node runs as it is."),
                 io.Boolean.Input("recursive", default=True,
                                  tooltip="mask_folder: also read PNGs in subfolders (Groups/, Windows/ ...)."),
                 io.String.Input("scope_masks", advanced=True, default="", optional=True,
@@ -153,6 +155,11 @@ class KUBA_FacadeMaskAtlas(io.ComfyNode):
                                  f"{image.shape[1]}x{image.shape[0]}; they must match exactly.")
             scope_np = sc.detach().cpu().numpy() > 0.5
 
+        sample = mode == "mask_folder" and not fc.clean_folder_path(mask_folder or "")
+        if sample:                                     # nothing pasted or linked: the sample facade's masks at this size
+            import folder_paths
+            from ...kubakub import samples
+            mask_folder, recursive = samples.mask_folder(folder_paths.get_temp_directory(), image.shape[1], image.shape[0]), True
         labels, atlas, scope_used = fc.build_atlas(
             image, mode=mode, min_region_area=min_region_area,
             merge_small_regions=merge_small_regions, color_tolerance=color_tolerance,
@@ -163,6 +170,9 @@ class KUBA_FacadeMaskAtlas(io.ComfyNode):
             tag_only_masks=tag_only_masks or "", split_masks=split_masks or "", group_by=group_by,
             scope=scope_np, with_scope=True)
 
+        if sample:
+            atlas["notes"].append("no mask folder given: the sample facade's masks are used. Paste the path of your own "
+                                  "mask folder into 'mask_folder'.")
         n = len(atlas["regions"])
         h, w = labels.shape
         if n == 0:

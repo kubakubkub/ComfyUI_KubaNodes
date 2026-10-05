@@ -11,10 +11,12 @@ import cv2
 import numpy as np
 import torch
 
+import folder_paths
 from comfy_api.latest import io, ui
 
 from ...kubakub import cryptomatte as cm
 from ...kubakub import exr
+from ...kubakub import samples
 from ...kubakub.io_types import RegionsType
 from ...kubakub.types import Regions
 
@@ -58,8 +60,9 @@ class KUBA_RegionsFromCryptomatte(io.ComfyNode):
                          "named alike (window_left_01, _02 ...) share a group; a second cryptomatte layer "
                          "(materials) adds tags for the plan rules. Also gives the render itself."),
             inputs=[
-                io.String.Input("file", default="", placeholder="renders/facade_crypto.exr",
-                                tooltip="The multilayer EXR with the cryptomatte pass (32-bit)."),
+                io.String.Input("file", default="", placeholder="paste the path of your cryptomatte .exr  (empty = a sample)",
+                                tooltip="Your multilayer EXR with the cryptomatte pass (32-bit): paste its path. Empty: a "
+                                        "built-in sample EXR, so the node runs as it is."),
                 io.String.Input("layer", default="object",
                                 tooltip="Which cryptomatte becomes the regions: object, material, asset, or the "
                                         "layer's full name."),
@@ -98,6 +101,9 @@ class KUBA_RegionsFromCryptomatte(io.ComfyNode):
                 matrix=None) -> io.NodeOutput:
         t0 = time.perf_counter()
         path = (file or "").strip().strip('"')
+        sample = not path
+        if sample:
+            path = samples.cryptomatte(folder_paths.get_temp_directory())
         if not os.path.isfile(path):
             raise ValueError(f"kubakub regions from cryptomatte: file not found: '{path}'")
         data = _read_cached(path)
@@ -138,7 +144,8 @@ class KUBA_RegionsFromCryptomatte(io.ComfyNode):
         report = (f"{os.path.basename(path)} ({data['compression']}): layers {', '.join(lays)}; regions from {main}: "
                   f"{len(atlas['regions'])} objects in {len(atlas['groups'])} groups"
                   + (f"; tags from {', '.join(used_tags)}" if used_tags else "")
-                  + "".join(f"; {n}" for n in atlas["notes"]) + f"; {time.perf_counter() - t0:.1f} s")
+                  + "".join(f"; {n}" for n in atlas["notes"]) + f"; {time.perf_counter() - t0:.1f} s"
+                  + ("\n" + samples.note("cryptomatte EXR", "file") if sample else ""))
         log.info("[KUBA cryptomatte] %s", report)
         return io.NodeOutput(regions, regions.masks(), json.dumps(atlas, indent=1), preview,
                              torch.from_numpy(np.ascontiguousarray(render))[None], report,
