@@ -319,6 +319,9 @@ class KUBA_PiecesRender(io.ComfyNode):
                                tooltip="view = audience: eye height above the ground (metres)."),
                 io.Float.Input("lens_mm", default=24.0, min=6.0, max=300.0, step=1.0, optional=True, advanced=True,
                                tooltip="view = audience: focal length (smaller = wider)."),
+                io.Color.Input("clay_color", default=sv.RELIGHT_CLAY_COLOR, optional=True,
+                               tooltip="Colour of the stone (and of the surroundings); 'clay' sets how bright it is. "
+                                       "White = neutral grey clay, as before."),
             ],
             outputs=[io.Image.Output("frames"), io.Mask.Output("alpha"), io.Float.Output("fps"),
                      io.String.Output("report")],
@@ -327,7 +330,7 @@ class KUBA_PiecesRender(io.ComfyNode):
     @classmethod
     def execute(cls, pieces, duration, fps, look, projector_brightness, environment, env_strength, clay, background,
                 resolution_scale, samples, view="projector", audience_distance_m=15.0, audience_offset_m=0.0,
-                eye_height_m=1.7, lens_mm=24.0, matrix=None) -> io.NodeOutput:
+                eye_height_m=1.7, lens_mm=24.0, matrix=None, clay_color=sv.RELIGHT_CLAY_COLOR) -> io.NodeOutput:
         t0 = time.perf_counter()
         scene = pieces["scene"]
         s, pt, nrm, ground, fr = ns.load_scene_cached(scene)
@@ -343,6 +346,7 @@ class KUBA_PiecesRender(io.ComfyNode):
         if projected and matrix is None:
             raise ValueError("look = projected matrix needs a matrix image (or frames).")
         rig = {"lights": [], "environment": environment, "env_strength": env_strength, "clay": clay,
+               "clay_color": clay_color,
                "roughness": 0.8, "background": background, "exposure": 0.0, "view": "AgX",
                "projector": {"on": projected, "brightness": projector_brightness}}
         look_from = None

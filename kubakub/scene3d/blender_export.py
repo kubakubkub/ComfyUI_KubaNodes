@@ -73,36 +73,54 @@ def pick_camera(scene, name):
     return None, "none"
 
 
-def flatten(scene, dg):
-    """Render-visible geometry as new world-space mesh objects (modifiers applied, instances real)."""
+def world_mesh(inst, dg):
+    """One instance of the depsgraph as a new world-space mesh with flat faces, or None (no faces, not a mesh)."""
+    try:
+        me = bpy.data.meshes.new_from_object(inst.object, preserve_all_data_layers=False, depsgraph=dg)
+    except RuntimeError:
+        return None
+    if me is None or len(me.polygons) == 0:
+        return None
+    me.transform(inst.matrix_world)
+    if inst.matrix_world.determinant() < 0:
+        me.flip_normals()
+    # flat shading and no custom normals: FBX / OBJ imports often carry smooth normals that blur the
+    # clay render (window frames vanish) and would make the normal pass disagree with the faces
+    if "custom_normal" in me.attributes:
+        me.attributes.remove(me.attributes["custom_normal"])
+    try:
+        me.shade_flat()
+    except AttributeError:
+        me.polygons.foreach_set("use_smooth", [False] * len(me.polygons))
+    return me
+
+
+def flatten(dg, only=None):
+    """Render-visible geometry as new world-space meshes (modifiers applied, instances real) -> [(object name,
+    collection name, mesh)]. only: a set of original objects to take (the rest of the scene is left alone)."""
     out = []
     for inst in dg.object_instances:
         ob = inst.object
-        if ob.type not in GEOMETRY:
-            continue
         orig = ob.original
+        if ob.type not in GEOMETRY or (only is not None and orig not in only):
+            continue
         if orig.hide_render or (inst.parent is not None and inst.parent.original.hide_render):
             continue
-        try:
-            me = bpy.data.meshes.new_from_object(ob, preserve_all_data_layers=False, depsgraph=dg)
-        except RuntimeError:
-            continue
-        if me is None or len(me.polygons) == 0:
-            continue
-        me.transform(inst.matrix_world)
-        if inst.matrix_world.determinant() < 0:
-            me.flip_normals()
-        # flat shading and no custom normals: FBX / OBJ imports often carry smooth normals that blur the
-        # clay render (window frames vanish) and would make the normal pass disagree with the faces
-        if "custom_normal" in me.attributes:
-            me.attributes.remove(me.attributes["custom_normal"])
-        try:
-            me.shade_flat()
-        except AttributeError:
-            me.polygons.foreach_set("use_smooth", [False] * len(me.polygons))
-        col = orig.users_collection[0].name if orig.users_collection else ""
-        out.append((orig.name, col, me))
+        me = world_mesh(inst, dg)
+        if me is not None:
+            out.append((orig.name, orig.users_collection[0].name if orig.users_collection else "", me))
     return out
+
+
+def paint_face_ids(me, ids):
+    """The 'kuba_face' colour of every face = its id (an array, or one id for all), as the face id pass reads it:
+    4096 steps per channel."""
+    ids = np.broadcast_to(np.asarray(ids, np.int64), (len(me.polygons),))
+    rgba = np.ones((len(ids), 4), np.float32)
+    rgba[:, 0] = (ids % 4096) / 4096.0
+    rgba[:, 1] = (ids // 4096 % 4096) / 4096.0
+    rgba[:, 2] = (ids // 16777216) / 4096.0
+    me.color_attributes.new("kuba_face", "FLOAT_COLOR", "FACE").data.foreach_set("color", rgba.ravel())
 
 
 def frame_share(cob, scene, pts):
@@ -155,31 +173,26 @@ def image_to_numpy(path, channels):
 
 
 
-def projector(sc, cob, P):
-    """
-    The matrix as light: a spot light at the projection camera whose colour per direction is the image, mapped
-    onto the camera's frame (lens shift and sensor fit included via view_frame). Light shaders see their own
-    direction as the Normal texture coordinate (light space, the spot shines along -Z).
-    """
+def frame_bounds(sc, cob, size=None):
+    """The projection camera's picture as tangents in its own space (x0, x1, y0, y1): lens shift and sensor fit
+    included via view_frame. size: the matrix size (w, h); an audience render may have another shape."""
+    r = sc.render
+    keep = (r.resolution_x, r.resolution_y)
+    if size:
+        r.resolution_x, r.resolution_y = int(size[0]), int(size[1])
     frame = cob.data.view_frame(scene=sc)                       # 4 corners in camera space, z < 0
+    r.resolution_x, r.resolution_y = keep
     tx = [v.x / -v.z for v in frame]
     ty = [v.y / -v.z for v in frame]
-    x0, x1, y0, y1 = min(tx), max(tx), min(ty), max(ty)
-    ld = bpy.data.lights.new("kuba_projector", type="SPOT")
-    ld.energy = float(P.get("power", 1000.0))
-    ld.color = (1.0, 1.0, 1.0)
-    ld.shadow_soft_size = 0.0                                  # radius 0: Normal = direction to the shading point
-    ld.spot_blend = 0.0
-    reach = max(math.hypot(x, y) for x in (x0, x1) for y in (y0, y1))
-    ld.spot_size = min(math.pi, 2 * math.atan(reach) * 1.02)
-    if hasattr(ld, "use_soft_falloff"):
-        ld.use_soft_falloff = False                             # plain inverse square, like a real projector
-    ld.use_nodes = True
-    nt = ld.node_tree
-    em = next(n for n in nt.nodes if n.type == "EMISSION")
-    tc = nt.nodes.new("ShaderNodeTexCoord")
+    return min(tx), max(tx), min(ty), max(ty)
+
+
+def frame_uv(nt, vector, bounds):
+    """Nodes that turn a vector in the projection camera's space (a direction, or a point) into the 0..1 picture
+    coordinate it lands on -> the output socket."""
+    x0, x1, y0, y1 = bounds
     sp = nt.nodes.new("ShaderNodeSeparateXYZ")
-    nt.links.new(tc.outputs["Normal"], sp.inputs["Vector"])
+    nt.links.new(vector, sp.inputs["Vector"])
 
     def axis(out_name, lo, hi):                                 # (a / -z - lo) / (hi - lo)
         dv = nt.nodes.new("ShaderNodeMath"); dv.operation = "DIVIDE"
@@ -193,11 +206,34 @@ def projector(sc, cob, P):
     u, v = axis("X", x0, x1), axis("Y", y0, y1)
     cb = nt.nodes.new("ShaderNodeCombineXYZ")
     nt.links.new(u.outputs[0], cb.inputs["X"]); nt.links.new(v.outputs[0], cb.inputs["Y"])
+    return cb.outputs[0]
+
+
+def projector(sc, cob, P):
+    """
+    The matrix as light: a spot light at the projection camera whose colour per direction is the image, mapped
+    onto the camera's frame. Light shaders see their own direction as the Normal texture coordinate (light space,
+    the spot shines along -Z).
+    """
+    x0, x1, y0, y1 = frame_bounds(sc, cob, P.get("size"))
+    ld = bpy.data.lights.new("kuba_projector", type="SPOT")
+    ld.energy = float(P.get("power", 1000.0))
+    ld.color = (1.0, 1.0, 1.0)
+    ld.shadow_soft_size = 0.0                                  # radius 0: Normal = direction to the shading point
+    ld.spot_blend = 0.0
+    reach = max(math.hypot(x, y) for x in (x0, x1) for y in (y0, y1))
+    ld.spot_size = min(math.pi, 2 * math.atan(reach) * 1.02)
+    if hasattr(ld, "use_soft_falloff"):
+        ld.use_soft_falloff = False                             # plain inverse square, like a real projector
+    ld.use_nodes = True
+    nt = ld.node_tree
+    em = next(n for n in nt.nodes if n.type == "EMISSION")
+    tc = nt.nodes.new("ShaderNodeTexCoord")
     tex = nt.nodes.new("ShaderNodeTexImage")
     tex.image = bpy.data.images.load(P["image"], check_existing=True)
     tex.extension = "CLIP"
     tex.interpolation = "Linear"
-    nt.links.new(cb.outputs[0], tex.inputs["Vector"])
+    nt.links.new(frame_uv(nt, tc.outputs["Normal"], (x0, x1, y0, y1)), tex.inputs["Vector"])
     nt.links.new(tex.outputs["Color"], em.inputs["Color"])
     lo = bpy.data.objects.new("kuba_projector", ld)
     sc.collection.objects.link(lo)
@@ -255,11 +291,16 @@ def apply_rig(sc, cob, R, placed_objects):
         return m
 
     old = [m for m in bpy.data.materials if m.name.startswith(("kuba_clay", "kuba_emit"))]
-    clay = principled("kuba_clay", tuple(R.get("albedo", [0.7, 0.7, 0.7])), float(R.get("roughness", 0.8)))
+    albedo, rough = tuple(R.get("albedo", [0.7, 0.7, 0.7])), float(R.get("roughness", 0.8))
+    clay = principled("kuba_clay", albedo, rough)
+    street = principled("kuba_clay_street", albedo, rough)
+    for ob in CONTEXT:                                        # the surroundings: the same clay, never painted or glowing
+        ob.data.materials.clear()
+        ob.data.materials.append(street)
     emits = []
     for k, e in enumerate(R.get("emit", [])):
         faces = np.load(e["faces"]).astype(np.int64)
-        emits.append((principled(f"kuba_emit_{k}", tuple(R.get("albedo", [0.7, 0.7, 0.7])), 0.6,
+        emits.append((principled(f"kuba_emit_{k}", albedo, 0.6,
                                  tuple(e["color"]), float(e["strength"])), faces))
     lit = 0
     for ob, first, count in placed_objects:
@@ -303,22 +344,145 @@ def apply_rig(sc, cob, R, placed_objects):
 
     P = R.get("projector") or {}
     if P.get("image") and P.get("mode") == "paint":
-        # the image as the model's colour, seen from the render camera (window coordinates = the camera frame),
-        # then lit by the lamps / HDRI like the clay: layers painted on the building
+        # the image as the model's colour, where the projection camera sees it (its frame, also when another
+        # camera renders: an audience view), then lit by the lamps / HDRI like the clay: layers painted on the building
         cnt = clay.node_tree
         b = next(n for n in cnt.nodes if n.type == "BSDF_PRINCIPLED")
         tc = cnt.nodes.new("ShaderNodeTexCoord")
+        tc.object = cob                                         # 'Object' = the point in the projection camera's space
         tex = cnt.nodes.new("ShaderNodeTexImage")
         tex.image = bpy.data.images.load(P["image"], check_existing=True)
         tex.extension = "EXTEND"
-        cnt.links.new(tc.outputs["Window"], tex.inputs["Vector"])
+        cnt.links.new(frame_uv(cnt, tc.outputs["Object"], frame_bounds(sc, cob, P.get("size"))), tex.inputs["Vector"])
         mul = cnt.nodes.new("ShaderNodeVectorMath"); mul.operation = "MULTIPLY"      # colour x clay brightness
         cnt.links.new(tex.outputs["Color"], mul.inputs[0])
-        mul.inputs[1].default_value = tuple(R.get("albedo", [0.7, 0.7, 0.7]))
+        mul.inputs[1].default_value = albedo
         cnt.links.new(mul.outputs["Vector"], b.inputs["Base Color"])
     elif P.get("image"):
         projector(sc, cob, P)
     return lit, env
+
+
+TERRAIN = {}         # the real ground of the surroundings: its grid and matrix (cameras stand on it)
+CONTEXT = []         # objects of the surroundings (kubakub scene surroundings): in the picture, not part of the model
+
+
+def _footprints_mesh(doc):
+    """Footprints (rings in metres, height, base) -> one mesh: walls and filled roofs (courtyards stay open)."""
+    import bmesh
+    from mathutils.geometry import tessellate_polygon
+    verts, faces = [], []
+    for b in doc.get("buildings", []):
+        z, base = float(b.get("z", 0.0)), float(b.get("base", 0.0))   # z: the ground under it (real terrain), else 0
+        z0, z1 = (z + base if base > 0 else float(b.get("foot", z))), z + float(b["height"])
+        roof = []                                         # per ring: the indices of its roof vertices
+        for ring in b["rings"]:
+            n, lo = len(ring), len(verts)
+            verts += [(x, y, z0) for x, y in ring] + [(x, y, z1) for x, y in ring]
+            hi = lo + n
+            faces += [(lo + i, lo + (i + 1) % n, hi + (i + 1) % n, hi + i) for i in range(n)]
+            roof.append(range(hi, hi + n))
+        flat = [i for r in roof for i in r]               # tessellate_polygon numbers the points ring after ring
+        faces += [tuple(flat[i] for i in tri) for tri in
+                  tessellate_polygon([[Vector(verts[i]) for i in r] for r in roof])]
+    me = bpy.data.meshes.new("kuba_context")
+    me.from_pydata(verts, [], faces)
+    bm = bmesh.new()                                      # walls and roofs facing out, in one pass over the whole street
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    return me
+
+
+def _terrain_mesh(T, radius):
+    """The real ground (surroundings.ground_grid: x, y sample positions, z heights, row = y) -> a smooth mesh, cut
+    round at the radius."""
+    x, y, z = T["x"], T["y"], T["z"]
+    nx, ny = len(x), len(y)
+    X, Y = np.meshgrid(x, y)
+    verts = np.stack([X.ravel(), Y.ravel(), z.ravel() - 0.02], 1)
+    i = np.arange(ny * nx).reshape(ny, nx)
+    quads = np.stack([i[:-1, :-1], i[:-1, 1:], i[1:, 1:], i[1:, :-1]], -1).reshape(-1, 4)
+    quads = quads[(np.hypot(verts[quads, 0], verts[quads, 1]) <= radius).all(1)]
+    me = bpy.data.meshes.new("kuba_terrain")
+    me.from_pydata(verts.tolist(), [], quads.tolist())
+    me.update()
+    try:
+        me.shade_smooth()
+    except AttributeError:
+        me.polygons.foreach_set("use_smooth", [True] * len(me.polygons))
+    return me
+
+
+def on_ground(loc):
+    """A camera spot given above flat ground (world space) -> the same spot standing on the real ground there."""
+    if not TERRAIN:
+        return loc
+    x, y, z, Mi = TERRAIN["x"], TERRAIN["y"], TERRAIN["z"], TERRAIN["inverse"]
+    q = Mi @ Vector(loc)
+    fx = min(max((q.x - x[0]) / (x[-1] - x[0]) * (len(x) - 1), 0.0), len(x) - 1.001)
+    fy = min(max((q.y - y[0]) / (y[-1] - y[0]) * (len(y) - 1), 0.0), len(y) - 1.001)
+    j, i = int(fx), int(fy)
+    u, v = fx - j, fy - i
+    h = (z[i, j] * (1 - u) * (1 - v) + z[i, j + 1] * u * (1 - v) + z[i + 1, j] * (1 - u) * v + z[i + 1, j + 1] * u * v)
+    return Vector((loc[0], loc[1], loc[2] + float(h)))
+
+
+def _ground_mesh(G, n=64):
+    """A disc on the ground (model space): G = {"centre": [x, y, z], "radius": m}, a little under the model's feet."""
+    cx, cy, cz = (float(v) for v in G["centre"])
+    r = float(G["radius"])
+    me = bpy.data.meshes.new("kuba_ground")
+    me.from_pydata([(cx + r * math.cos(2 * math.pi * k / n), cy + r * math.sin(2 * math.pi * k / n), cz - 0.02)
+                    for k in range(n)], [], [list(range(n))])
+    me.update()
+    return me
+
+
+def load_context(sc, C, face_id):
+    """
+    The surroundings next to the model: C["file"] is a footprints .json (surroundings.py) or a mesh file, C["matrix"]
+    puts it into the model's space, C["ground"] adds a flat ground disc or C["terrain"] the real ground (a grid of
+    heights, surroundings.ground_grid). Every face gets the one id face_id (the first
+    after the model's faces), so the views show it as building but no region, glow or piece ever picks it.
+    """
+    M = Matrix([list(map(float, row)) for row in C["matrix"]])
+    path = C["file"]
+    ext = os.path.splitext(path)[1].lower()
+    meshes = []
+    if ext == ".json":
+        meshes.append(_footprints_mesh(json.load(open(path, encoding="utf-8"))))
+    elif ext in IMPORTERS:
+        before = set(bpy.data.objects)
+        IMPORTERS[ext](path)
+        new = [o for o in bpy.data.objects if o not in before]
+        meshes += [me for _, _, me in flatten(bpy.context.evaluated_depsgraph_get(), only=set(new))]
+        for ob in new:
+            bpy.data.objects.remove(ob, do_unlink=True)
+    else:
+        raise RuntimeError(f"surroundings: unsupported file type {ext} (a .blend cannot be added: export .glb / .fbx / .obj)")
+    if C.get("terrain"):
+        with np.load(C["terrain"]["file"]) as f:
+            TERRAIN.update(x=f["x"], y=f["y"], z=f["z"], inverse=M.inverted())
+        meshes.append(_terrain_mesh(TERRAIN, float(C["terrain"]["radius"])))
+    for me in meshes:
+        me.transform(M)
+        if M.determinant() < 0:
+            me.flip_normals()
+    if C.get("ground") and not C.get("terrain"):
+        meshes.append(_ground_mesh(C["ground"]))
+    faces = 0
+    for k, me in enumerate(meshes):
+        paint_face_ids(me, face_id)
+        me.materials.clear()                                  # relights give it the model's clay (apply_rig)
+        ob = bpy.data.objects.new(f"kuba_ctx_{k}", me)
+        sc.collection.objects.link(ob)
+        CONTEXT.append(ob)
+        faces += len(me.polygons)
+    notes.append(f"surroundings: {faces} faces from {os.path.basename(path)}")
+    return faces
 
 
 PIECES = {}          # moving pieces of the loaded scene: key, per object (mesh, rest positions, piece per vertex)
@@ -380,7 +544,7 @@ def look_camera(sc, cob, L):
         ob = bpy.data.objects.new("kuba_look", cd)
         sc.collection.objects.link(ob)
     ob.data.lens = float(L.get("lens", 24.0))
-    loc, look = Vector(L["location"]), Vector(L["look_at"])
+    loc, look = on_ground(Vector(L["location"])), Vector(L["look_at"])
     ob.matrix_world = Matrix.Translation(loc) @ (look - loc).to_track_quat("-Z", "Y").to_matrix().to_4x4()
     sc.camera = ob
 
@@ -452,6 +616,8 @@ def _relight_frames(sc, cob, R, frames, placed_objects, out, r, per, lits):
         rig.update(F)
         lit, env = apply_rig(sc, cob, rig, placed_objects)
         look_camera(sc, cob, rig.get("look_from"))            # audience view (the projector stays at cob)
+        for o in CONTEXT:                                     # from the projector the picture is the model alone: the
+            o.visible_camera = bool(rig.get("look_from"))     # street still shades it and bounces light, unseen
         if rig.get("pieces"):                                 # moving pieces (scene3d/pieces.py): this frame's matrices
             pieces_frame(rig["pieces"], placed_objects)
         elif PIECES:
@@ -488,7 +654,7 @@ def main(job=None):
         notes.append(f"{os.path.splitext(job['file'])[1]} carries no render size: "
                      + (f"{W}x{H} taken from the camera name" if named else "1920x1080 used, set width / height"))
     dg = bpy.context.evaluated_depsgraph_get()
-    parts = flatten(src, dg)
+    parts = flatten(dg)
     if not parts:
         raise RuntimeError("no renderable geometry in the file")
     unit_scale = float(job.get("unit_scale") or 1.0)
@@ -524,14 +690,7 @@ def main(job=None):
         if col not in cols:
             cols.append(col)
         n = len(me.polygons)
-        idx = np.arange(foff + 1, foff + 1 + n, dtype=np.int64)
-        attr = me.color_attributes.new("kuba_face", "FLOAT_COLOR", "FACE")
-        rgba = np.zeros((n, 4), np.float32)
-        rgba[:, 0] = (idx % 4096) / 4096.0
-        rgba[:, 1] = (idx // 4096 % 4096) / 4096.0
-        rgba[:, 2] = (idx // 16777216) / 4096.0
-        rgba[:, 3] = 1.0
-        attr.data.foreach_set("color", rgba.ravel())
+        paint_face_ids(me, np.arange(foff + 1, foff + 1 + n, dtype=np.int64))
         slot_mats = [(s.material.name if s.material else "") for s in ob.material_slots] or [""]
         mi = np.zeros(n, np.int32)
         me.polygons.foreach_get("material_index", mi)
@@ -557,6 +716,10 @@ def main(job=None):
                         col=np.concatenate(face_col), loop_total=np.concatenate(loop_tot),
                         loop_vert=np.concatenate(verts_idx), vert=V)
     lo, hi = V.min(0), V.max(0)
+    CONTEXT.clear()
+    TERRAIN.clear()
+    ctx_faces = load_context(sc, job["surroundings"], foff + 1) if job.get("surroundings") else 0
+    top_id = foff + (1 if ctx_faces else 0)                 # the highest face id a pixel can show
 
     # camera: an audience view, the projector of kubakub projector, the file's own, or a front camera framing the model
     view = job.get("view")
@@ -577,7 +740,7 @@ def main(job=None):
         cdata = bpy.data.cameras.new("kuba_view")
         cdata.lens, cdata.sensor_width, cdata.sensor_fit = float(view.get("lens", 24.0)), 36.0, "AUTO"
         cdata.clip_start, cdata.clip_end = 0.05, 100000.0
-        loc, look = Vector(view["location"]), Vector(view["look_at"])
+        loc, look = on_ground(Vector(view["location"])), Vector(view["look_at"])
         rot = (look - loc).to_track_quat("-Z", "Y").to_matrix().to_4x4()
         cmat = Matrix.Translation(loc) @ rot
     elif projector:
@@ -716,7 +879,7 @@ def main(job=None):
         fid = image_to_numpy(slot_file("pass_faceid_"), 3).astype(np.float64)
         q = np.rint(fid * 4096.0).astype(np.int64)
         faceid = (q[..., 0] + 4096 * q[..., 1] + 16777216 * q[..., 2]).astype(np.uint32)
-        faceid[faceid > foff] = 0
+        faceid[faceid > top_id] = 0
         np.save(os.path.join(dst, "faceid.npy"), np.ascontiguousarray(faceid))
         np.save(os.path.join(dst, "position.npy"), np.ascontiguousarray(image_to_numpy(slot_file("pass_position_"), 3)))
         np.save(os.path.join(dst, "normal.npy"),
@@ -729,7 +892,7 @@ def main(job=None):
     if views:
         # walkthrough: many audience cameras, one folder each (v_0000 ...), same flattened scene
         for k, v in enumerate(views):
-            loc, look = Vector(v["location"]), Vector(v["look_at"])
+            loc, look = on_ground(Vector(v["location"])), Vector(v["look_at"])
             cob.matrix_world = Matrix.Translation(loc) @ (look - loc).to_track_quat("-Z", "Y").to_matrix().to_4x4()
             cdata.lens = float(v.get("lens", cdata.lens))
             render_to(os.path.join(out, f"v_{k:04d}"))
@@ -749,7 +912,7 @@ def main(job=None):
                    "ortho_scale": c.ortho_scale, "clip_start": c.clip_start, "clip_end": c.clip_end,
                    "matrix_world": [list(row) for row in cmat], "projection": [list(row) for row in proj]},
         "cameras": cam_all, "objects": objs, "materials": mats, "collections": cols,
-        "faces": int(foff), "bbox_min": lo.tolist(), "bbox_max": hi.tolist(),
+        "faces": int(foff), "context_faces": int(ctx_faces), "bbox_min": lo.tolist(), "bbox_max": hi.tolist(),
         "views": len(views), "cycles_device": device, "seconds": {"load_flatten": t_load, "clay": t_clay,
                                              "ids": t_cycles, "total": time.time() - t0},
         "notes": notes,
@@ -764,7 +927,7 @@ LOADED = {}
 
 def _scene_key(job):
     return json.dumps([job.get("file"), job.get("camera"), job.get("frame"), job.get("unit_scale"), job.get("view"),
-                       job.get("projector")])
+                       job.get("projector"), job.get("surroundings")])
 
 
 def serve(idle_s=600.0):

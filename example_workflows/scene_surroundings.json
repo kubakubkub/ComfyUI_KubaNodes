@@ -1,0 +1,745 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 12,
+ "nodes": [
+  {
+   "id": 2,
+   "type": "KUBA_Projector",
+   "pos": [
+    0,
+    260
+   ],
+   "size": [
+    320,
+    240
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "projector",
+     "type": "KUBA_PROJECTOR",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Projector"
+   },
+   "widgets_values": [
+    30.0,
+    0.0,
+    1.5,
+    0.0,
+    "lens shift",
+    "auto",
+    0.0,
+    0.05,
+    ""
+   ],
+   "title": "1 \u00b7 projector: 30 m from the wall, 1.5 m up"
+  },
+  {
+   "id": 3,
+   "type": "KUBA_SceneRender",
+   "pos": [
+    360,
+    0
+   ],
+   "size": [
+    380,
+    560
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "projector",
+     "type": "KUBA_PROJECTOR",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "clay",
+     "type": "IMAGE",
+     "links": [
+      4,
+      12
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "ids_preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "normal",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "coverage",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 4
+    },
+    {
+     "name": "folder",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 5
+    },
+    {
+     "name": "scene_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 7
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [
+      2
+     ],
+     "slot_index": 8
+    },
+    {
+     "name": "depth_gray",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 9
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneRender"
+   },
+   "widgets_values": [
+    "",
+    1920,
+    1080,
+    -1,
+    "elements sections floors shelves facing parts objects materials",
+    "elements",
+    0.05,
+    3.0,
+    0.02,
+    "-0.5 -0.05 0.05 0.5",
+    "",
+    "",
+    "",
+    1.0,
+    0.5
+   ],
+   "title": "2 \u00b7 scene render (Blender): paste your file, or leave empty for the sample"
+  },
+  {
+   "id": 4,
+   "type": "KUBA_SceneSurroundings",
+   "pos": [
+    780,
+    0
+   ],
+   "size": [
+    400,
+    300
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [
+      3
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "plan",
+     "type": "IMAGE",
+     "links": [
+      5
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "view",
+     "type": "IMAGE",
+     "links": [
+      6
+     ],
+     "slot_index": 2
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      8
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneSurroundings"
+   },
+   "widgets_values": [
+    "",
+    250.0,
+    "remove",
+    "above",
+    "",
+    true,
+    -1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "title": "3 \u00b7 surroundings: paste 'latitude, longitude', or leave empty for the sample square"
+  },
+  {
+   "id": 5,
+   "type": "KUBA_ScenePreview",
+   "pos": [
+    1220,
+    0
+   ],
+   "size": [
+    360,
+    440
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 3
+    },
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 4
+    },
+    {
+     "name": "background",
+     "type": "IMAGE",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [
+      7
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "shadow",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "views",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [
+      9
+     ],
+     "slot_index": 4
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_ScenePreview"
+   },
+   "widgets_values": [
+    "0, 45, 1.7\n-30, 40, 1.7\n20, 60, 14",
+    20.0,
+    1280,
+    720,
+    0.2,
+    1.0,
+    1.0,
+    "#f2f2f2",
+    "clay"
+   ],
+   "title": "4 \u00b7 previz: the picture on the building, seen from the square"
+  },
+  {
+   "id": 20,
+   "type": "PreviewImage",
+   "pos": [
+    780,
+    360
+   ],
+   "size": [
+    520,
+    420
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "plan: audience at the bottom, your model orange"
+  },
+  {
+   "id": 21,
+   "type": "PreviewImage",
+   "pos": [
+    780,
+    840
+   ],
+   "size": [
+    520,
+    420
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 6
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "the model in its street"
+  },
+  {
+   "id": 22,
+   "type": "PreviewImage",
+   "pos": [
+    1220,
+    500
+   ],
+   "size": [
+    520,
+    420
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 7
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "previz from three spots"
+  },
+  {
+   "id": 25,
+   "type": "PreviewAny",
+   "pos": [
+    1340,
+    920
+   ],
+   "size": [
+    320,
+    340
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "surroundings report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    -520
+   ],
+   "size": [
+    760,
+    500
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## scene surroundings \u00b7 the street around the building\n\n**You need:** Blender 4.x installed (it runs in the background). No AI models.\n\n**Do:** Queue. The sample building stands on a sample square: neighbours in its row, a row across the square, a block with a courtyard. The plan shows the fit from above, the previz shows the clay model as the picture on the building, seen from three spots on the square.\n\n**Your own place:** open a map, right click on the middle of your facade, copy the coordinates and paste them into `location` of **scene surroundings** (`latitude, longitude`). The buildings around come from OpenStreetMap. Downloads are off until you allow them: write `surroundings_download = on` under `[settings]` in `kubakub.ini` (pack folder) and restart ComfyUI. Then it is one download per place (the node sends the coordinates and the radius to overpass-api.de), and after that it works offline. The node finds which way your facade faces and leaves the building's own footprint out.\n\n**Your own picture on the building:** connect it to `matrix` of **scene preview**. It must be made in the projector's view, the same frame as the `clay` picture of scene render. A festival file with its own projection camera: unplug the **projector** node and set `width` / `height` of scene render to 0, then the file's camera and matrix size are used and a picture made on the festival template fits. Too bright: lower `gain`; `ambient` is the light on everything the projector does not reach.\n\n**If the fit is off:** the advanced inputs `turn_deg`, `along_m`, `out_m` move the street against the model; `facing_deg` sets the facade's compass direction by hand. Watch the plan.\n\n**Your own surroundings:** a city model or a Houdini export in the same space as the building goes into `file`; then nothing is downloaded.\n\n**Light it:** **scene relight** renders the building in its street with lamps and an HDRI, your picture cast on it from the projector (`matrix`; here the clay stands in for it). Lamps: one per line in `lights`, or by hand on the plan the node shows after its first run: drag a lamp, turn the mouse wheel over it for its height, click it for watts, colour and size; the `+` buttons add lamps. `environment` picks the HDRI (night, sunset, city ... or your own file).\n\n**Where the camera stands:** drag the violet ring on the plan (`camera = audience`) and the dot in front of it to turn it; switch `live` on and every drop renders again (lower `resolution_scale` and `samples` for speed). Or set `camera = previz` to take the very viewpoint of **scene preview** (its first spot; `previz_spot` picks another). `camera = projector` is the matrix view of the building alone.\n\n**Too bright:** lower `exposure`, the lamps' watts or `projector_brightness` (1 = as in the previz). A projection only shows where the lamps leave the wall dark.\n\n**Looks:** on **scene preview**, `clay_color` picks the clay's colour and `shader` switches between clay, wireframe and clay + wireframe.\n\n**Then try:** connect the surroundings' `scene` to **scene walkthrough**, or to **pieces render** with `view = audience`; `view = street` on the surroundings node.\n"
+   ],
+   "title": "read me"
+  },
+  {
+   "id": 6,
+   "type": "KUBA_SceneRelight",
+   "pos": [
+    1800,
+    0
+   ],
+   "size": [
+    440,
+    1180
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 9
+    },
+    {
+     "name": "emission_masks",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "projector",
+     "type": "IMAGE",
+     "link": 12,
+     "label": "matrix"
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      10
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "alpha",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "plan",
+     "type": "IMAGE",
+     "links": [
+      11
+     ],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneRelight"
+   },
+   "widgets_values": [
+    "night",
+    0.3,
+    0.0,
+    "// type  x  height  distance  watts  #colour  size / angle   (metres from the facade's middle, the ground, the wall)\narea   -10  8   12   2500  #ffd2a0  5\npoint   9   3    6    400  #ff7a40  0.3\nspot    0  14   30   6000  #a187b7  30\n",
+    0.7,
+    0.8,
+    64,
+    0.0,
+    "black",
+    1.0,
+    "#ffb060",
+    20.0,
+    "",
+    1.0,
+    "light",
+    "AgX",
+    "#f2f2f2",
+    "audience",
+    34.0,
+    -14.0,
+    1.7,
+    24.0,
+    0.0,
+    1,
+    0.0
+   ],
+   "title": "5 \u00b7 relight: your picture on the building, lamps dragged on the plan, seen from the audience"
+  },
+  {
+   "id": 26,
+   "type": "PreviewImage",
+   "pos": [
+    2290,
+    0
+   ],
+   "size": [
+    520,
+    420
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "the lit place"
+  },
+  {
+   "id": 27,
+   "type": "PreviewImage",
+   "pos": [
+    2290,
+    470
+   ],
+   "size": [
+    520,
+    420
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "light plan: lamps by number and height"
+  }
+ ],
+ "links": [
+  [
+   1,
+   2,
+   0,
+   3,
+   0,
+   "KUBA_PROJECTOR"
+  ],
+  [
+   2,
+   3,
+   8,
+   4,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   3,
+   4,
+   0,
+   5,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   4,
+   3,
+   0,
+   5,
+   1,
+   "IMAGE"
+  ],
+  [
+   5,
+   4,
+   1,
+   20,
+   0,
+   "IMAGE"
+  ],
+  [
+   6,
+   4,
+   2,
+   21,
+   0,
+   "IMAGE"
+  ],
+  [
+   7,
+   5,
+   0,
+   22,
+   0,
+   "IMAGE"
+  ],
+  [
+   8,
+   4,
+   3,
+   25,
+   0,
+   "STRING"
+  ],
+  [
+   9,
+   5,
+   4,
+   6,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   10,
+   6,
+   0,
+   26,
+   0,
+   "IMAGE"
+  ],
+  [
+   11,
+   6,
+   3,
+   27,
+   0,
+   "IMAGE"
+  ],
+  [
+   12,
+   3,
+   0,
+   6,
+   2,
+   "IMAGE"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub starter workflow"
+ },
+ "version": 0.4
+}

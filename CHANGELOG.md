@@ -4,6 +4,39 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## dev (branch `dev`, not released)
+
+- **kubakub scene surroundings** (3d / scene): the street around the building as plain boxes, from a place on the
+  map (`latitude, longitude` pasted from a map; OpenStreetMap, downloaded once per place and kept) or from your
+  own model. Goes between scene render and scene preview / scene walkthrough / pieces render / scene relight.
+  The facade's direction is read from the map, the building's own footprint is left out, and a plan and a clay
+  view show the fit. An empty location is a sample square. No new packages (the geometry is built in Blender).
+  `kubakub/scene3d/surroundings.py`, `nodes/scene3d/nodes_surroundings.py`, `tests/test_surroundings.py`, example
+  `scene_surroundings.json`.
+- **Clay colour and shaders in the previz.** scene preview and scene walkthrough: `clay_color` (a colour picker,
+  almost white by default, a little lighter than the grey before) and `shader` = clay / wireframe / clay +
+  wireframe. scene relight and pieces render: `clay_color` (white = as before). The surroundings take the same clay.
+- **scene relight from the audience, with a light plan.** `camera = audience` renders the lit building in its
+  surroundings from a spot in front of it (distance, offset, eye height, lens); the new `plan` output shows every
+  lamp from above with its number and height, next to the model, the projector, the audience and the street.
+- **Lamps placed by hand on scene relight.** The node carries a plan of the place from above: drag lamps, wheel
+  for their height, fields for watts / colour / size, buttons to add and remove. It edits the `lights` text. The
+  node shows this plan where it used to show its render (connect a preview to `image`). `web/kubakub_light_plan.js`.
+- **Real ground under the street.** scene surroundings, `terrain = real heights`: the terrain of the place (open
+  terrain tiles, one more download per place), the buildings standing on it, level around the facade (`level_m`),
+  the previz cameras on the ground. `tests/test_surroundings.py`.
+- **One viewpoint for previz and relight.** scene preview has a `scene` output that carries its spots; scene relight
+  with `camera = previz` renders from exactly there, at the previz size. `camera = audience` now means the same as a
+  previz spot (x, distance, eye, looking at the frame's middle), and its violet ring on the plan can be dragged. The
+  relight report says when the picture is burnt out.
+- **Turn the camera, and live.** The plan shows the audience camera's angle of view; a dot in front of it turns it
+  (`audience_turn_deg`). The `live` pill queues the workflow after every finished change on the plan.
+- This is the first node that can use the network: one request per new place, to overpass-api.de, with the
+  coordinates and the radius. It is off until you allow it: `surroundings_download = on` in kubakub.ini. The sample
+  square, places already downloaded and your own surroundings files need no network.
+- Fix: a model that is one flat wall (a single quad) no longer stops scene measure / preview with an index error.
+- Scene caches are rebuilt once after this update (the Blender script changed).
+
 ## 0.1.2 (2026-10-05)
 
 For 3D artists:

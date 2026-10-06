@@ -30,7 +30,7 @@ from comfy_api.latest import io, ui
 from ...kubakub import save_paths as sp
 from ...kubakub import viewer as vw
 from ...kubakub.io_types import ProjectorType, RegionsType, SceneType, ViewerType
-from ...kubakub.scene3d import autocam, bridge, scene_ids, scene_view as sv
+from ...kubakub.scene3d import autocam, bridge, scene_ids, scene_view as sv, surroundings as sr
 from ...kubakub.types import Regions
 from ...kubakub import imio
 from ...kubakub import samples
@@ -66,11 +66,18 @@ def cache_root():
     empties its temp folder at every start): setting cache_folder in kubakub.ini (a folder; 'temp' = the old place in
     ComfyUI's temp), else kubakub_cache in ComfyUI's user directory. Kept under cache_gb (default 20), least used first.
     """
+    return os.path.join(cache_base(), "kuba_scene3d")
+
+
+def cache_base(lasting=False):
+    """The folder the caches live in (setting cache_folder). lasting: for what must survive a restart (downloaded map
+    data): cache_folder = temp then still means ComfyUI's user directory."""
     env = kst.get("cache_folder", "").strip()
     if env.lower() in ("temp", "off", "0"):
-        return os.path.join(folder_paths.get_temp_directory(), "kuba_scene3d")
-    base = bridge.clean_path(env) if env else os.path.join(folder_paths.get_user_directory(), "kubakub_cache")
-    return os.path.join(base, "kuba_scene3d")
+        env = ""
+        if not lasting:
+            return folder_paths.get_temp_directory()
+    return bridge.clean_path(env) if env else os.path.join(folder_paths.get_user_directory(), "kubakub_cache")
 
 
 def cache_cap_bytes():
@@ -594,18 +601,26 @@ class KUBA_ScenePreview(io.ComfyNode):
                                        "real projector; 0 = flat."),
                 io.Image.Input("background", optional=True,
                                tooltip="Behind the building (still or frames, looping), scaled to cover the view."),
+                io.Color.Input("clay_color", default=sv.CLAY_COLOR, optional=True,
+                               tooltip="Colour of the clay: the building and its surroundings where no picture lands. "
+                                       "Almost white by default; pick the stone's colour for a closer look."),
+                io.Combo.Input("shader", options=list(sv.SHADERS), default="clay", optional=True,
+                               tooltip="How the model is drawn where no picture lands: clay, wireframe (its edges as "
+                                       "lines in the clay colour, not dimmed by ambient) or clay with the edges on it."),
             ],
             outputs=[
                 io.Image.Output("preview", tooltip="Per spot all frames (spot-major batch)."),
                 io.Mask.Output("shadow", tooltip="Per spot: building the audience sees but the projector misses."),
                 io.Image.Output("views", tooltip="Per spot the clay view (no projection)."),
                 io.String.Output("report", tooltip="Per spot: how much of the view is building and how much of it the projector misses."),
+                SceneType.Output("scene", tooltip="The scene with these viewpoints (spots, lens, size) -> kubakub scene "
+                                                  "relight with camera = previz: the lit picture from the same spot."),
             ],
         )
 
     @classmethod
     def execute(cls, scene, matrix, spots, lens_mm, width, height, ambient, gain, physical,
-                background=None) -> io.NodeOutput:
+                background=None, clay_color=sv.CLAY_COLOR, shader="clay") -> io.NodeOutput:
         t0 = time.perf_counter()
         s, pt, nrm, ground = _load_scene(scene)
         info = s["info"]
@@ -621,33 +636,35 @@ class KUBA_ScenePreview(io.ComfyNode):
         if background is not None:
             bgs = [sv.fit_background(b, width, height) for b in background[..., :3].cpu().float().numpy()]
         root = cache_root()
-        previews, shadows, views, lines = [], [], [], []
+        previews, shadows, views, lines, viewpoints = [], [], [], [], []
         for i, (x, d, eye) in enumerate(sv.parse_spots(spots)):
             loc = sv.spot_position(fr, x, d, eye)
             view = {"location": [round(float(v), 4) for v in loc], "look_at": [round(float(v), 4) for v in fr["centre"]],
                     "lens": float(lens_mm), "name": f"spot_{i + 1}"}
-            vf, cached, _ = bridge.export(scene["file"], root, camera=scene.get("camera", ""), width=width,
-                                          height=height, frame=scene.get("frame", -1), blender=scene.get("blender", ""),
-                                          unit_scale=scene.get("unit_scale", 1.0), view=view)
+            viewpoints.append(dict(view, size=[int(width), int(height)]))
+            vf, cached, _ = bridge.export(scene["file"], root, width=width, height=height, view=view,
+                                          blender=scene.get("blender", ""), **bridge.scene_opts(scene))
             vs = scene_ids.load(vf)
             rp = sv.reprojection(vs, s)
-            clay = imio.imread(os.path.join(vf, "clay.png"))[..., ::-1].astype(np.float32) / 255
+            clay, full = sv.look_picture(vs, imio.imread(os.path.join(vf, "clay.png"))[..., ::-1].astype(np.float32) / 255,
+                                         shader, clay_color)
             for fi, f in enumerate(frames):
-                previews.append(sv.render_preview(f, rp, clay, ambient=ambient, gain=gain, physical=physical,
+                previews.append(sv.render_preview(f, rp, clay, ambient=1.0 if full else ambient, gain=gain, physical=physical,
                                                   background=None if bgs is None else bgs[fi % len(bgs)]))
             shadows.append(rp["shadow"].astype(np.float32))
             views.append(clay)
-            model = max(int(rp["model"].sum()), 1)
-            lines.append(f"spot {i + 1} (x {x:+g}, {d:g} m, eye {eye:g}): building {rp['model'].mean() * 100:.0f} % "
+            model = max(int(rp["building"].sum()), 1)
+            lines.append(f"spot {i + 1} (x {x:+g}, {d:g} m, eye {eye:g}): building {rp['building'].mean() * 100:.0f} % "
                          f"of the view, lit {rp['lit'].sum() / model * 100:.0f} %, projection shadow "
                          f"{rp['shadow'].sum() / model * 100:.1f} %{' (cached)' if cached else ''}")
         _after_render()
         report = "\n".join([f"{len(lines)} spot(s) x {len(frames)} frame(s), {time.perf_counter() - t0:.1f} s",
-                            *lines, *([resized] if resized else [])])
+                            *lines, *([resized] if resized else []),
+                            *(["with surroundings"] if scene.get("surroundings") else [])])
         log.info("[KUBA scene3d] preview: %s", report.replace("\n", "\n    "))
         out = torch.from_numpy(np.stack(previews))
         return io.NodeOutput(out, torch.from_numpy(np.stack(shadows)), torch.from_numpy(np.stack(views)), report,
-                             ui=ui.PreviewImage(out, cls=cls))
+                             dict(scene, viewpoints=viewpoints), ui=ui.PreviewImage(out, cls=cls))
 
 
 def _frames_at(matrix, W, H):
@@ -700,6 +717,12 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
                 io.Image.Input("background", optional=True,
                                tooltip="Behind the building: a still or frames (looping), scaled to cover the view. "
                                        "Default black."),
+                io.Color.Input("clay_color", default=sv.CLAY_COLOR, optional=True,
+                               tooltip="Colour of the clay: the building and its surroundings where no picture lands. "
+                                       "Almost white by default; pick the stone's colour for a closer look."),
+                io.Combo.Input("shader", options=list(sv.SHADERS), default="clay", optional=True,
+                               tooltip="How the model is drawn where no picture lands: clay, wireframe (its edges as "
+                                       "lines in the clay colour, not dimmed by ambient) or clay with the edges on it."),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="The walk as video frames (-> Create Video / Save Video)."),
@@ -709,7 +732,7 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
 
     @classmethod
     def execute(cls, scene, matrix, path, seconds, fps, lens_mm, width, height, ambient, gain, physical,
-                background=None) -> io.NodeOutput:
+                background=None, clay_color=sv.CLAY_COLOR, shader="clay") -> io.NodeOutput:
         import comfy.utils
         t0 = time.perf_counter()
         s, pt, nrm, ground = _load_scene(scene)
@@ -723,8 +746,7 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
             bgs = [sv.fit_background(b, width, height) for b in background[..., :3].cpu().float().numpy()]
         root = cache_root()
         walk = os.path.join(root, "walk")                   # one folder per camera: a changed path renders only new views
-        opts = dict(camera=scene.get("camera", ""), width=width, height=height, frame=scene.get("frame", -1),
-                    unit_scale=scene.get("unit_scale", 1.0))
+        opts = dict(bridge.scene_opts(scene), width=width, height=height)
         pbar = comfy.utils.ProgressBar(n)
         out, shadow_share, chunk, rendered = [], [], 25, 0
         for c0 in range(0, n, chunk):
@@ -752,11 +774,12 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
                       "position": np.load(os.path.join(d, "position.npy")),
                       "normal": np.load(os.path.join(d, "normal.npy")).astype(np.float32)}
                 rp = sv.reprojection(vs, s)
-                clay = imio.imread(os.path.join(d, "clay.png"))[..., ::-1].astype(np.float32) / 255
+                clay, full = sv.look_picture(vs, imio.imread(os.path.join(d, "clay.png"))[..., ::-1].astype(np.float32) / 255,
+                                             shader, clay_color)
                 i = c0 + k
-                out.append(sv.render_preview(frames[i % len(frames)], rp, clay, ambient=ambient, gain=gain,
+                out.append(sv.render_preview(frames[i % len(frames)], rp, clay, ambient=1.0 if full else ambient, gain=gain,
                                              physical=physical, background=None if bgs is None else bgs[i % len(bgs)]))
-                shadow_share.append(rp["shadow"].sum() / max(int(rp["model"].sum()), 1))
+                shadow_share.append(rp["shadow"].sum() / max(int(rp["building"].sum()), 1))
                 pbar.update(1)
         if rendered:
             _after_render()
@@ -823,9 +846,11 @@ class KUBA_SceneRelight(io.ComfyNode):
                 io.Float.Input("emission_strength", advanced=True, default=20.0, min=0.0, max=10000.0, step=1.0, optional=True,
                                tooltip="Emission strength of the glowing faces."),
                 io.String.Input("hdri_file", advanced=True, default="", optional=True, tooltip="An .hdr / .exr for environment = file."),
-                io.Image.Input("projector", optional=True,
-                               tooltip="The matrix as light: this image is cast from the projection camera like a real "
-                                       "projector (falloff, surface angle, shadows seen from other lamps' light)."),
+                io.Image.Input("projector", display_name="matrix", optional=True,
+                               tooltip="Your projection picture (the matrix, as on scene preview): it is cast from the "
+                                       "projection camera like a real projector, with falloff, surface angle and the "
+                                       "shadows other lamps would not show. With camera = audience you see the "
+                                       "building with your picture on it, in its street, under your lamps."),
                 io.Float.Input("projector_brightness", advanced=True, default=1.0, min=0.0, max=100.0, step=0.05, optional=True,
                                tooltip="1 = the image lands at about its own brightness on a frontal wall."),
                 io.Combo.Input("projector_mode", options=["light", "paint"], default="light", optional=True,
@@ -834,11 +859,43 @@ class KUBA_SceneRelight(io.ComfyNode):
                 io.Combo.Input("view", options=["AgX", "Standard"], default="AgX", optional=True,
                                tooltip="Tone mapping: AgX = soft highlights (lamps), Standard = the projected image's "
                                        "colours as they are."),
+                io.Color.Input("clay_color", default=sv.RELIGHT_CLAY_COLOR, optional=True,
+                               tooltip="Colour of the clay material (the building and its surroundings); 'clay' sets "
+                                       "how bright it is. White = neutral grey clay, as before."),
+                io.Combo.Input("camera", options=["projector", "audience", "previz"], default="projector", optional=True,
+                               tooltip="projector = the matrix view, the building alone (content, a base for the "
+                                       "director). audience = from a spot in front of the building, with its "
+                                       "surroundings (kubakub scene surroundings): the lit place as a visitor sees "
+                                       "it; drag the ring on the plan to move it. previz = the very viewpoint of "
+                                       "kubakub scene preview (connect its scene output): same spot, lens and size."),
+                io.Float.Input("audience_distance_m", default=30.0, min=0.5, max=2000.0, step=0.5, optional=True,
+                               tooltip="camera = audience: metres in front of the wall (the 'distance' of a scene "
+                                       "preview spot)."),
+                io.Float.Input("audience_offset_m", default=0.0, min=-1000.0, max=1000.0, step=0.5, optional=True,
+                               tooltip="camera = audience: metres left (-) or right (+) along the wall (the 'x' of a "
+                                       "scene preview spot)."),
+                io.Float.Input("eye_height_m", default=1.7, min=0.0, max=500.0, step=0.1, optional=True, advanced=True,
+                               tooltip="camera = audience: eye height above the ground; 20-60 for a view from above."),
+                io.Float.Input("lens_mm", default=24.0, min=6.0, max=300.0, step=1.0, optional=True, advanced=True,
+                               tooltip="camera = audience: focal length (smaller = wider)."),
+                io.Float.Input("plan_width_m", default=0.0, min=0.0, max=3000.0, step=10.0, optional=True, advanced=True,
+                               tooltip="How many metres the light plan shows across. 0 = fitted to the lamps, the "
+                                       "projector and the audience; larger to see more of the surroundings."),
+                io.Int.Input("previz_spot", default=1, min=1, max=64, optional=True, advanced=True,
+                             tooltip="camera = previz: which spot of scene preview (its line in 'spots')."),
+                io.Float.Input("audience_turn_deg", default=0.0, min=-180.0, max=180.0, step=1.0, optional=True,
+                               tooltip="camera = audience: turns the camera away from the middle of the facade, in "
+                                       "degrees (+ = to the right). On the plan: drag the small dot in front of the "
+                                       "ring."),
             ],
             outputs=[
-                io.Image.Output("image", tooltip="The relit clay from the projection camera."),
-                io.Mask.Output("alpha", tooltip="1 where the building is."),
+                io.Image.Output("image", tooltip="The relit clay from the projection camera, or from the audience."),
+                io.Mask.Output("alpha", tooltip="1 where the building is (camera = audience: and its surroundings)."),
                 io.String.Output("report", tooltip="Size, lights, environment, samples, glowing faces and render time."),
+                io.Image.Output("plan", tooltip="Top view of the light plan, the audience at the bottom: every lamp "
+                                                "in its colour with its number (the line in 'lights') and height, "
+                                                "the model (orange), the projector (dot), the audience camera "
+                                                "(ring) and the surroundings (grey)."),
             ],
         )
 
@@ -850,8 +907,10 @@ class KUBA_SceneRelight(io.ComfyNode):
     @classmethod
     def execute(cls, scene, environment, env_strength, env_rotation_deg, lights, clay, roughness, samples, exposure,
                 background, resolution_scale, emission_masks=None, emission_colors="#ffb060", emission_strength=20.0,
-                hdri_file="", projector=None, projector_brightness=1.0, projector_mode="light", view="AgX") -> io.NodeOutput:
-        rig = {"view": view, "projector": {"on": projector is not None, "brightness": projector_brightness,
+                hdri_file="", projector=None, projector_brightness=1.0, projector_mode="light", view="AgX",
+                clay_color=sv.RELIGHT_CLAY_COLOR, camera="projector", audience_distance_m=30.0, audience_offset_m=0.0,
+                eye_height_m=1.7, lens_mm=24.0, plan_width_m=0.0, previz_spot=1, audience_turn_deg=0.0) -> io.NodeOutput:
+        rig = {"view": view, "clay_color": clay_color, "projector": {"on": projector is not None, "brightness": projector_brightness,
                                            "mode": projector_mode},"environment": environment, "env_strength": env_strength, "env_rotation": env_rotation_deg,
                "exposure": exposure, "clay": clay, "roughness": roughness, "samples": samples, "background": background,
                "resolution_scale": resolution_scale, "hdri_file": hdri_file, "lights": sv.parse_lights(lights)}
@@ -862,9 +921,80 @@ class KUBA_SceneRelight(io.ComfyNode):
             for k, m in enumerate(masks.cpu().float().numpy()):
                 emission.append((m, cols[min(k, len(cols) - 1)], float(emission_strength), f"emission mask {k + 1}"))
         pimg = None if projector is None else projector[0, ..., :3].cpu().float().numpy()
-        rgb, alpha, report = relight_scene(scene, rig, emission=emission, projector=pimg)
+        s, pt, nrm, ground, fr = load_scene_cached(scene)
+        cam = np.asarray(s["info"]["camera"]["matrix_world"], np.float64)[:3, 3]
+        look_from = None
+        if camera == "audience":                              # as a scene preview spot: x, distance, eye; looks at the frame's middle
+            loc = sv.spot_position(fr, audience_offset_m, audience_distance_m, eye_height_m)
+            look = np.asarray(fr["centre"], float) - loc
+            a = -np.radians(float(audience_turn_deg))         # + = to the right = clockwise seen from above
+            look[:2] = [np.cos(a) * look[0] - np.sin(a) * look[1], np.sin(a) * look[0] + np.cos(a) * look[1]]
+            look_from = {"location": [round(float(v), 4) for v in loc], "lens": float(lens_mm),
+                         "look_at": [round(float(v), 4) for v in loc + look]}
+        elif camera == "previz":
+            spots = scene.get("viewpoints") or []
+            if not spots:
+                raise ValueError("camera = previz needs the viewpoints of kubakub scene preview: connect its 'scene' "
+                                 "output to this node's scene")
+            look_from = dict(spots[min(int(previz_spot), len(spots)) - 1])
+        rgb, alpha, report = relight_scene(scene, rig, emission=emission, projector=pimg, look_from=look_from)
+        top = rgb.max(-1)
+        white = (top > 0.98) & (alpha > 0.5)
+        burnt = float(white.mean())                           # share of the whole picture that is clipped
+        if burnt > 0.03:
+            report += (f"\nNOTE: {burnt * 100:.0f} % of the picture is burnt out to white. Lower exposure (try -1.5), the "
+                       "lamps' watts, env_strength or projector_brightness; a projection only shows where the lamps "
+                       "leave the wall dark.")
+        sur = scene.get("surroundings") or {}
+        buildings = sr.read(sur.get("file", "")) if sur else []
+        if look_from and sur:                                 # a camera inside a neighbour sees a black room
+            if sr.stands_inside(buildings, sur["matrix"], look_from["location"]):
+                report += ("\nWARNING: the audience camera stands inside a neighbouring building (the ring on the "
+                           "plan): change audience_distance_m / audience_offset_m.")
+        elif look_from:
+            report += "\nno surroundings on this scene: connect the scene of kubakub scene surroundings to see the street"
         out = _img(rgb)
-        return io.NodeOutput(out, torch.from_numpy(alpha)[None], report, ui=ui.PreviewImage(out, cls=cls))
+        plan, meta = light_plan(s, pt, nrm, ground, fr, rig["lights"], cam, buildings, sur.get("matrix") or np.eye(4),
+                                look_from, across_m=float(plan_width_m))
+        meta["camera"] = camera
+        # the node shows its light plan (web/kubakub_light_plan.js) where it used to show the render: connect a
+        # preview to 'image'
+        return io.NodeOutput(out, torch.from_numpy(alpha)[None], report, _img(plan), ui={"kubakub_light_plan": [meta]})
+
+
+def light_plan(s, pt, nrm, ground, fr, lights, projector, buildings, matrix, look_from=None, size=768, across_m=0.0):
+    """
+    The top view of a light rig: lamps (facade metres -> world), model, projector, audience camera and the
+    buildings around (surroundings.read, with their placement matrix).
+    -> (picture with the lamps, meta for the plan on the node: the same picture without lamps as a temp file, and
+    where a lamp at x / distance lands on it: origin + x * ax + distance * ad, in pixels).
+    """
+    V = s["mesh"]["vert"]
+    anchor, nh, ex = sr.facade_anchor(V, pt, nrm, ground)
+    world = sv.lights_to_world(lights, fr)
+    viewer = np.asarray(look_from["location"], float) if look_from else None
+    reach = [np.linalg.norm((np.asarray(q, float) - anchor)[:2]) for q in
+             [projector] + [L["location"] for L in world if L["type"] != "sun"] + ([viewer] if viewer is not None else [])]
+    width = float((V @ ex).max() - (V @ ex).min())
+    # fitted in steps of 20 m, so the plan does not change its scale with every small move of a lamp or the camera
+    radius = across_m / 2 if across_m > 0 else np.ceil(max(40.0, 1.2 * width, 1.25 * max(reach)) / 20.0) * 20.0
+    bare = sr.plan(buildings, matrix, anchor, nh, ex, V[::max(1, len(V) // 4000)], radius, size=size,
+                   projector=projector)                       # no audience ring: the plan on the node draws and drags it
+    png = (np.clip(bare[..., ::-1], 0, 1) * 255 + 0.5).astype(np.uint8)
+    temp = folder_paths.get_temp_directory()
+    name = "kubakub_lightplan_" + hashlib.sha1(png.tobytes()).hexdigest()[:16] + ".png"
+    if not os.path.isfile(os.path.join(temp, name)):
+        os.makedirs(temp, exist_ok=True)
+        imio.imwrite(os.path.join(temp, name), png)
+    k = size / (2.0 * radius)
+    axis = lambda v: [round(float(np.asarray(v, float) @ ex) * k, 4), round(float(np.asarray(v, float) @ nh) * k, 4)]  # noqa: E731
+    origin = axis(np.asarray(fr["centre"], float) - anchor)
+    meta = {"filename": name, "subfolder": "", "type": "temp",
+            "origin": [round(size / 2 + origin[0], 2), round(size / 2 + origin[1], 2)], "ax": axis(fr["ex"]),
+            "ad": axis(fr["normal"])}
+    if viewer is not None:                                  # where the camera stands, for the plan on the node
+        meta["viewer"] = [round(size / 2 + float((viewer - anchor) @ ex) * k, 2), round(size / 2 + float((viewer - anchor) @ nh) * k, 2)]
+    return sr.plan_lights(bare, world, anchor, nh, ex, radius, viewer=viewer), meta
 
 
 _SCENE_CACHE = {}
@@ -914,7 +1044,7 @@ def _rig_job(s, fr, rig, emission, projector, root, notes):
             emit.append({"faces": fp, "color": [float(c) for c in col], "strength": float(strength), "count": int(len(faces))})
     part = {"exposure": float(rig.get("exposure", 0.0)), "background": rig.get("background", "black"),
             "env": env, "env_strength": float(rig.get("env_strength", 0.3)), "env_rotation": float(rig.get("env_rotation", 0.0)),
-            "albedo": [float(rig.get("clay", 0.7))] * 3, "roughness": float(rig.get("roughness", 0.8)), "lights": world, "emit": emit,
+            "albedo": sv.clay_albedo(rig.get("clay", 0.7), rig.get("clay_color")), "roughness": float(rig.get("roughness", 0.8)), "lights": world, "emit": emit,
             "view": rig.get("view", "AgX")}
     pj = rig.get("projector") or {}
     if projector is not None and pj.get("on"):
@@ -925,11 +1055,11 @@ def _rig_job(s, fr, rig, emission, projector, root, notes):
         if not os.path.isfile(fp):
             imio.imwrite(fp, cv2.cvtColor(a, cv2.COLOR_RGB2BGR))
         if pj.get("mode") == "paint":
-            part["projector"] = {"image": fp, "mode": "paint"}
+            part["projector"] = {"image": fp, "mode": "paint", "size": [int(s["info"]["width"]), int(s["info"]["height"])]}
             notes.append(f"painted: {a.shape[1]}x{a.shape[0]} image as the model's colour from the camera")
         else:
             power = sv.projector_power(pj.get("brightness", 1.0), fr["projector_distance_m"], rig.get("clay", 0.7))
-            part["projector"] = {"image": fp, "power": power}
+            part["projector"] = {"image": fp, "power": power, "size": [int(s["info"]["width"]), int(s["info"]["height"])]}
             notes.append(f"projector: {a.shape[1]}x{a.shape[0]} image from the camera, {power / 1000:.0f} kW spot")
     return part, world, environment, env
 
@@ -971,7 +1101,8 @@ def relight_frame_key(scene, rw, rh, samples, part):
     """
     return bridge.cache_key(bridge.clean_path(scene["file"]), scene.get("camera", ""), int(rw), int(rh),
                             int(scene.get("frame", -1)), float(scene.get("unit_scale", 1.0)),
-                            relight={"samples": int(samples), "denoise": True, **part}, projector=scene.get("projector"))
+                            relight={"samples": int(samples), "denoise": True, **part}, projector=scene.get("projector"),
+                            surroundings=scene.get("surroundings"))
 
 
 def relight_frames(scene, parts, rw, rh, samples, timeout=900):
@@ -990,10 +1121,9 @@ def relight_frames(scene, parts, rw, rh, samples, timeout=900):
     if missing:
         job = {"samples": int(samples), "denoise": True,
                "frames": [dict(parts[j], name=f"relit_{n:04d}.png") for n, j in enumerate(missing)]}
-        folder, _, _ = bridge.export(scene["file"], root, camera=scene.get("camera", ""), width=rw, height=rh,
-                                     frame=scene.get("frame", -1), blender=scene.get("blender", ""),
-                                     unit_scale=scene.get("unit_scale", 1.0), relight=job, timeout=timeout,
-                                     transient=True, projector=scene.get("projector"))
+        folder, _, _ = bridge.export(scene["file"], root, width=rw, height=rh, blender=scene.get("blender", ""),
+                                     relight=job, timeout=timeout, transient=True, projector=scene.get("projector"),
+                                     **bridge.scene_opts(scene))
         try:
             with open(os.path.join(folder, "relight.json"), encoding="utf-8") as f:
                 rj = json.load(f)
@@ -1010,13 +1140,15 @@ def relight_frames(scene, parts, rw, rh, samples, timeout=900):
     return got, missing, rj
 
 
-def relight_scene(scene, rig, emission=(), size=None, scale=None, samples=None, projector=None):
+def relight_scene(scene, rig, emission=(), size=None, scale=None, samples=None, projector=None, look_from=None):
     """
     Cycles relight of a KUBA_SCENE. rig: a light rig (scene_view.rig_from_doc form; 'lights' as parse_lights()
     dicts in facade metres). emission: [(mask HxW float, (r, g, b), strength, label)], faces covered glow.
     size: (W, H) of the output (default the scene's matrix size); scale / samples override the rig's
     resolution_scale / samples (previews). projector: an RGB image (float 0..1, display values) cast from the
-    projection camera when rig["projector"]["on"] (the matrix as light). -> (rgb HxWx3, alpha HxW, report text).
+    projection camera when rig["projector"]["on"] (the matrix as light). look_from: an audience camera
+    ({"location", "look_at", "lens"}, pieces.audience_view) instead of the projection camera; the surroundings of
+    the scene are in the picture then. -> (rgb HxWx3, alpha HxW, report text).
     The render is kept in the frame store, so a sequence frame with the same rig and size reuses it.
     """
     t0 = time.perf_counter()
@@ -1024,8 +1156,16 @@ def relight_scene(scene, rig, emission=(), size=None, scale=None, samples=None, 
     info = s["info"]
     notes = []
     part, world, environment, env = _rig_job(s, fr, rig, emission, projector, cache_root(), notes)
+    if look_from:
+        part["look_from"] = look_from
+        notes.append("seen from the audience" + (", with surroundings" if scene.get("surroundings") else ""))
     samples = int(samples or rig.get("samples", 64))
-    W, H, rw, rh = _render_size(info, size, float(scale if scale is not None else rig.get("resolution_scale", 1.0)))
+    k = float(scale if scale is not None else rig.get("resolution_scale", 1.0))
+    if look_from and look_from.get("size") and not size:      # a viewpoint with its own picture size (scene preview)
+        W, H = (int(v) for v in look_from["size"])
+        rw, rh = max(16, round(W * k)), max(16, round(H * k))
+    else:
+        W, H, rw, rh = _render_size(info, size, k)
     got, missing, _ = relight_frames(scene, [part], rw, rh, samples)
     fp, meta = got[0]
     cached = not missing
@@ -1094,7 +1234,7 @@ def prestart_relight(scene):
             info = json.load(f)
         job = bridge.job_dict(scene["file"], "", scene.get("camera", ""), info["width"], info["height"],
                               scene.get("frame", -1), scene.get("unit_scale", 1.0), relight={"warm": True},
-                              projector=scene.get("projector"))
+                              projector=scene.get("projector"), surroundings=scene.get("surroundings"))
         return bridge.worker_prestart(job, os.path.join(cache_root(), "warm"), blender=scene.get("blender", ""))
     except Exception as e:  # noqa: BLE001
         log.info("[KUBA scene3d] Blender pre-start skipped: %s", e)

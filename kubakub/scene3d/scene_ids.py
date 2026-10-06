@@ -179,7 +179,7 @@ def main_plane(scene, bin_m=0.01):
     s = p[members] @ nrm
     lo, hi = float(s.min()), float(s.max())
     hist, edges = np.histogram(s, bins=max(1, int(np.ceil((hi - lo) / bin_m))), range=(lo, hi + 1e-9))
-    k = int(np.argmax(np.convolve(hist, [1, 2, 1], mode="same")))
+    k = int(np.argmax(np.convolve(hist, [1, 2, 1], mode="same") if len(hist) >= 3 else hist))   # one flat wall: 1 bin
     peak = (edges[k] + edges[k + 1]) / 2
     near = np.abs(s - peak) <= 1.5 * bin_m
     if near.any():

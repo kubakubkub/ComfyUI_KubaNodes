@@ -192,15 +192,19 @@ def parse_spots(text):
 def reprojection(view_scene, proj_scene, tol_frac=0.01, tol_min_m=0.03):
     """
     For every pixel of an audience view: where it lands in the projector image (map_x, map_y for
-    cv2.remap), whether the projector reaches it (lit), and the projector brightness there.
+    cv2.remap), whether the projector reaches it (lit), and the projector brightness there. Surroundings in the
+    view (kubakub scene surroundings: face ids above the model's) are drawn like the model but never lit and never
+    counted: 'model' = everything solid, 'building' = the model alone.
     """
     vcam = Camera(view_scene["info"])
     pcam = Camera(proj_scene["info"])
     pos, nor, fid = view_scene["position"], view_scene["normal"], view_scene["faceid"]
     fg = fid > 0
+    faces = view_scene["info"].get("faces")                     # ids above the model's faces are its surroundings
+    own = fg if faces is None else fg & (fid <= int(faces))
     u, v, _ = pcam.project(pos)
     dirs, dist = pcam.towards(pos)
-    inside = fg & (u >= 0) & (u < pcam.W) & (v >= 0) & (v < pcam.H)
+    inside = own & (u >= 0) & (u < pcam.W) & (v >= 0) & (v < pcam.H)
     ui = np.clip(u.astype(np.int64), 0, pcam.W - 1)
     vi = np.clip(v.astype(np.int64), 0, pcam.H - 1)
     cached = proj_scene.get("_pdist")                  # once per projection view (walkthroughs reuse it),
@@ -220,8 +224,8 @@ def reprojection(view_scene, proj_scene, tol_frac=0.01, tol_min_m=0.03):
     ref = np.median(bright[lit & (cos_inc > 0.9)]) if (lit & (cos_inc > 0.9)).any() else (
         np.median(bright[lit]) if lit.any() else 1.0)
     return {"map_x": (u - 0.5).astype(np.float32), "map_y": (v - 0.5).astype(np.float32), "lit": lit,
-            "model": fg, "brightness": (bright / max(ref, 1e-12)).astype(np.float32),
-            "shadow": fg & ~lit & inside}
+            "model": fg, "building": own, "brightness": (bright / max(ref, 1e-12)).astype(np.float32),
+            "shadow": own & ~lit & inside}
 
 
 def render_preview(frame_rgb, rp, clay, ambient=0.12, gain=1.0, physical=1.0, background=None):
@@ -238,6 +242,70 @@ def render_preview(frame_rgb, rp, clay, ambient=0.12, gain=1.0, physical=1.0, ba
         out = np.where(model, out, background)
     lit = rp["lit"][..., None]
     return np.clip(np.where(lit, out + col * gain * b[..., None], out), 0, 1).astype(np.float32)
+
+
+CLAY_GREY = 0.8             # the grey blender_export.py renders the clay picture in
+CLAY_COLOR = "#f2f2f2"      # the previz default: almost white, like stone under work light
+RELIGHT_CLAY_COLOR = "#ffffff"   # relights: the colour multiplies the 'clay' brightness, white = the clay as it was
+
+
+def _clay_rgb(color):
+    return np.array(_hex_rgb(str(color or CLAY_COLOR), _hex_rgb(CLAY_COLOR)), np.float32)
+
+
+def tint_clay(clay, color):
+    """The clay render (H, W, 3 float, grey) in another clay colour ('#rrggbb'): its base grey becomes that colour,
+    the shading stays."""
+    return np.clip(clay * (_clay_rgb(color) / CLAY_GREY), 0, 1).astype(np.float32)
+
+
+SHADERS = ("clay", "wireframe", "clay + wireframe")
+
+
+def wire_lines(view_scene, angle_deg=20.0, step_m=0.25, soft=0.6):
+    """
+    The edges of a view as a line drawing (H, W float 0..1), from the passes the view already has: a line where two
+    neighbouring pixels see different faces, where the surface turns by more than angle_deg, or where it jumps by
+    more than step_m in depth (one building in front of another). Surroundings share one face id, so their flat
+    walls stay clean and only their corners draw.
+    """
+    fid, nor, pos = view_scene["faceid"], view_scene["normal"], view_scene["position"]
+    cos = np.cos(np.radians(angle_deg))
+    lines = np.zeros(fid.shape, bool)
+    for a, b in (((slice(None), slice(0, -1)), (slice(None), slice(1, None))),
+                 ((slice(0, -1), slice(None)), (slice(1, None), slice(None)))):
+        fa, fb = fid[a], fid[b]
+        both = (fa > 0) & (fb > 0)
+        edge = fa != fb
+        edge |= both & ((nor[a] * nor[b]).sum(-1) < cos)
+        edge |= both & (np.abs(((pos[a] - pos[b]) * nor[a]).sum(-1)) > step_m)
+        lines[a] |= edge & (fa > 0)
+        lines[b] |= edge & (fb > 0) & (fa == 0)               # the outline belongs to the model's side
+    out = lines.astype(np.float32)
+    if soft > 0:
+        out = (np.clip(cv2.GaussianBlur(out, (0, 0), soft) * 1.8, 0, 1) * (fid > 0)).astype(np.float32)
+    return out
+
+
+def look_picture(view_scene, clay, shader="clay", color=CLAY_COLOR):
+    """
+    What the unlit model looks like in a previz: 'clay' (the clay render in the clay colour), 'wireframe' (its edges
+    as lines in that colour on black) or 'clay + wireframe' (the clay with dark edges).
+    -> (picture H x W x 3 float, full: True when the picture is shown as it is instead of dimmed to 'ambient').
+    """
+    if shader == "wireframe":
+        return wire_lines(view_scene)[..., None] * _clay_rgb(color), True
+    pic = tint_clay(clay, color)
+    if shader == "clay + wireframe":
+        pic = pic * (1.0 - 0.7 * wire_lines(view_scene)[..., None])
+    return pic, False
+
+
+def clay_albedo(brightness, color):
+    """Cycles albedo of the clay: the colour ('#rrggbb', as seen on screen -> linear light) x the brightness."""
+    c = np.array(_hex_rgb(str(color or RELIGHT_CLAY_COLOR)), float)
+    lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    return [round(float(v), 5) for v in lin * float(brightness)]
 
 
 def fit_background(img, W, H):
@@ -486,6 +554,8 @@ def rig_from_doc(raw):
             out["size"] = _f(L, "size", 4 if L["type"] == "area" else 0.3, 0.001, 1000)
         lights.append(out)
     rig["lights"] = lights
+    cc = str(raw.get("clay_color") or RELIGHT_CLAY_COLOR)
+    rig["clay_color"] = cc if len(cc) == 7 and cc.startswith("#") else RELIGHT_CLAY_COLOR
     rig["view"] = raw.get("view") if raw.get("view") in ("AgX", "Standard") else "AgX"
     pj = raw.get("projector") if isinstance(raw.get("projector"), dict) else {}
     src = str(pj.get("source") or "below")

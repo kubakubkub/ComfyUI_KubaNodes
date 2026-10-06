@@ -143,6 +143,12 @@ Output batch: per spot all frames. 3200x2160 test facade: ~3 s per new spot; fro
 the visible building is in projection shadow. Optional `background` (image or frames, looping) fills
 everything behind the building, scaled to cover the view.
 
+`clay_color` (a colour picker, almost white by default) is the colour of the model and its surroundings where no
+picture lands. `shader` draws them as `clay`, as `wireframe` (the edges as lines in the clay colour on black, not
+dimmed by `ambient`) or as `clay + wireframe`. The lines come from the passes the view already has (a new face, a
+turn of the surface, a step in depth), so changing the shader or the colour renders nothing again. Scene
+walkthrough has the same two inputs; scene relight and pieces render have `clay_color` (white = the neutral clay).
+
 ## kubakub scene walkthrough: previz video
 
 The same previz along a camera path: `path` has one keyframe per line, `x, distance, eye[, look_x,
@@ -154,6 +160,86 @@ Video -> Save Video. Blender renders 25 camera positions per session (then the c
 temp). The 3200x2160 test facade at 960x540: 0.64 s per frame (150 frames in 96 s). Note: a loader that outputs a *list*
 (Load Images From Dir With Names) needs core Rebatch Images before the matrix input, otherwise ComfyUI
 runs the walkthrough once per image.
+
+## kubakub scene relight: lamps, HDRI, the lit place
+
+The model lit in Blender Cycles: an HDRI `environment` (Blender's built-in ones or your own `hdri_file`), lamps,
+masks that glow, and your picture (input `matrix`) cast as light from the projector. Lamps are one line each in `lights`, in metres
+from the facade: `point | area | spot  x  height  distance  watts  [#colour]  [size | angle]` (x along the wall
+from the middle, height above the ground, distance from the wall towards the audience) or
+`sun  azimuth  elevation  strength  [#colour]`.
+
+- **The plan on the node.** Below its inputs the node shows the place from above, the audience at the bottom
+  (after the first run: the real model, projector, audience camera and surroundings; before it a plain grid). Drag
+  a lamp to move it along and away from the wall (Shift = whole metres), turn the mouse wheel over it for its
+  height, click it for its watts, colour, size or angle; a sun is dragged around the rim to where it shines from.
+  `+ point / area / spot / sun` add lamps, `remove` or Delete takes the selected one out. The plan writes the
+  `lights` text and follows it when you type there, so the text stays the one truth. The node no longer shows its
+  render on itself: connect a preview to `image`.
+- **`camera = projector`** (default): the matrix view, the building alone: content, or a base for the director.
+- **`camera = previz`**: the very viewpoint of kubakub scene preview: connect the `scene` output of scene preview
+  to this node. Same spot, lens and picture size; `previz_spot` picks which line of its `spots`.
+- **`camera = audience`**: from a spot in front of the building (`audience_distance_m`, `audience_offset_m`,
+  `eye_height_m`, `lens_mm`), with its surroundings when kubakub scene surroundings is connected: the lit place as
+  a visitor sees it. A high `eye_height_m` (20-60) gives the view from above. The numbers mean what a scene
+  preview spot means (x along the wall, distance, eye height). On the node's plan the camera is the violet ring
+  with its angle of view: drag the ring to move it, drag the dot in front of it to turn it (`audience_turn_deg`,
+  0 = looking at the middle of the facade). With real ground (`terrain = real heights`) the eye height counts
+  from the ground under the camera.
+- **`live`** (the pill under the plan): every time you drop a lamp or the camera, or change one of the plan's
+  fields, the workflow is queued again, so walking the camera around the square gives one picture after the
+  other. Only what changed runs. For quick looks lower `resolution_scale` (0.3) and `samples` (16); set
+  `plan_width_m` to keep the plan's scale fixed while you move far.
+- **Too bright?** `projector_brightness` 1 lands the picture at about its own brightness, as in the previz;
+  lamps add to it. Lower `exposure`, the lamps' watts or `env_strength`; the report says when a large part is
+  burnt out to white. A projection only shows where the lamps leave the wall dark.
+- **`plan`** (output): the light plan from above, the audience at the bottom. Every lamp in its colour with its
+  number (its line in `lights`) and height, a spot with its aim, a sun as an arrow from where it shines; the model
+  in orange, the projector as a dot, the audience camera as a ring, the surroundings in grey. Change a lamp's x or
+  distance and watch it move on the plan.
+
+## kubakub scene surroundings: the street around the building
+
+A festival file is the building alone, so every previz shows it in the void. This node adds the neighbourhood as
+plain boxes: put it between **scene render** and **scene preview / scene walkthrough / pieces render / scene
+relight**. Example: `example_workflows/scene_surroundings.json`.
+
+- **`location`**: the middle of your facade on a map, as `latitude, longitude` (Google Maps: right click on the
+  wall, click the numbers to copy them; a link with `@lat,lon` works too). The buildings within `radius_m` come from
+  OpenStreetMap. **Empty** = a sample square, so the node runs as it is and nothing is downloaded.
+- **One download per place.** The node sends the coordinates and the radius to the OpenStreetMap server
+  (overpass-api.de) once and keeps the answer in `ComfyUI/user/kubakub_cache/surroundings`; after that the place
+  works offline, also for a smaller radius or a spot a few metres away. The map server is busy at times: the
+  node asks three times, and if it still gets no answer it uses what is on this computer for that place and
+  says so in the report. Downloads are **off by default**: write `surroundings_download = on` under `[settings]` in kubakub.ini to allow them (the node's error says so when a place is not on disk yet). Nothing else in the
+  pack uses the network.
+- **The fit is found on the map.** The footprint nearest to the location is the building itself: its wall there
+  gives the compass direction of the facade, which is turned onto your model's facade, with the location on the
+  middle of the model at ground level. `own_building = remove` leaves that footprint out (your model stands
+  there); `keep` is for a model that is only the facade. If the fit is a little off: `turn_deg`, `along_m`,
+  `out_m`, `lift_m`, or `facing_deg` to set the direction by hand.
+- **Heights**: the map's height where it has one, else its level count x 3 m, else `default_height_m` (0 = the
+  median of the buildings around that have one). In many towns most heights are unknown and every block gets
+  the same height: good for sight lines and shadows, not for a skyline. For true roofs use your own file.
+- **`terrain = real heights`**: the real ground of the place instead of a flat disc: hills, slopes, river banks.
+  The heights come from the open terrain tiles on AWS (one more download per place, kept like the map), the
+  buildings are set down on the ground and the audience cameras of the previz stand on it. The data is coarse
+  (about 10-30 m between real measurements, and in a dense town it partly follows the roofs), so it shows the
+  lie of the land, not kerbs or steps. That is why the ground stays level within `level_m` (40 m) of the facade
+  and blends into the real heights beyond: your model stands on even ground. For a truer ground bring it in your
+  own `file`.
+- **`file`**: your own surroundings model instead of the map (.glb .fbx .obj .abc .usd ...), in the same space as
+  the building: a city model, a Houdini export, a scan. `file_scale` brings it into metres. Not .blend.
+- **Outputs**: `scene` (the same scene, now with surroundings), `plan` (top view, the audience at the bottom:
+  surroundings grey, your model orange, the left-out footprint as a violet line, the projector as a dot), `view`
+  (the clay model in its street, from above or from the street) and a report that warns when the projector
+  stands inside a neighbouring building.
+
+The surroundings are context only. They never become regions, IDs, pieces or glow, and the projection never lands
+on them. In **scene relight** from the projector they stay out of the picture (it remains the matrix of the
+building alone) but shade the building and bounce light; from an audience view (pieces render, `view = audience`)
+they are in the picture, in the same clay as the building. A dense old town (about 280 buildings within 250 m): 3.5 s to download, under 1 s per
+view more than without.
 
 ## kubakub brightness compensation: even light on the building
 

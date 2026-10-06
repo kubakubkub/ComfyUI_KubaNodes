@@ -119,7 +119,7 @@ The menu is split into **2d** (images, masks, video) and **3d** (anything that n
 | **2d / director** | kubakub director (the window), director sequence (every frame, sound), director diffuse |
 | **2d / motion** | region video sampler (ltx), keyframe clips (h3, video with sound), trim to exact duration (audio clips of a constant length for LTX AV) |
 | **2d / post** | align to source (an edited picture back onto the picture it was made from, to the pixel), colour match (to a reference, as .cube too), apply lut, deflicker, retime (optical flow), burn in, export video / frames |
-| **3d / scene** | scene render (Blender: clay, depth, ID passes), projector (where it stands: metres from the wall, height, throw ratio, lens shift or tilt), projector blend (soft-edge masks for several projectors), scene relight (Cycles), scene measure, scene preview and walkthrough (previz from the audience), brightness compensation |
+| **3d / scene** | scene render (Blender: clay, depth, ID passes), projector (where it stands: metres from the wall, height, throw ratio, lens shift or tilt), projector blend (soft-edge masks for several projectors), scene relight (Cycles), scene measure, scene preview and walkthrough (previz from the audience), scene surroundings (the street around the building, from a place on the map or your own model), brightness compensation |
 | **3d / pieces** | scene pieces, pieces falloff, pieces beat falloff, pieces transform, pieces render: the model's parts (or whole regions) moved like MOPS in Houdini (a wave, a pulse, a stagger, noise or the beats of the director's timeline push, tilt, turn and scale stones, windows and cornices), rendered in Cycles as clay or with the matrix projected on them, from the projector or from the audience |
 | **3d / from renders** | render passes (a folder of your passes: picture, depth, normals, every other pass as a mask), regions from cryptomatte (every object by its name from the 3D scene), regions from id renders (Houdini, Blender, any ID pass) |
 | **3d / fabricate** | relief panels in millimetres (mould prep, safety check, STL / OBJ), mesh to relief field, save GLB |
@@ -215,6 +215,10 @@ Every group has a model-free test in `tests/`, e.g. `python_embeded\python.exe C
   Kosinkadink / AustinMroz).
 - A sound as a held audio latent in the region video sampler (`nodes/motion/nodes_video.py`): the wiring of
   RuneXX's custom-audio LTX workflows (huggingface.co/RuneXX/LTX-2.3-Workflows).
+- The buildings of kubakub scene surroundings: map data (c) OpenStreetMap contributors, under the Open Database
+  License (openstreetmap.org/copyright), fetched through the Overpass API (overpass-api.de). Its real ground:
+  the Mapzen / Tilezen terrain tiles on AWS Open Data (SRTM, EU-DEM and other open sources; attribution list at
+  github.com/tilezen/joerd/blob/master/docs/attribution.md).
 - MKL colour transfer: Pitie & Kokaram 2007, as in the color-matcher library
   (github.com/hahnec/color-matcher); reimplemented in torch in `kubakub/ops.py`.
 

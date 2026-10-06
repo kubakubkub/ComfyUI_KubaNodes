@@ -32,6 +32,7 @@ _MODULES = [                        # nodes/<menu group>/<module>
     "nodes.scene3d.nodes_scene3d",
     "nodes.scene3d.nodes_pieces",
     "nodes.scene3d.nodes_compensate",
+    "nodes.scene3d.nodes_surroundings",
     "nodes.from_renders.nodes_cryptomatte",
     "nodes.from_renders.nodes_passes",
     "nodes.fabricate.relief_forge_Kub",

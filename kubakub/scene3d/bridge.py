@@ -102,7 +102,7 @@ def _file_stamps(obj, out):
 
 def cache_key(path: str, camera: str, width: int, height: int, frame: int, unit_scale: float = 1.0,
               view: dict | None = None, views: list | None = None, relight: dict | None = None,
-              projector: dict | None = None) -> str:
+              projector: dict | None = None, surroundings: dict | None = None) -> str:
     st = os.stat(path)
     h = hashlib.sha1()
     for part in (os.path.abspath(path).lower(), st.st_size, st.st_mtime_ns, camera, width, height, frame,
@@ -114,6 +114,10 @@ def cache_key(path: str, camera: str, width: int, height: int, frame: int, unit_
         h.update(json.dumps(projector, sort_keys=True).encode("utf-8", "replace") + b"|")
     for s in _file_stamps(relight, []) if relight else ():     # an edited HDRI is a new job
         h.update(s.encode("utf-8", "replace") + b"|")
+    if surroundings:                                      # kubakub scene surroundings: the street around the model
+        h.update(json.dumps(surroundings, sort_keys=True).encode("utf-8", "replace") + b"|")
+        for s in _file_stamps(surroundings, []):
+            h.update(s.encode("utf-8", "replace") + b"|")
     return h.hexdigest()[:16]
 
 
@@ -136,20 +140,27 @@ def folder_token(folder: str, ok: bool | None = None) -> bytes:
 
 
 def cache_folder(path, cache_root, camera="", width=0, height=0, frame=-1, unit_scale=1.0, view=None, views=None,
-                 relight=None, projector=None) -> str:
+                 relight=None, projector=None, surroundings=None) -> str:
     """Where export() keeps (or finds) the result for these settings."""
     path = clean_path(path)
     cache_root = os.path.abspath(cache_root)      # Blender runs from its own working directory
     stem = re.sub(r"[^\w.\-]+", "_", os.path.splitext(os.path.basename(path))[0])[:40]
-    return os.path.join(cache_root, f"{stem}_{cache_key(path, camera, width, height, frame, unit_scale, view, views, relight, projector)}")
+    return os.path.join(cache_root, f"{stem}_{cache_key(path, camera, width, height, frame, unit_scale, view, views, relight, projector, surroundings)}")
 
 
 def job_dict(path, out, camera="", width=0, height=0, frame=-1, unit_scale=1.0, view=None, views=None, relight=None,
-             projector=None):
+             projector=None, surroundings=None):
     """The job file blender_export.py reads (the worker keeps a loaded scene per file / camera / frame / scale)."""
     return {"file": clean_path(path), "out": out, "camera": camera, "width": int(width), "height": int(height),
             "frame": int(frame), "unit_scale": float(unit_scale), "view": view, "views": views, "relight": relight,
-            "projector": projector or None}
+            "projector": projector or None, "surroundings": surroundings or None}
+
+
+def scene_opts(scene):
+    """The export() / cache_folder() arguments a scene (the KUBA_SCENE dict of scene render) carries along: its
+    camera, frame, scale and surroundings. A view of that scene passes them all, so none is forgotten."""
+    return {"camera": scene.get("camera", ""), "frame": scene.get("frame", -1),
+            "unit_scale": scene.get("unit_scale", 1.0), "surroundings": scene.get("surroundings")}
 
 
 def done_files(view=None, views=None, relight=None):
@@ -198,7 +209,7 @@ def stage_path(final) -> str:
 def export(path: str, cache_root: str, camera: str = "", width: int = 0, height: int = 0, frame: int = -1,
            blender: str = "", timeout: int = 900, force: bool = False, unit_scale: float = 1.0,
            view: dict | None = None, views: list | None = None, relight: dict | None = None,
-           transient: bool = False, projector: dict | None = None):
+           transient: bool = False, projector: dict | None = None, surroundings: dict | None = None):
     """
     -> (folder with scene.json / faceid.npy / ..., cached: bool, blender log tail).
     transient: always render, into a folder of this call's own (the caller moves the files on and deletes it).
@@ -206,6 +217,9 @@ def export(path: str, cache_root: str, camera: str = "", width: int = 0, height:
     instead of the file's (audience spots; metres after unit_scale). views: a list of such cameras,
     rendered in one Blender session into v_0000, v_0001 ... (walkthroughs). projector: the dict of kubakub projector
     (autocam.py): the projection camera is placed in front of the facade instead of taken from the file.
+    surroundings: {"file": footprints .json or a mesh file, "matrix": 4 x 4, "ground": {"centre", "radius"}} from
+    kubakub scene surroundings: the street around the model, in the picture but not part of the model
+    (surroundings.py).
     """
     path = clean_path(path)
     if not os.path.isfile(path):
@@ -215,7 +229,8 @@ def export(path: str, cache_root: str, camera: str = "", width: int = 0, height:
         raise ValueError("Blender cannot read .c4d files: export FBX or Alembic from Cinema 4D")
     if ext not in FORMATS:
         raise ValueError(f"unsupported file type {ext} (supported: {' '.join(FORMATS)})")
-    out = cache_folder(path, cache_root, camera, width, height, frame, unit_scale, view, views, relight, projector)
+    out = cache_folder(path, cache_root, camera, width, height, frame, unit_scale, view, views, relight, projector,
+                       surroundings)
     done = done_files(view, views, relight)
     if not force and not transient and is_done(out, done):
         touch(out)
@@ -223,8 +238,8 @@ def export(path: str, cache_root: str, camera: str = "", width: int = 0, height:
     stage = stage_path(out)
     os.makedirs(stage, exist_ok=True)
     try:
-        tail = _run_job(job_dict(path, stage, camera, width, height, frame, unit_scale, view, views, relight, projector),
-                        stage, done, blender, timeout)
+        tail = _run_job(job_dict(path, stage, camera, width, height, frame, unit_scale, view, views, relight, projector,
+                                 surroundings), stage, done, blender, timeout)
         if transient:
             return stage, False, tail
         if force:

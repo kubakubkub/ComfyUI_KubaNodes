@@ -155,7 +155,8 @@ try:
     real_export = bridge.export
 
     def fake_export(path, cache_root, camera="", width=0, height=0, frame=-1, blender="", timeout=900, force=False,
-                    unit_scale=1.0, view=None, views=None, relight=None, transient=False, projector=None):
+                    unit_scale=1.0, view=None, views=None, relight=None, transient=False, projector=None,
+                    surroundings=None):
         """Writes what Blender would: relit_XXXX.png per frame + relight.json, or v_XXXX view folders."""
         calls.append({"relight": relight, "views": views, "view": view, "transient": transient})
         out = bridge.stage_path(bridge.cache_folder(path, cache_root, camera, width, height, frame, unit_scale,
@@ -247,7 +248,8 @@ try:
     import kubakub.scene3d.scene_view as svm
     ns._load_scene = lambda scene: ({"info": {"width": W, "height": H}}, None, None, None)
     svm.wall_frame = lambda info, pt, nrm, ground: fr_stub
-    svm.reprojection = lambda vs, s: {"shadow": np.zeros(vs["faceid"].shape, bool), "model": vs["faceid"] > 0}
+    svm.reprojection = lambda vs, s: {"shadow": np.zeros(vs["faceid"].shape, bool), "model": vs["faceid"] > 0,
+                                            "building": vs["faceid"] > 0}
     svm.render_preview = lambda f, rp, clay, **k: clay
     matrix = torch.rand(1, H, W, 3)
     walk_kw = dict(path="-15, 25, 1.7\n0, 15, 1.7\n15, 10, 1.7", seconds=1.2, fps=25, lens_mm=24.0, width=32,
