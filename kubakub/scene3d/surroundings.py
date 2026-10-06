@@ -700,12 +700,13 @@ def plan(buildings, M, anchor, nh, ex, model_xyz, radius_m, size=768, projector=
     return img
 
 
-def plan_lights(img, lights, anchor, nh, ex, radius_m, viewer=None):
+def plan_lights(img, lights, anchor, nh, ex, radius_m, viewer=None, look_at=None, lens_mm=None):
     """
     A copy of a plan() picture (same anchor, nh, ex, radius_m) with the lamps on it: lamps in world space
     (scene_view.lights_to_world), each in its colour with its number and height; point = dot, area = square, spot =
     dot with its aim, sun = arrow from where it shines. viewer: the audience camera (violet ring), for a plan()
-    drawn without it.
+    drawn without it; with look_at (a point it looks at) an arrow shows its direction, with lens_mm (36 mm sensor)
+    two lines its angle of view.
     """
     import cv2
     img = img.copy()
@@ -713,6 +714,16 @@ def plan_lights(img, lights, anchor, nh, ex, radius_m, viewer=None):
     _, pt = _to_px(anchor, nh, ex, radius_m, size)
     if viewer is not None:
         c = pt(viewer)
+        if look_at is not None:
+            d = np.asarray(pt(look_at), float) - c
+            if np.linalg.norm(d) > 1e-6:
+                a = math.atan2(d[1], d[0])
+                tip = lambda ang, r: (int(c[0] + math.cos(ang) * r), int(c[1] + math.sin(ang) * r))  # noqa: E731
+                if lens_mm:
+                    half = math.atan(18.0 / float(lens_mm))
+                    for sgn in (-1, 1):
+                        cv2.line(img, c, tip(a + sgn * half, size * 0.34), tuple(0.55 * v for v in VIOLET), 1, cv2.LINE_AA)
+                cv2.arrowedLine(img, c, tip(a, size * 0.11), VIOLET, 2, cv2.LINE_AA, tipLength=0.3)
         cv2.circle(img, c, 7, VIOLET, 2, cv2.LINE_AA)
         cv2.putText(img, "audience", (c[0] + 11, c[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.42, VIOLET, 1, cv2.LINE_AA)
     for n, L in enumerate(lights or []):

@@ -235,6 +235,16 @@ try:
     check("light plan: the area lamp on the other side, nearer the wall", abs(gx - (128 + 20 * 1.28)) < 3 and abs(gy - (128 + 10 * 1.28)) < 3,
           f"{gx:.0f} {gy:.0f}")
 
+    bare = sr.plan([], Ms, anchor, nh, ex, V, 100.0, size=256)
+    cam_at = anchor + nh * 60
+    pov = sr.plan_lights(bare, [], anchor, nh, ex, 100.0, viewer=cam_at, look_at=anchor, lens_mm=24.0)
+    ring = sr.plan_lights(bare, [], anchor, nh, ex, 100.0, viewer=cam_at)
+    drawn = np.abs(pov - ring).sum(-1) > 0.05
+    ys, xs = np.nonzero(drawn)
+    check("light plan: the camera's direction and angle of view are drawn, towards the facade",
+          drawn.sum() > 150 and ys.max() <= 128 + 60 * 1.28 + 2 and ys.min() < 128 + 60 * 1.28 - 60 and (xs.min() < 128 - 30) and (xs.max() > 128 + 30),
+          f"{drawn.sum()} y {ys.min()}..{ys.max()} x {xs.min()}..{xs.max()}")
+
     k0 = bridge.cache_key(fp, "", 64, 64, -1)
     sur = {"file": fp, "matrix": np.eye(4).tolist(), "ground": None}
     check("cache: no surroundings keeps the old key", k0 == bridge.cache_key(fp, "", 64, 64, -1, surroundings=None))

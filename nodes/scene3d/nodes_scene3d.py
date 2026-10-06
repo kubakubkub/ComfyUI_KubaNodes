@@ -998,7 +998,8 @@ def light_plan(s, pt, nrm, ground, fr, lights, projector, buildings, matrix, loo
             "ad": axis(fr["normal"])}
     if viewer is not None:                                  # where the camera stands, for the plan on the node
         meta["viewer"] = [round(size / 2 + float((viewer - anchor) @ ex) * k, 2), round(size / 2 + float((viewer - anchor) @ nh) * k, 2)]
-    return sr.plan_lights(bare, world, anchor, nh, ex, radius, viewer=viewer), meta
+    return sr.plan_lights(bare, world, anchor, nh, ex, radius, viewer=viewer, look_at=(look_from or {}).get("look_at"),
+                          lens_mm=(look_from or {}).get("lens")), meta
 
 
 _SCENE_CACHE = {}
