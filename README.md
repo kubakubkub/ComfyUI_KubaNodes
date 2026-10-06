@@ -13,16 +13,17 @@ regions of starter 01 connected):
 
 ## What's new
 
-**0.1.2**, for 3D artists:
-- **No file needed to try 3D.** Starters 07 and 08 run on a built-in sample building: regions from the model, real
-  distances, previz, and its stones moved by a wave.
-- **Your projector, placed in metres.** *kubakub projector* sets it by distance, height and throw ratio, so a 3D
-  file without a camera works. *kubakub projector blend* makes the blend masks for several projectors.
-- **Your own render as the start.** *kubakub render passes* reads a folder of passes from any renderer; only the
-  parts you masked are repainted.
-- **Pictures that sit on the building.** *kubakub align to source* puts a whole-picture edit back onto its source
-  when the model returned it a few pixels moved or scaled.
-- **Every file field can stay empty.** A node that reads a file of yours runs on a sample until you paste a path.
+**0.2.0**, the building in its street:
+- **Your building is no longer alone.** *kubakub scene surroundings* puts the neighbouring buildings around your
+  model, from a place on the map or from your own file, on real ground if you want (hills and slopes).
+- **The lit place, seen from the audience.** *kubakub scene relight* renders your projection on the building in its
+  street, under your lamps, from where a visitor stands, or from the exact viewpoint of the previz.
+- **Lamps and camera placed by hand.** A plan on the relight node: drag lamps and the audience camera, turn it, and
+  let `live` render again after every move.
+- **A projection keeps its colours** in the relight (new tone mapping, `view = Neutral`), and the previz has a clay
+  colour picker and a wireframe look.
+- **Nothing is downloaded unless you allow it.** The map is fetched only after you write
+  `surroundings_download = on` into kubakub.ini; everything else in the pack stays offline.
 
 Everything that changed, version by version: [CHANGELOG.md](CHANGELOG.md). Updates arrive through ComfyUI Manager
 (*Update*) or `git pull`; a problem or a wish: [open an issue](https://github.com/kubakubkub/ComfyUI_KubaNodes/issues).
