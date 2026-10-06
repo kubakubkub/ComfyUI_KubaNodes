@@ -854,8 +854,10 @@ class KUBA_SceneRelight(io.ComfyNode):
                 io.Float.Input("projector_brightness", advanced=True, default=1.0, min=0.0, max=100.0, step=0.05, optional=True,
                                tooltip="1 = the image lands at about its own brightness on a frontal wall."),
                 io.Combo.Input("projector_mode", options=["light", "paint"], default="light", optional=True,
-                               tooltip="light = cast from the camera like a real projector; paint = the image becomes "
-                                       "the model's colour (textures on the building), lit by the lamps and HDRI."),
+                               tooltip="light = cast from the camera like a real projector: this is the one for a "
+                                       "projection, it shines by itself. paint = the image becomes the model's colour "
+                                       "(textures on the building) and is only as bright as the lamps and HDRI make "
+                                       "it: dark at night."),
                 io.Combo.Input("view", options=["AgX", "Standard"], default="AgX", optional=True,
                                tooltip="Tone mapping: AgX = soft highlights (lamps), Standard = the projected image's "
                                        "colours as they are."),
@@ -1056,7 +1058,9 @@ def _rig_job(s, fr, rig, emission, projector, root, notes):
             imio.imwrite(fp, cv2.cvtColor(a, cv2.COLOR_RGB2BGR))
         if pj.get("mode") == "paint":
             part["projector"] = {"image": fp, "mode": "paint", "size": [int(s["info"]["width"]), int(s["info"]["height"])]}
-            notes.append(f"painted: {a.shape[1]}x{a.shape[0]} image as the model's colour from the camera")
+            notes.append(f"painted: {a.shape[1]}x{a.shape[0]} image as the model's colour from the camera. It gives no "
+                         "light of its own: it is only as bright as the lamps and the HDRI make it. For a projection "
+                         "set projector_mode = light.")
         else:
             power = sv.projector_power(pj.get("brightness", 1.0), fr["projector_distance_m"], rig.get("clay", 0.7))
             part["projector"] = {"image": fp, "power": power, "size": [int(s["info"]["width"]), int(s["info"]["height"])]}
