@@ -29,6 +29,9 @@ may have changed since.
   with `camera = previz` renders from exactly there, at the previz size. `camera = audience` now means the same as a
   previz spot (x, distance, eye, looking at the frame's middle), and its violet ring on the plan can be dragged. The
   relight report says when the picture is burnt out.
+- **A projection keeps its colours in the relight.** New tone mapping `view = Neutral` (now the default of scene
+  relight, and of pieces render with the matrix projected): the old default, AgX, bleached a projected picture
+  towards white, the more the brighter. AgX and Standard are still there.
 - **Turn the camera, and live.** The plan shows the audience camera's angle of view; a dot in front of it turns it
   (`audience_turn_deg`). The `live` pill queues the workflow after every finished change on the plan.
 - This is the first node that can use the network: one request per new place, to overpass-api.de, with the

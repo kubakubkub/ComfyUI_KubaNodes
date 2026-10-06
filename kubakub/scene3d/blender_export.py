@@ -244,10 +244,13 @@ def apply_rig(sc, cob, R, placed_objects):
     """World, materials, lights and projector for one rig; called again per frame (the last frame's objects go)."""
     for o in [o for o in bpy.data.objects if o.name.startswith(("kuba_light_", "kuba_projector"))]:
         bpy.data.objects.remove(o, do_unlink=True)
-    try:
-        sc.view_settings.view_transform = R.get("view", "AgX")
-    except TypeError:
-        sc.view_settings.view_transform = "Filmic"
+    view = {"Neutral": "Khronos PBR Neutral"}.get(R.get("view", "AgX"), R.get("view", "AgX"))
+    for name in (view, "Standard" if view == "Khronos PBR Neutral" else "Filmic"):   # older Blender: the nearest it has
+        try:
+            sc.view_settings.view_transform = name
+            break
+        except TypeError:
+            continue
     sc.view_settings.exposure = float(R.get("exposure", 0.0))
     sc.render.film_transparent = R.get("background", "black") != "environment"
 

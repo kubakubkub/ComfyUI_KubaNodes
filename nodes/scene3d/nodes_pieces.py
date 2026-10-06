@@ -347,7 +347,7 @@ class KUBA_PiecesRender(io.ComfyNode):
             raise ValueError("look = projected matrix needs a matrix image (or frames).")
         rig = {"lights": [], "environment": environment, "env_strength": env_strength, "clay": clay,
                "clay_color": clay_color,
-               "roughness": 0.8, "background": background, "exposure": 0.0, "view": "AgX",
+               "roughness": 0.8, "background": background, "exposure": 0.0, "view": "Neutral" if projected else "AgX",
                "projector": {"on": projected, "brightness": projector_brightness}}
         look_from = None
         if view == "audience":

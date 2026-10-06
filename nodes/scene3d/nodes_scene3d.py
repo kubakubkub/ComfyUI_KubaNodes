@@ -858,9 +858,11 @@ class KUBA_SceneRelight(io.ComfyNode):
                                        "projection, it shines by itself. paint = the image becomes the model's colour "
                                        "(textures on the building) and is only as bright as the lamps and HDRI make "
                                        "it: dark at night."),
-                io.Combo.Input("view", options=["AgX", "Standard"], default="AgX", optional=True,
-                               tooltip="Tone mapping: AgX = soft highlights (lamps), Standard = the projected image's "
-                                       "colours as they are."),
+                io.Combo.Input("view", options=["Neutral", "AgX", "Standard"], default="Neutral", optional=True,
+                               tooltip="Tone mapping. Neutral = the projected picture keeps its colours, also when it "
+                                       "is bright (the one for a projection). AgX = filmic, soft highlights for lamp "
+                                       "moods, but it bleaches a projection towards white. Standard = no tone "
+                                       "mapping: exact colours until they clip to white."),
                 io.Color.Input("clay_color", default=sv.RELIGHT_CLAY_COLOR, optional=True,
                                tooltip="Colour of the clay material (the building and its surroundings); 'clay' sets "
                                        "how bright it is. White = neutral grey clay, as before."),
@@ -909,7 +911,7 @@ class KUBA_SceneRelight(io.ComfyNode):
     @classmethod
     def execute(cls, scene, environment, env_strength, env_rotation_deg, lights, clay, roughness, samples, exposure,
                 background, resolution_scale, emission_masks=None, emission_colors="#ffb060", emission_strength=20.0,
-                hdri_file="", projector=None, projector_brightness=1.0, projector_mode="light", view="AgX",
+                hdri_file="", projector=None, projector_brightness=1.0, projector_mode="light", view="Neutral",
                 clay_color=sv.RELIGHT_CLAY_COLOR, camera="projector", audience_distance_m=30.0, audience_offset_m=0.0,
                 eye_height_m=1.7, lens_mm=24.0, plan_width_m=0.0, previz_spot=1, audience_turn_deg=0.0) -> io.NodeOutput:
         rig = {"view": view, "clay_color": clay_color, "projector": {"on": projector is not None, "brightness": projector_brightness,

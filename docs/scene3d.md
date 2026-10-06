@@ -190,6 +190,11 @@ from the middle, height above the ground, distance from the wall towards the aud
   fields, the workflow is queued again, so walking the camera around the square gives one picture after the
   other. Only what changed runs. For quick looks lower `resolution_scale` (0.3) and `samples` (16); set
   `plan_width_m` to keep the plan's scale fixed while you move far.
+- **`view`** is the tone mapping. `Neutral` (default) keeps the projected picture's colours, also when it is
+  bright; `AgX` is filmic and good for lamp moods, but it bleaches a projection towards white however bright
+  you make it; `Standard` shows exact colours until they clip.
+- **`projector_mode`**: `light` casts the picture like a projector (it shines by itself); `paint` makes it the
+  wall's colour, only as bright as the lamps make it.
 - **Too bright?** `projector_brightness` 1 lands the picture at about its own brightness, as in the previz;
   lamps add to it. Lower `exposure`, the lamps' watts or `env_strength`; the report says when a large part is
   burnt out to white. A projection only shows where the lamps leave the wall dark.

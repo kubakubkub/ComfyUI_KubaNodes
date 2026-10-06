@@ -527,7 +527,7 @@ def rig_from_doc(raw):
          "glow": [{"by": "layer:<id>" | region selector, "color": "#rrggbb", "strength"}],
          "projector": {"on", "source": "below" | "base" | "layer:<id>", "brightness",
                        "mode": "light" (cast from the camera) | "paint" (the model's colour, lit by the lamps)},
-         "view": "AgX" | "Standard"}
+         "view": "AgX" | "Standard" | "Neutral" (keeps a projection's colours)}
     -> the same with defaults and clamped numbers; 'lights' in parse_lights() form (switched-off lights dropped).
     """
     raw = raw if isinstance(raw, dict) else {}
@@ -556,7 +556,7 @@ def rig_from_doc(raw):
     rig["lights"] = lights
     cc = str(raw.get("clay_color") or RELIGHT_CLAY_COLOR)
     rig["clay_color"] = cc if len(cc) == 7 and cc.startswith("#") else RELIGHT_CLAY_COLOR
-    rig["view"] = raw.get("view") if raw.get("view") in ("AgX", "Standard") else "AgX"
+    rig["view"] = raw.get("view") if raw.get("view") in ("AgX", "Standard", "Neutral") else "AgX"
     pj = raw.get("projector") if isinstance(raw.get("projector"), dict) else {}
     src = str(pj.get("source") or "below")
     rig["projector"] = {"on": bool(pj.get("on")), "brightness": _f(pj, "brightness", 1.0, 0, 100),
