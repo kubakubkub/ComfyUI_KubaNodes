@@ -89,6 +89,7 @@ check("stagger out: the reverse", all(v == 0 for v in mo.stagger_weights([dict(s
 ch = mo.stagger_weights([{"type": "stagger", "mode": "chase", "order": "left", "step": 0.1, "fade": 0, "hold": 0.1}], 0.35, 5, REGS, 3200, 2160)
 check("stagger chase: one step lit at a time", sum(1 for v in ch.values() if v == 1) in (1, 2, 3), str(ch))
 check("stagger: no stagger behaviour -> None", mo.stagger_weights([{"type": "wiggle"}], 1, 5, REGS, 3200, 2160) is None)
+# (swap masks: tests/test_soundswap.py; the window twin below runs its cases too)
 
 # ---- through animate (the node's per frame document)
 doc = {"timeline": {"duration": 4, "fps": 25}, "layers": [
@@ -140,6 +141,24 @@ RCASES = [({"type": "repeat", "count": 7, "layout": lay, "dx": 120, "dy": -40, "
             "rotate": 7, "scale": sc, "opacity": -0.1}, k) for lay in ("line", "grid", "radial") for st in (0, 33) for o in (True, False)
           for sc in (0, -12) for k in range(1, 7)]
 LOOPS = [{"keys": keys, "t": t, "mode": m} for t in (0.5, 1.3, 2.7, 5.01) for m in ("cycle", "pingpong", "continue", None)]
+# swap masks: steps on beats / bars / markers / a fixed time / hits per band, every order, with and without a fade
+HITS = {"low": [[0.0, 1.0], [0.5, 0.9], [0.62, 0.2], [1.0, 1.0], [1.04, 0.8], [1.5, 0.95], [2.31, 0.4], [3.0, 1.0]],
+        "mid": [[0.25, 0.5], [1.25, 0.31], [2.75, 0.29]], "high": [[0.25, 1.0], [0.3, 0.6], [0.75, 0.9], [1.25, 0.2], [1.75, 1.0], [2.2, 0.7]]}
+SCTX = dict(actx, hits=HITS, bands={"low": lv, "high": [v * 0.5 for v in lv]}, offset=0.1)
+SWCASES = [{"t": t, "n": n, "b": {"type": "swap", "order": o, "trigger": tr, "nth": nth, "every": 0.37, "threshold": th, "gap": gp,
+                                  "fade": fd, "seed": 7, "t_start": 0.2, "t_end": te, "transition": "dip" if fd and n == 3 else "cross"}}
+           for t in (0, 0.26, 0.55, 1.02, 1.31, 2.0, 3.3, 5.5) for n in (2, 3, 5) for o in ("loop", "pingpong", "random")
+           for tr, nth, th, gp in (("beats", 1, 0.3, 0.1), ("bars", 1, 0.3, 0.1), ("beats", 2, 0.3, 0.1), ("markers", 1, 0.3, 0.1),
+                                   ("every", 1, 0.3, 0.1), ("low", 1, 0.3, 0.1), ("low", 2, 0.0, 0.0), ("mid", 1, 0.3, 0.1), ("high", 1, 0.65, 0.3))
+           for fd, te in ((0, -1), (0.2, 4.0))]
+SWLAYERS = [{"id": "a", "kind": "image", "clip": "W_F1_*", "motion": [{"type": "wiggle"}, {"type": "swap", "order": "random", "trigger": "every", "every": 0.3, "fade": 0.1, "seed": 3, "with": ["d", "b", "zz", "c", "a"]}]},
+            {"id": "b", "kind": "shape", "clip": "M_Door"}, {"id": "c", "kind": "image", "clip": " "},
+            {"id": "d", "kind": "adjust", "clip": "group:Windows", "motion": [{"type": "swap", "trigger": "every", "with": ["e"]}]},
+            {"id": "e", "kind": "image", "clip": "M_Attic", "motion": [{"type": "swap", "order": "pingpong", "trigger": "low", "threshold": 0.5, "with": ["f", "a"]}]},
+            {"id": "f", "kind": "image", "clip": "M_FLOOR_F0"}, {"id": "base", "kind": "base", "clip": "x"}]
+SWTIMES = (0, 0.31, 0.65, 0.95, 1.5, 2.48, 4.9)
+BCASES = [{"t": t, "motion": [{"type": "audio", "path": "opacity", "amount": 1, "smooth": sm, "band": bd}]}
+          for t in (0.4, 1.02, 1.5, 2.24) for sm in (0, 0.15) for bd in ("all", "low", "mid", "high", "nothing")]
 BASE = {"x": 100, "y": 60, "w": 50, "h": 30, "rotation": 3, "opacity": 0.8, "light.lights.#p1.power": 500}
 
 
@@ -156,13 +175,19 @@ def py_side():
     out["level"] = mo.level_curve(sig, sr)
     out["repeat"] = [mo.repeat_apply(dict(BASE), b, k) for b, k in RCASES]
     out["stagger"] = [{str(k): v for k, v in (mo.stagger_weights(c_["motion"], c_["t"], 5.0, REGS, 3200, 2160) or {}).items()} for c_ in SCASES]
+    sctx = dict(SCTX)                                  # one context for all: the step times and shuffles are kept in it
+    out["swap"] = json.loads(json.dumps([mo.swap_mix(c_["b"], c_["t"], 6.0, c_["n"], sctx) for c_ in SWCASES]))
+    out["swaptimes"] = [mo.swap_times(c_["b"], sctx, 6.0) for c_ in SWCASES[:54]]
+    out["swapclips"] = [mo.swap_clips(SWLAYERS, t, 6.0, sctx) for t in SWTIMES]
+    out["band"] = [mo.offsets(c_["motion"], c_["t"], 4.0, sctx) for c_ in BCASES]
     return out
 
 
 PY = py_side()
 import tempfile  # noqa: E402
 VEC = os.path.join(tempfile.gettempdir(), "kuba_motion_vectors.json")        # the cases for the window twin
-json.dump({"cases": CASES, "loops": LOOPS, "base": BASE, "pcases": PCASES, "scases": SCASES, "rcases": RCASES, "regs": REGS, "ctx": actx, "sig": sig, "sr": sr, "expect": PY}, open(VEC, "w"))
+json.dump({"cases": CASES, "loops": LOOPS, "base": BASE, "pcases": PCASES, "scases": SCASES, "rcases": RCASES, "regs": REGS, "ctx": actx, "sig": sig, "sr": sr, "expect": PY,
+           "sctx": SCTX, "swcases": SWCASES, "swlayers": SWLAYERS, "swtimes": SWTIMES, "bcases": BCASES}, open(VEC, "w"))
 
 node = shutil.which("node")
 if not node:
@@ -182,6 +207,10 @@ out.beats = beatTimes({ bpm: 97.3, phase: 0.41 }, 1.7, 30);
 out.level = levelCurve(Float64Array.from(V.sig), V.sr);
 out.repeat = V.rcases.map(([b, k]) => repeatApply({ ...V.base }, b, k));
 out.stagger = V.scases.map(c => staggerWeights(c.motion, c.t, 5.0, V.regs, 3200, 2160) || {});
+out.swap = V.swcases.map(c => swapMix(c.b, c.t, 6.0, c.n, V.sctx));
+out.swaptimes = V.swcases.slice(0, 54).map(c => swapTimes(c.b, V.sctx, 6.0));
+out.swapclips = V.swtimes.map(t => swapClips(V.swlayers, t, 6.0, V.sctx));
+out.band = V.bcases.map(c => motionOffsets(c.motion, c.t, 4.0, V.sctx));
 console.log(JSON.stringify(out));
 """
     tmp = os.path.join(HERE, "_motion_twin.cjs")
@@ -211,6 +240,12 @@ console.log(JSON.stringify(out));
         bads = [i for i, (p, q) in enumerate(zip(PY["stagger"], JS["stagger"])) if not close(p, q)]
         check(f"window twin: {len(SCASES)} stagger cases agree", not bads, f"first bad {bads[:1]}: {SCASES[bads[0]] if bads else ''}")
         check(f"window twin: {len(RCASES)} repeat placements agree", close(PY["repeat"], JS["repeat"]))
+        badw = [i for i, (p, q) in enumerate(zip(PY["swap"], JS["swap"])) if not close(p, q)]
+        check(f"window twin: {len(SWCASES)} swap cases agree", not badw and len(JS["swap"]) == len(SWCASES),
+              f"first bad {badw[:1]}: {SWCASES[badw[0]] if badw else ''} {PY['swap'][badw[0]] if badw else ''} vs {JS['swap'][badw[0]] if badw else ''}")
+        check("window twin: swap step times agree", close(PY["swaptimes"], JS["swaptimes"]))
+        check("window twin: swap groups of a document agree", close(PY["swapclips"], JS["swapclips"]), f"{PY['swapclips'][2]} vs {JS['swapclips'][2]}")
+        check(f"window twin: {len(BCASES)} sound level per band cases agree", close(PY["band"], JS["band"]))
         check("window twin: beat times agree", close(PY["beats"], JS["beats"]))
         check("window twin: loudness curve agrees", close(PY["level"], JS["level"]))
         check("window twin: looped keyframes agree", close(PY["loops"], JS["loops"]), f"{PY['loops']} vs {JS['loops']}")

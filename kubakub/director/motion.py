@@ -13,17 +13,21 @@ A behaviour: {"id", "type", "path", "on", "t_start", "t_end" (-1 = to the end), 
   loop       mode cycle | pingpong | continue  the path's keyframes repeat after the last one
   pulse      amount, trigger beats | bars | markers | every, nth, every (s), attack (s), decay (s)
                                                a kick at each trigger, eased in, decaying out
-  audio      amount, smooth (s)                the loudness of the timeline sound (0-1, a peak with a release)
+  audio      amount, smooth (s), band all | low | mid | high
+                                               the loudness of the timeline sound (0-1, a peak with a release)
 path: any numeric animatable value, plus "position" (x and y, amounts in delivery px) and "scale" (% around the
 centre). Offsets add to the keyframed value; several behaviours on one path add up.
 """
 
 from __future__ import annotations
 
+import bisect
+import json
 import math
 
 TYPES = ("wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio")
 LEVEL_RATE = 100                                  # loudness curve samples per second
+BANDS = ("low", "mid", "high")                    # the sound in three bands (kubakub/sound.py)
 _M32 = 0xFFFFFFFF
 
 
@@ -108,14 +112,16 @@ def beat_times(beat, offset, duration):
     return out
 
 
-def context(doc, level=None):
-    """What pulse / audio behaviours need, once per document: beats, markers, the loudness curve (file time)."""
+def context(doc, level=None, sound=None):
+    """What pulse / audio / swap behaviours need, once per document: beats, markers, the loudness curve (file time)
+    and, from sound (kubakub/sound.py analyze), the loudness per band and the hits per band."""
     tl = (doc or {}).get("timeline") or {}
     dur = min(max(_num(tl, "duration", 10), 0.5), 3600.0)
     au = tl.get("audio") if isinstance(tl.get("audio"), dict) else {}
     ms = sorted(float(m["t"]) for m in tl.get("markers") or [] if isinstance(m, dict) and isinstance(m.get("t"), (int, float)))
     return {"beats": beat_times(tl.get("beat"), _num(au, "offset", 0), dur), "markers": ms,
-            "level": level, "offset": _num(au, "offset", 0)}
+            "level": level, "offset": _num(au, "offset", 0),
+            "bands": (sound or {}).get("curves") or {}, "hits": (sound or {}).get("hits") or {}}
 
 
 def level_curve(mono, sr):
@@ -135,8 +141,8 @@ def level_curve(mono, sr):
     return [0.0] * n if ref <= 1e-9 else [min(1.5, v / ref) for v in out.tolist()]
 
 
-def _level(ctx, t, smooth):
-    lv = (ctx or {}).get("level")
+def _level(ctx, t, smooth, band="all"):
+    lv = ((ctx or {}).get("bands") or {}).get(band) if band in BANDS else (ctx or {}).get("level")
     if not lv:
         return 0.0
     ft = t + (ctx.get("offset") or 0.0)
@@ -210,7 +216,7 @@ def _one(b, t, duration, ctx=None):
             lt = _last_trigger(b, ctx, t, s, e)
             v = 0.0 if lt is None else amt * pulse_env(b, t - lt)
         else:
-            v = amt * _level(ctx, t, max(0.0, _num(b, "smooth", 0.15)))
+            v = amt * _level(ctx, t, max(0.0, _num(b, "smooth", 0.15)), b.get("band") or "all")
         return list(zip(("x", "y"), _vec(b, v))) if path == "position" else [(path, v)]
     if typ == "wiggle":
         fr = _num(b, "freq", 1)
@@ -377,6 +383,125 @@ def stagger_weights(motion, t, duration, regs, W, H):
                 k = math.floor(tl / max(1e-3, step if step > 0 else 0.1))
                 w[rid] = 1.0 if hash01(k, seed + 7919 * rid) < _num(b, "density", 0.5) else 0.0
         out = w if out is None else {k: out.get(k, 1.0) * v for k, v in w.items()}
+    return out
+
+
+# ---- swap: the layers of a group trade their masks (clips), one step per trigger. The owner layer carries the
+#   behaviour, "with" = the ids of the other layers. The pictures stay where they are, only the masks move on.
+#   order loop | pingpong | random;  trigger beats | bars | markers | every | low | mid | high;  nth (every nth
+#   trigger), every (s), threshold (0-1: how strong a hit has to be), gap (s, the shortest time between two steps),
+#   fade (s, 0 = the layer just appears in the new mask), transition cross (crossfade) | dip (out, then in), seed (random)
+SWAP_ORDERS = ("loop", "pingpong", "random")
+SWAP_TRIGGERS = ("beats", "bars", "markers", "every", "low", "mid", "high")
+
+
+def swap_of(motion):
+    return next((b for b in motion or [] if isinstance(b, dict) and b.get("type") == "swap" and b.get("on") is not False), None)
+
+
+def swap_times(b, ctx, duration):
+    """The times a swap steps at (sorted, after the start of its range up to its end). Kept in ctx per setting."""
+    s, e = span(b, duration)
+    trig = b.get("trigger") if b.get("trigger") in SWAP_TRIGGERS else "beats"
+    nth = max(1, int(_num(b, "nth", 1)))
+    every, thr, gap = max(0.02, _num(b, "every", 0.5)), _num(b, "threshold", 0.3), max(0.0, _num(b, "gap", 0.1))
+    memo = ctx.setdefault("_swap_times", {}) if isinstance(ctx, dict) else {}
+    key = json.dumps([s, e, trig, nth, every, thr, gap])
+    if key in memo:
+        return memo[key]
+    if trig == "every":
+        ts, j = [], 1
+        while s + j * every <= e + 1e-9 and len(ts) < 20000:
+            ts.append(s + j * every)
+            j += 1
+    else:
+        if trig in ("beats", "bars"):
+            ts = ((ctx or {}).get("beats") or [])[::4 if trig == "bars" else 1]
+        elif trig == "markers":
+            ts = (ctx or {}).get("markers") or []
+        else:
+            off, ts, last = (ctx or {}).get("offset") or 0.0, [], None
+            for h in ((ctx or {}).get("hits") or {}).get(trig) or []:
+                x = h[0] - off
+                if h[1] >= thr and x > s + 1e-9 and (last is None or x - last >= gap - 1e-9):
+                    ts.append(x)
+                    last = x
+        ts = [x for x in ts if s + 1e-9 < x <= e + 1e-9][nth - 1::nth]
+    memo[key] = ts
+    return ts
+
+
+def swap_state(b, t, duration, ctx=None):
+    """(steps done at t, progress 0-1 of the fade into the last step, linear). After the range the last state holds."""
+    ts = swap_times(b, ctx, duration)
+    k = bisect.bisect_right(ts, t + 1e-9)
+    if k == 0:
+        return 0, 1.0
+    fade = max(0.0, _num(b, "fade", 0))
+    return k, (1.0 if fade <= 0 else min(1.0, max(0.0, (t - ts[k - 1]) / fade)))
+
+
+def swap_perm(n, k, order="loop", seed=1, memo=None):
+    """Where the n layers sit after k steps: out[i] = the member whose mask layer i shows through. loop: one on per
+    step; pingpong: there and back; random: a new shuffle per step, never the same twice in a row."""
+    if n <= 1 or k <= 0:
+        return list(range(n))
+    if order == "random":
+        chain = memo.setdefault(("perm", n, seed), [list(range(n))]) if isinstance(memo, dict) else [list(range(n))]
+        while len(chain) <= k:
+            j = len(chain)
+            d = sorted(range(n), key=lambda i: (hash01(i, seed + 7919 * j), i))
+            if d == list(range(n)):
+                d = [(i + 1) % n for i in range(n)]
+            chain.append([d[x] for x in chain[-1]])
+        return list(chain[k])
+    if order == "pingpong":
+        m = k % (2 * n - 2)
+        k = m if m < n else 2 * n - 2 - m
+    return [(i + k) % n for i in range(n)]
+
+
+def swap_mix(b, t, duration, n, ctx=None):
+    """[[(member, weight), ...] per layer] at t: one mask each, two while a step crossfades. The layers are in
+    stack order (the first on top), so in a mask that changes hands only the upper layer fades and the lower one
+    is whole underneath: a clean crossfade without the background showing through. transition = dip: the layer
+    fades out of its old mask in the first half of the fade and into the new one in the second half."""
+    k, p = swap_state(b, t, duration, ctx)
+    u = _ramp(p)
+    order, seed = b.get("order") if b.get("order") in SWAP_ORDERS else "loop", int(_num(b, "seed", 1))
+    memo = ctx.setdefault("_swap_perm", {}) if isinstance(ctx, dict) else None
+    now = swap_perm(n, k, order, seed, memo)
+    if k == 0 or p >= 1:
+        return [[(now[i], 1.0)] for i in range(n)]
+    was = swap_perm(n, k - 1, order, seed, memo)
+    if b.get("transition") == "dip":
+        return [[(now[i], 1.0)] if was[i] == now[i] else [(was[i], 1.0 - _ramp(2 * p)), (now[i], _ramp(2 * p - 1))] for i in range(n)]
+    comes, goes = {now[i]: i for i in range(n)}, {was[i]: i for i in range(n)}
+    return [[(now[i], 1.0)] if was[i] == now[i] else
+            [(was[i], 1.0 - u if i < comes[was[i]] else 1.0), (now[i], u if i < goes[now[i]] else 1.0)] for i in range(n)]
+
+
+def swap_clips(layers, t, duration, ctx=None):
+    """{layer id: [[clip selector, weight], ...]} at t for every layer of a swap group (document layers, the first
+    on top). Members need a clip and trade in stack order; a layer is in one group only (the first that names it)."""
+    index = {str(L.get("id")): i for i, L in enumerate(layers or []) if isinstance(L, dict)}
+    by_id = {str(L.get("id")): L for L in layers or [] if isinstance(L, dict) and L.get("kind") != "base"
+             and isinstance(L.get("clip"), str) and L["clip"].strip()}
+    out = {}
+    for L in layers or []:
+        b = swap_of(L.get("motion")) if isinstance(L, dict) else None
+        lid = str(L.get("id")) if b else ""
+        if not b or lid not in by_id or lid in out:
+            continue
+        ids = [lid]
+        for i in b.get("with") if isinstance(b.get("with"), list) else []:
+            if isinstance(i, str) and i in by_id and i not in ids and i not in out:
+                ids.append(i)
+        if len(ids) < 2:
+            continue
+        ids.sort(key=index.get)
+        for i, mix in zip(ids, swap_mix(b, t, duration, len(ids), ctx)):
+            out[i] = [[by_id[ids[m]]["clip"], w] for m, w in mix]
     return out
 
 

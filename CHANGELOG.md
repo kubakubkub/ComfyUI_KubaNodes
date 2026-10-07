@@ -6,6 +6,19 @@ may have changed since.
 
 ## Not released yet
 
+- **Layers trade their masks with the sound.** New behaviour **swap masks** in the kubakub director: several layers,
+  each clipped to its own regions, swap places at every step, so each picture shows through the next layer's mask.
+  The pictures stay where they are on the facade. A step on beats, bars, markers, a fixed time, or on a hit in the
+  low (kick, bass), mid or high (hats, clicks) frequencies; in a loop, there and back, or shuffled; as a cut, a
+  crossfade, or out, then in. Tick the layers that take part in the behaviour's card.
+- **kubakub sound mask swap** (2d / motion): the same as one node, without the director. Sound, a background, a mask
+  batch and (if you like) a picture per layer in; frames, the moving mask of one layer, fps and sound out. It can
+  also step on a control wav (gate, trigger, LFO, CV from a synth) or on a list of times, and has a `feather` for
+  soft mask edges. Nothing connected runs a sample. Example `sound_mask_swap.json`.
+- **clip feather** in the director: a slider under `clip to` gives the clip of a layer a soft edge.
+- **sound level listens to a band.** `listen to` on the sound level behaviour: everything, low, mid or high.
+- No new packages: the sound analysis is numpy (kubakub/sound.py).
+
 - **The example workflows say where their models are.** Open one without its models and ComfyUI's missing-models
   dialog can offer the files (Klein, Qwen Image 2.1, LTX 2.5, SAM 3.1 and most of the MiniMax H3 set). The nodes
   themselves still download nothing. Without a link so far: the LTX video VAE and the H3 model and LoRA files; see

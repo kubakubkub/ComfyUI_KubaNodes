@@ -62,7 +62,8 @@ function keyValue(keys, t) {                          // keys sorted by t: [{t, 
   return typeof a.v === "number" ? a.v + (b.v - a.v) * u : mixHex(a.v, b.v, u);
 }
 // ---- behaviours (= kubakub/director/motion.py, checked by tests/test_motion.py): procedural motion on top of the keyframes
-const M_TYPES = ["wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio", "stagger", "repeat"];
+const M_TYPES = ["wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio", "stagger", "swap", "repeat"];
+const M_BANDS = ["low", "mid", "high"];               // the sound in three bands (kubakub/sound.py)
 const LEVEL_RATE = 100;                               // loudness curve samples per second
 function levelCurve(mono, sr) {                       // RMS per 1/100 s, / its 98th percentile (= motion.level_curve)
   const hop = sr / LEVEL_RATE, n = Math.floor(mono.length / hop); if (n < 1) return [];
@@ -71,8 +72,8 @@ function levelCurve(mono, sr) {                       // RMS per 1/100 s, / its 
   const ref = Float64Array.from(out).sort()[Math.min(n - 1, Math.floor(0.98 * (n - 1)))];
   return ref <= 1e-9 ? new Array(n).fill(0) : Array.from(out, v => Math.min(1.5, v / ref));
 }
-function mLevel(ctx, t, smooth) {
-  const lv = ctx?.level; if (!lv?.length) return 0;
+function mLevel(ctx, t, smooth, band) {
+  const lv = M_BANDS.includes(band) ? ctx?.bands?.[band] : ctx?.level; if (!lv?.length) return 0;
   const i = Math.floor((t + (ctx.offset || 0)) * LEVEL_RATE), k = Math.max(0, Math.round(smooth * LEVEL_RATE));
   if (i < 0 || i - k >= lv.length) return 0;
   let best = 0;
@@ -113,7 +114,7 @@ function mWave(kind, u) {
   return Math.sin(2 * Math.PI * u);
 }
 const M_DEF = { freq: 1, seed: 1, period: 2, every: 0.5, attack: 0.02, decay: 0.25, smooth: 0.15, nth: 1, step: 0.1, hold: 0.3,
-  density: 0.5, count: 1, dx: 100, cols: 4, radius: 200 };                           // = the defaults the engine reads with
+  density: 0.5, count: 1, dx: 100, cols: 4, radius: 200, threshold: 0.3, gap: 0.1 };                           // = the defaults the engine reads with
 const mDefault = (b, k) => k === "fade" ? (b.type === "stagger" ? 0.2 : 0) : k === "dy" ? ((b.layout || "line") === "grid" ? 100 : 0) : (M_DEF[k] ?? 0);
 const mNum = (b, k, d) => { const v = b[k]; return typeof v === "number" && Number.isFinite(v) ? v : d; };
 function mSpan(b, dur) { const s = Math.max(0, mNum(b, "t_start", 0)), e = mNum(b, "t_end", -1); return [s, e < 0 ? dur : Math.max(s, e)]; }
@@ -138,7 +139,7 @@ function mOne(b, t, dur, ctx) {                            // one behaviour at t
   if (typ === "pulse" || typ === "audio") {
     let v;
     if (typ === "pulse") { const lt = lastTrigger(b, ctx, t, s); v = lt === null ? 0 : amt * pulseEnv(b, t - lt); }
-    else v = amt * mLevel(ctx, t, Math.max(0, mNum(b, "smooth", 0.15)));
+    else v = amt * mLevel(ctx, t, Math.max(0, mNum(b, "smooth", 0.15)), b.band || "all");
     if (path === "position") { const [x, y] = mVec(b, v); return [["x", x], ["y", y]]; }
     return [[path, v]];
   }
@@ -220,6 +221,73 @@ function staggerWeights(motion, t, dur, regs, W, H) {  // {id: 0-1} of the activ
   }
   return out;
 }
+// swap (= motion.swap_*): the layers of a group trade their masks (clips), one step per trigger; the owner carries the
+// behaviour, "with" = the ids of the other layers. The pictures stay where they are, only the masks move on.
+const SWAP_ORDERS = ["loop", "pingpong", "random"], SWAP_TRIGGERS = ["beats", "bars", "markers", "every", "low", "mid", "high"];
+const swapOf = motion => (motion || []).find(b => b && b.type === "swap" && b.on !== false) || null;
+function swapTimes(b, ctx, dur) {                     // the times a swap steps at (after the start of its range up to its end)
+  const [s, e] = mSpan(b, dur), trig = SWAP_TRIGGERS.includes(b.trigger) ? b.trigger : "beats", nth = Math.max(1, Math.trunc(mNum(b, "nth", 1)));
+  const every = Math.max(0.02, mNum(b, "every", 0.5)), thr = mNum(b, "threshold", 0.3), gap = Math.max(0, mNum(b, "gap", 0.1));
+  const memo = ctx ? (ctx._swapTimes ||= {}) : {}, key = JSON.stringify([s, e, trig, nth, every, thr, gap]);
+  if (memo[key]) return memo[key];
+  let ts = [];
+  if (trig === "every") { for (let j = 1; s + j * every <= e + 1e-9 && ts.length < 20000; j++) ts.push(s + j * every); }
+  else {
+    if (trig === "beats" || trig === "bars") { const st = trig === "bars" ? 4 : 1; ts = (ctx?.beats || []).filter((_, i) => i % st === 0); }
+    else if (trig === "markers") ts = ctx?.markers || [];
+    else { const off = ctx?.offset || 0; let last = null;
+      for (const h of ctx?.hits?.[trig] || []) { const x = h[0] - off; if (h[1] >= thr && x > s + 1e-9 && (last === null || x - last >= gap - 1e-9)) { ts.push(x); last = x; } } }
+    ts = ts.filter(x => x > s + 1e-9 && x <= e + 1e-9).filter((_, i) => i % nth === nth - 1);
+  }
+  return memo[key] = ts;
+}
+function swapState(b, t, dur, ctx) {                  // [steps done at t, progress 0-1 of the crossfade into the last step]
+  const ts = swapTimes(b, ctx, dur); let lo = 0, hi = ts.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (ts[m] <= t + 1e-9) lo = m + 1; else hi = m; }
+  if (!lo) return [0, 1];
+  const fade = Math.max(0, mNum(b, "fade", 0));
+  return [lo, fade <= 0 ? 1 : Math.min(1, Math.max(0, (t - ts[lo - 1]) / fade))];
+}
+function swapPerm(n, k, order, seed, memo) {          // out[i] = the member whose mask layer i shows through after k steps
+  const id = Array.from({ length: n }, (_, i) => i);
+  if (n <= 1 || k <= 0) return id;
+  if (order === "random") {                           // a new shuffle per step, never the same twice in a row
+    const key = n + "|" + seed, chain = memo ? (memo[key] ||= [id]) : [id];
+    while (chain.length <= k) {
+      const j = chain.length;
+      let d = id.map(i => [hash01(i, seed + 7919 * j), i]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(x => x[1]);
+      if (d.every((v, i) => v === i)) d = id.map(i => (i + 1) % n);
+      chain.push(chain[chain.length - 1].map(x => d[x]));
+    }
+    return chain[k].slice();
+  }
+  if (order === "pingpong") { const m = k % (2 * n - 2); k = m < n ? m : 2 * n - 2 - m; }
+  return id.map(i => (i + k) % n);
+}
+function swapMix(b, t, dur, n, ctx) {                 // [[[member, weight] ...] per layer]; layers in stack order (first on top):
+  const [k, p] = swapState(b, t, dur, ctx), u = mRamp(p), order = SWAP_ORDERS.includes(b.order) ? b.order : "loop", seed = Math.trunc(mNum(b, "seed", 1));
+  const memo = ctx ? (ctx._swapPerm ||= {}) : null, now = swapPerm(n, k, order, seed, memo);   // in a mask that changes hands only the upper layer fades
+  if (k === 0 || p >= 1) return now.map(m => [[m, 1]]);
+  const was = swapPerm(n, k - 1, order, seed, memo), comes = {}, goes = {};
+  if (b.transition === "dip") return now.map((m, i) => was[i] === m ? [[m, 1]] : [[was[i], 1 - mRamp(2 * p)], [m, mRamp(2 * p - 1)]]);   // out, then in
+  now.forEach((m, i) => { comes[m] = i; }); was.forEach((m, i) => { goes[m] = i; });
+  return now.map((m, i) => was[i] === m ? [[m, 1]] : [[was[i], i < comes[was[i]] ? 1 - u : 1], [m, i < goes[m] ? u : 1]]);
+}
+function swapClips(layers, t, dur, ctx) {             // {layer id: [[clip selector, weight] ...]} of every swap group at t
+  const byId = {}, index = {}, out = {};
+  (layers || []).forEach((L, i) => { if (!L || typeof L !== "object") return; index[String(L.id)] = i;
+    if (L.kind !== "base" && typeof L.clip === "string" && L.clip.trim()) byId[String(L.id)] = L; });
+  for (const L of layers || []) {
+    const b = L && typeof L === "object" ? swapOf(L.motion) : null, lid = b ? String(L.id) : "";
+    if (!b || !(lid in byId) || lid in out) continue;
+    const ids = [lid];
+    for (const i of Array.isArray(b.with) ? b.with : []) if (typeof i === "string" && i in byId && !ids.includes(i) && !(i in out)) ids.push(i);
+    if (ids.length < 2) continue;
+    ids.sort((a, c) => index[a] - index[c]);
+    swapMix(b, t, dur, ids.length, ctx).forEach((mix, j) => { out[ids[j]] = mix.map(([m, w]) => [byId[ids[m]].clip, w]); });
+  }
+  return out;
+}
 // repeater (= motion.repeat_of / repeat_offsets / repeat_apply): copies of a box layer
 const repeatOf = motion => (motion || []).find(b => b && b.type === "repeat" && b.on !== false && Math.trunc(mNum(b, "count", 1)) > 1) || null;
 const repeatCount = b => Math.max(1, Math.min(200, Math.trunc(mNum(b, "count", 1))));
@@ -286,11 +354,15 @@ const M_PRESETS = [                                   // [label, needs a box, be
   ["stagger: regions on in order", false, { type: "stagger", path: "regions", mode: "sequence", order: "left", step: 0.08, fade: 0.25, direction: "in" }],
   ["stagger: chase (running light)", false, { type: "stagger", path: "regions", mode: "chase", order: "left", step: 0.1, fade: 0.08, hold: 0.3 }],
   ["stagger: wave across", false, { type: "stagger", path: "regions", mode: "wave", order: "centre", step: 0.05, period: 2 }],
-  ["stagger: random flicker", false, { type: "stagger", path: "regions", mode: "random", order: "left", step: 0.12, density: 0.5, seed: 1 }]];
+  ["stagger: random flicker", false, { type: "stagger", path: "regions", mode: "random", order: "left", step: 0.12, density: 0.5, seed: 1 }],
+  ["swap masks: on beats", false, { type: "swap", path: "masks", with: [], order: "loop", trigger: "beats", nth: 1 }],
+  ["swap masks: on low hits (kick, bass)", false, { type: "swap", path: "masks", with: [], order: "loop", trigger: "low", nth: 1, threshold: 0.3, gap: 0.1 }],
+  ["swap masks: on high hits (hats, clicks)", false, { type: "swap", path: "masks", with: [], order: "random", trigger: "high", nth: 1, threshold: 0.3, gap: 0.1, seed: 1 }],
+  ["sound → opacity (low)", false, { type: "audio", path: "opacity", amount: 1, smooth: 0.1, band: "low" }]];
 const M_PARAMS = { wiggle: [["amount", "amount"], ["freq", "per second"], ["seed", "seed"]], oscillate: [["amount", "amount"], ["period", "period s"], ["phase", "phase 0-1"]],
   drift: [["rate", "per second"]], random: [["amount", "amount"], ["every", "every s"], ["seed", "seed"]], loop: [],
   pulse: [["amount", "amount"], ["attack", "attack s"], ["decay", "decay s"]], audio: [["amount", "amount"], ["smooth", "release s"]],
-  stagger: [["step", "step s"], ["fade", "fade s"]],
+  stagger: [["step", "step s"], ["fade", "fade s"]], swap: [],
   repeat: [["count", "copies"], ["rotate", "rotate °/copy"], ["scale", "scale %/copy"], ["opacity", "opacity/copy"], ["delay", "delay s/copy"]] };
 // ---- audio: beats from a mono signal (onset envelope at 100 Hz, tempo by autocorrelation, phase by the best fit)
 function analyzeBeats(x, sr) {
@@ -481,6 +553,8 @@ const CSS = `
 .kkd-x{background:transparent;border:0;cursor:pointer;font-size:16px;line-height:1;color:var(--muted);padding:0 4px}.kkd-x:hover{color:#c0392b}
 .kkd-sub{font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:lowercase;margin:10px 0 2px;display:flex;gap:6px;align-items:center}
 .kkd-lstatus{font-size:12px;color:var(--muted);min-height:16px}
+.kkd-mwith{display:flex;flex-direction:column;gap:2px;margin-top:6px;font-size:12px;color:var(--muted)}.kkd-mwith label{display:flex;gap:6px;align-items:center;min-width:0}
+.kkd-mwith span{color:var(--ink,inherit);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kkd-mwith em{font-style:normal;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;text-align:right}
 .kkd-lstatus.err{color:#c0392b}
 .kkd-fxh{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;margin:8px 0 0;text-transform:lowercase}
 .kkd-fxh+.kkd-field{margin-top:2px}
@@ -675,7 +749,28 @@ class Director {
         .catch(e => console.warn("[kubakub director] level", e));
     }
     this._mctx.level = this._levelFile === file ? this._level : null;
+    const wantBands = file && this.layers?.some(L => L.motion?.some(b => b.on !== false && (b.type === "audio" && M_BANDS.includes(b.band) || b.type === "swap" && M_BANDS.includes(b.trigger))));
+    if (wantBands && this._soundFile !== file) {       // loudness and hits per band (kubakub/sound.py), so preview = render
+      this._soundFile = file; this._sound = null;
+      api.fetchApi("/kubakub/director/level", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file, bands: true }) })
+        .then(r => r.json()).then(j => { if (this._soundFile !== file || !j.hits || this.closed) return;
+          this._sound = { hits: j.hits, bands: j.bands || {} }; this.applyTime(this.tl.time); this.draw(); this.drawTimeline(); if (this.cur()) this.renderMotion(this.cur()); })
+        .catch(e => console.warn("[kubakub director] bands", e));
+    }
+    const snd = this._soundFile === file ? this._sound : null;
+    if (this._mctx.hits !== (snd?.hits || null)) { this._mctx.hits = snd?.hits || null; this._mctx.bands = snd?.bands || null; delete this._mctx._swapTimes; }
     return this._mctx;
+  }
+  swapNow() {                                        // {layer id: [[clip, weight] ...]} of the swap groups at the playhead (kept per frame)
+    if (!this.layers?.some(L => swapOf(L.motion))) return null;
+    const ctx = this.motionCtx();
+    const key = `${this.tl.time}|${this.tl.duration}|${ctx.key}|${ctx.hits ? this._soundFile : ""}|` + this.layers.map(L => `${L.id}:${L.kind}:${L.clip || ""}:${(b => b ? stable(b) : "")(swapOf(L.motion))}`).join(";");
+    if (this._swapNow?.key !== key) this._swapNow = { key, map: swapClips(this.layers, this.tl.time, this.tl.duration, ctx) };
+    return this._swapNow.map;
+  }
+  swapMixOf(L) {                                     // the masks a layer shows through now, or null when it has its own
+    const m = this.swapNow()?.[(L._copyOf || L).id];
+    return !m || (m.length === 1 && m[0][0] === L.clip) ? null : m;
   }
   applyMotion(L) {                                   // behaviours on top of the keyed / rest values; the rest values are what is saved
     const offs = motionOffsets(L.motion || [], this.tl.time, this.tl.duration, this.motionCtx());
@@ -717,10 +812,10 @@ class Director {
     const num = (b, i, k, label) => `<label class="kkd-mf"><span>${label}</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="${k}" value="${+(b[k] ?? mDefault(b, k))}"></label>`;
     el.kkdHTML = `<div class="kkd-sub" data-tip="Procedural motion on top of the keyframes: wiggle, oscillate, drift, random steps, looped keyframes. Several add up; the node renders them per frame">behaviours <span class="kkd-grow"></span>
       <select data-id="m-add" style="font-size:12px;max-width:150px"><option value="">+ behaviour</option>${M_PRESETS.map(([l, needBox, pr], i) => needBox && !box ? ""
-        : pr.type === "stagger" && !L.clip ? `<option value="${i}" disabled>${l} (clip to regions first)</option>` : `<option value="${i}">${l}</option>`).join("")}</select></div>` +
+        : (pr.type === "stagger" || pr.type === "swap") && !L.clip ? `<option value="${i}" disabled>${l} (clip to regions first)</option>` : `<option value="${i}">${l}</option>`).join("")}</select></div>` +
       mv.map((b, i) => `<div class="kkd-mcard ${b.on === false ? "off" : ""}">
         <div class="kkd-mhead"><select data-mi="${i}" data-mk="type">${M_TYPES.map(t => opt(t, b.type)).join("")}</select>
-          ${b.type === "repeat" ? `<select disabled><option>copies of this layer</option></select>` : b.type === "stagger" ? `<select disabled><option>regions (${esc(L.clip || "no clip")})</option></select>` : `<select data-mi="${i}" data-mk="path">${(pl => (pl.includes(b.path) ? "" : `<option value="" selected>— pick a value —</option>`) + pl.map(p => opt(p, b.path, lbl(p))).join(""))(b.type === "loop" ? this.loopPaths(L) : paths)}</select>`}
+          ${b.type === "repeat" ? `<select disabled><option>copies of this layer</option></select>` : b.type === "stagger" ? `<select disabled><option>regions (${esc(L.clip || "no clip")})</option></select>` : b.type === "swap" ? `<select disabled><option>masks (${esc(L.clip || "no clip")})</option></select>` : `<select data-mi="${i}" data-mk="path">${(pl => (pl.includes(b.path) ? "" : `<option value="" selected>— pick a value —</option>`) + pl.map(p => opt(p, b.path, lbl(p))).join(""))(b.type === "loop" ? this.loopPaths(L) : paths)}</select>`}
           <input type="checkbox" data-mi="${i}" data-mk="on" ${b.on === false ? "" : "checked"} data-tip="On / off"><button class="kkd-x" data-mdel="${i}" data-tip="Remove">×</button></div>
         <div class="kkd-mgrid">${(M_PARAMS[b.type] || []).map(([k, l]) => num(b, i, k, l)).join("")}
           ${b.type === "oscillate" ? `<label class="kkd-mf"><span>wave</span><select data-mi="${i}" data-mk="wave">${["sine", "triangle", "square", "saw", ...(b.path === "position" ? ["circle"] : [])].map(w => opt(w, b.wave || "sine")).join("")}</select></label>` : ""}
@@ -732,11 +827,26 @@ class Director {
             + ((b.mode || "sequence") === "sequence" ? `<label class="kkd-mf"><span>direction</span><select data-mi="${i}" data-mk="direction">${[["in", "turn on"], ["out", "turn off"]].map(([v, l]) => opt(v, b.direction || "in", l)).join("")}</select></label>` : "")
             + (b.mode === "chase" ? num(b, i, "hold", "hold s") : b.mode === "wave" ? num(b, i, "period", "period s") : b.mode === "random" ? num(b, i, "density", "on 0-1") + num(b, i, "seed", "seed") : "")
             + (b.order === "random" && b.mode !== "random" ? num(b, i, "seed", "seed") : "") : ""}
+          ${b.type === "swap" ? `<label class="kkd-mf" data-tip="loop: every layer moves on to the next mask. there and back: forwards, then backwards. random: a new shuffle every step"><span>order</span><select data-mi="${i}" data-mk="order">${[["loop", "loop"], ["pingpong", "there and back"], ["random", "random"]].map(([v, l]) => opt(v, b.order || "loop", l)).join("")}</select></label>
+            <label class="kkd-mf" data-tip="What makes a step: the tempo of the sound, your markers, a fixed time, or a hit in the low (kick, bass), mid or high (hats, clicks) frequencies"><span>step on</span><select data-mi="${i}" data-mk="trigger">${[["beats", "beats"], ["bars", "bars"], ["markers", "markers"], ["every", "every … s"], ["low", "low hits"], ["mid", "mid hits"], ["high", "high hits"]].map(([v, l]) => opt(v, b.trigger || "beats", l)).join("")}</select></label>`
+            + (b.trigger === "every" ? num(b, i, "every", "every s") : num(b, i, "nth", "every nth"))
+            + (M_BANDS.includes(b.trigger) ? num(b, i, "threshold", "hit strength 0-1") + num(b, i, "gap", "min gap s") : "")
+            + (b.order === "random" ? num(b, i, "seed", "seed") : "")
+            + (mNum(b, "fade", 0) > 0 ? `<label class="kkd-mf" data-tip="With a fade: crossfade = the new picture fades in over the old one. out, then in = the layer fades out of its old mask first, then into the new one. Fade 0 = it just appears"><span>fade style</span><select data-mi="${i}" data-mk="transition">${[["cross", "crossfade"], ["dip", "out, then in"]].map(([v, l]) => opt(v, b.transition || "cross", l)).join("")}</select></label>` : "") : ""}
+          ${b.type === "audio" ? `<label class="kkd-mf" data-tip="The whole sound, or only its low (kick, bass), mid or high (hats, clicks) frequencies"><span>listen to</span><select data-mi="${i}" data-mk="band">${[["all", "everything"], ["low", "low"], ["mid", "mid"], ["high", "high"]].map(([v, l]) => opt(v, b.band || "all", l)).join("")}</select></label>` : ""}
           ${b.type === "pulse" ? `<label class="kkd-mf"><span>on</span><select data-mi="${i}" data-mk="trigger">${[["beats", "beats"], ["bars", "bars"], ["markers", "markers"], ["every", "every … s"]].map(([v, l]) => opt(v, b.trigger || "beats", l)).join("")}</select></label>`
             + (b.trigger === "every" ? num(b, i, "every", "every s") : b.trigger === "markers" ? "" : num(b, i, "nth", "every nth")) : ""}
           ${b.path === "position" && (b.type === "drift" || b.type === "pulse" || b.type === "audio" || b.type === "oscillate" && b.wave !== "circle") ? num(b, i, "angle", "angle °") : ""}
           ${b.type === "repeat" ? "" : b.type === "loop" ? `<label class="kkd-mf"><span>mode</span><select data-mi="${i}" data-mk="mode">${["cycle", "pingpong", "continue"].map(m => opt(m, b.mode)).join("")}</select></label>`
             : `${num(b, i, "t_start", "from s")}<label class="kkd-mf"><span>to s</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="t_end" value="${mNum(b, "t_end", -1) < 0 ? "" : b.t_end}" placeholder="end"></label>${b.type === "drift" || b.type === "stagger" ? "" : num(b, i, "fade", "fade s")}`}</div>
+        ${b.type === "swap" ? `<div class="kkd-mwith" data-tip="The layers that trade masks with this one. Each needs its own 'clip to'. The pictures stay where they are: each layer shows through the mask of the next one, from the top of the layer list down">` +
+          (this.layers.filter(q => q !== L && q.kind !== "base").map(q => `<label><input type="checkbox" data-mi="${i}" data-mwith="${esc(q.id)}" ${(b.with || []).includes(q.id) ? "checked" : ""} ${q.clip ? "" : "disabled"}><span>${esc(q.name || q.id)}</span><em>${q.clip ? esc(q.clip) : "no clip"}</em></label>`).join("") || "no other layers yet") + `</div>` +
+          (() => { const n = (b.with || []).filter(id => this.layers.some(q => q.id === id && q.clip)).length, tr = b.trigger || "beats";
+            const msg = !L.clip ? "clip this layer to regions first ('clip to')" : !n ? "tick the layers that trade masks with this one"
+              : M_BANDS.includes(tr) ? (!this.tl.audio?.file ? "load a sound first (♪ audio in the timeline)" : !this._sound ? "listening to the sound…" : "")
+              : tr === "markers" ? (this.tl.markers?.length ? "" : "no markers yet (M in the timeline)") : tr !== "every" && !this.tl.beat?.bpm ? "no beats yet: load a sound (♪ audio) or set the tempo" : "";
+            const k = msg ? 0 : swapTimes(b, this.motionCtx(), this.tl.duration).length;
+            return `<div class="kkd-lstatus">${msg || (k ? `${k} steps · ${n + 1} layers` : "no step in this range: lower the hit strength or pick another 'step on'")}</div>`; })() : ""}
         ${b.type === "loop" && !b.path ? `<div class="kkd-lstatus">key a value at two times or more first, then loop it</div>` : ""}
         ${b.type === "audio" && !this.tl.audio?.file ? `<div class="kkd-lstatus">load a sound first (♪ audio in the timeline)</div>` : ""}
         ${b.type === "pulse" && (b.trigger || "beats") !== "every" && (b.trigger === "markers" ? !this.tl.markers?.length : !this.tl.beat?.bpm) ? `<div class="kkd-lstatus">${b.trigger === "markers" ? "no markers yet (M in the timeline)" : "no beats yet: load a sound (♪ audio) or set the tempo"}</div>` : ""}</div>`).join("");
@@ -1041,6 +1151,7 @@ class Director {
           const k = Math.min(n, 60), e2 = Math.min(e, this.tX(t0 + n * st)); ctx.moveTo(a, y + amp);
           for (let j = 0; j < k; j++) { const x0 = a + (e2 - a) * j / k, x1 = a + (e2 - a) * (j + 1) / k, yy = y + amp - 2 * amp * (j + 1) / k; ctx.lineTo(x0, yy); ctx.lineTo(x1, yy); }
           if ((b.mode || "sequence") !== "sequence") ctx.lineTo(e, y + amp); }
+        else if (b.type === "swap") { for (const q of swapTimes(b, this.motionCtx(), D)) { const x = this.tX(q); ctx.moveTo(x, y + amp); ctx.lineTo(x, y - 2 * amp); } }
         else if (b.type === "pulse") { const mc = this.motionCtx(), ts = mTriggers(b, mc) || (() => { const st = Math.max(0.02, mNum(b, "every", 0.5)), o = []; for (let q = t0; q <= t1 + 1e-9 && o.length < 5000; q += st) o.push(q); return o; })();
           for (const q of ts) if (q >= t0 - 1e-9 && q <= t1) { const x = this.tX(q); ctx.moveTo(x, y + amp); ctx.lineTo(x, y - 2 * amp); } }
         else if (b.type === "audio") { const mc = this.motionCtx(), sm = Math.max(0, mNum(b, "smooth", 0.15));
@@ -1313,7 +1424,7 @@ class Director {
   }
   serialize() {
     const keys = ["id", "name", "kind", "source", "visible", "opacity", "blend", "x", "y", "w", "h", "rotation", "flip_h", "flip_v",
-      "clip", "holes", "mask", "adjust", "action", "prompt", "denoise", "color", "size", "remove_bg", "light", "anim", "video", "media", "shape", "fx", "light_react", "motion"];
+      "clip", "clip_feather", "holes", "mask", "adjust", "action", "prompt", "denoise", "color", "size", "remove_bg", "light", "anim", "video", "media", "shape", "fx", "light_react", "motion"];
     const doc = { version: 1, canvas: [this.W, this.H],
       layers: this.layers.map(L => { const o = Object.fromEntries(keys.filter(k => L[k] !== undefined).map(k => [k, L[k]]));
         for (const p of Object.keys(L._rest || {})) {                       // saved without the behaviours (the node adds them per frame)
@@ -1359,7 +1470,7 @@ class Director {
   lightKey(L, ignoreQuality) {                        // what the preview depends on: the rig and the glowing layers
     const deps = (L.light.glow || []).filter(g => g.on !== false && String(g.by).startsWith("layer:")).map(g => {
       const q = this.layers?.find(z => z.id === g.by.slice(6));
-      return q ? [q.id, q.source, q.x, q.y, q.w, q.h, q.rotation, q.flip_h, q.flip_v, q.clip, q.ver || 0] : null;
+      return q ? [q.id, q.source, q.x, q.y, q.w, q.h, q.rotation, q.flip_h, q.flip_v, q.clip, q.ver || 0, stable(this.swapNow()?.[q.id] || "")] : null;
     });
     return stable({ light: L.light, deps, cast: this.castDeps(L), q: ignoreQuality ? "" : this.lq });
   }
@@ -1372,9 +1483,9 @@ class Director {
   castDeps(L) {
     const idx = this.castLayers(L); if (idx === null) return "matrix"; if (!idx.length) return null;
     return idx.map(i => { const q = this.layers[i];
-      return [q.id, q.kind, q.source, q.visible, q.opacity, q.blend, q.x, q.y, q.w, q.h, q.rotation, q.flip_h, q.flip_v, q.clip, q.holes,
+      return [q.id, q.kind, q.source, q.visible, q.opacity, q.blend, q.x, q.y, q.w, q.h, q.rotation, q.flip_h, q.flip_v, q.clip, q.clip_feather || 0, q.holes,
         stable(q.mask), stable(q.adjust), q.ver || 0, q.kind === "light" ? q.imgKey || "" : "", !!q.remove_bg, q.img ? 1 : 0,
-        q.motion ? stable(q.motion) : "", q.motion?.some(b => b.on !== false && (b.type === "stagger" || b.type === "repeat" && mNum(b, "delay", 0))) ? this.tl.time : ""]; });
+        q.motion ? stable(q.motion) : "", q.motion?.some(b => b.on !== false && (b.type === "stagger" || b.type === "repeat" && mNum(b, "delay", 0))) ? this.tl.time : "", stable(this.swapNow()?.[q.id] || "")]; });
   }
   castImage(L) {                                     // the window's own composite of what is cast, as a PNG data URL
     const idx = this.castLayers(L), P = L.light.projector;
@@ -1583,11 +1694,14 @@ class Director {
     return c;
   }
   clipMask(L) {                                      // the clip regions; with stagger behaviours each region weighted
-    if (!L.motion?.some(b => b.type === "stagger" && b.on !== false) || !this.labels) return this.regionMask(L.clip);
+    const mix = this.swapMixOf(L), stgOn = L.motion?.some(b => b.type === "stagger" && b.on !== false);   // swap: the masks it holds now
+    if ((!stgOn && !mix) || !this.labels) return this.regionMask(L.clip);
+    if (!stgOn && mix.length === 1) return this.regionMask(mix[0][0]);
     const lab = this.labels, owner = L._copyOf || L;  // the cache lives on the layer, its copies share it
+    const sel = mix ? mix.map(m => m[0]).join("\u0001") : L.clip;
     let c = owner._stg;
-    if (!c || c.sel !== L.clip || c.lab !== lab || c.PW !== this.PW) {  // the clipped pixels once per selection, grouped by region
-      const ids = this.selectIds(L.clip), LW = lab.w, LH = lab.h, src = lab.ids;
+    if (!c || c.sel !== sel || c.lab !== lab || c.PW !== this.PW) {  // the clipped pixels once per selection, grouped by region
+      const ids = mix ? new Set(mix.flatMap(m => [...this.selectIds(m[0])])) : this.selectIds(L.clip), LW = lab.w, LH = lab.h, src = lab.ids;
       let maxId = 0; for (const id of ids) if (id > maxId) maxId = id;
       const slot = new Int32Array(maxId + 2).fill(-1), order = [], count = [];
       for (let q = 0; q < src.length; q++) { const id = src[q]; if (id <= maxId && ids.has(id)) { let k = slot[id]; if (k < 0) { k = slot[id] = order.length; order.push(id); count.push(0); } count[k]++; } }
@@ -1601,15 +1715,17 @@ class Director {
       }
       const rp = order.map((id, k) => ({ id, pos: buf.subarray(start[k], start[k + 1]), box: [box[k][0], box[k][1], box[k][2] + 1, box[k][3] + 1], a: -1 }));
       const regs = (this.m.regions || []).filter(r => ids.has(r.id)).map(r => [r.id, r.bbox]);
-      c = owner._stg = { sel: L.clip, lab, PW: this.PW, rp, t, g, im, regs, out: mkCanvas(this.PW, this.PH) };
+      c = owner._stg = { sel, lab, PW: this.PW, rp, t, g, im, regs, out: mkCanvas(this.PW, this.PH) };
     }
-    const stg = L.motion.filter(b => b.type === "stagger" && b.on !== false), key = `${this.tl.time}|${this.tl.duration}|${this.W}x${this.H}|${stable(stg)}`;
+    const stg = (L.motion || []).filter(b => b.type === "stagger" && b.on !== false), key = `${this.tl.time}|${this.tl.duration}|${this.W}x${this.H}|${stable(stg)}|${mix ? stable(mix) : ""}`;
     if (c.key === key) return c.out;                 // the same weights: this frame's mask is ready
     c.key = key;
-    const w = staggerWeights(stg, this.tl.time, this.tl.duration, c.regs, this.W, this.H) || {}, A = c.im.data;
+    const w = (stg.length && staggerWeights(stg, this.tl.time, this.tl.duration, c.regs, this.W, this.H)) || {}, A = c.im.data;
+    let mw = null;                                   // swap: every region at the weight of the masks it is in
+    if (mix) { mw = {}; for (const [q, wt] of mix) for (const id of this.selectIds(q)) mw[id] = Math.min(1, (mw[id] || 0) + wt); }
     let X0 = Infinity, Y0 = Infinity, X1 = -1, Y1 = -1;
     for (const r of c.rp) {                          // only regions whose weight changed are rewritten
-      const v = w[r.id], a = v === undefined ? 255 : Math.round(255 * v); if (a === r.a) continue;
+      const v = (w[r.id] ?? 1) * (mw ? mw[r.id] ?? 0 : 1), a = Math.round(255 * v); if (a === r.a) continue;
       r.a = a; for (const q of r.pos) A[q * 4 + 3] = a;
       if (r.box[0] < X0) X0 = r.box[0]; if (r.box[1] < Y0) Y0 = r.box[1]; if (r.box[2] > X1) X1 = r.box[2]; if (r.box[3] > Y1) Y1 = r.box[3];
     }
@@ -1683,7 +1799,8 @@ class Director {
       else g.rect(-w / 2, -h / 2, w, h);
       g.fill(); g.restore();
     }
-    if (L.clip) { g.save(); g.globalCompositeOperation = "destination-in"; g.drawImage(this.clipMask(L), 0, 0); g.restore(); }
+    if (L.clip) { g.save(); g.globalCompositeOperation = "destination-in"; const cf = (+L.clip_feather || 0) * this.k / 2;   // clip feather: a blurred mask
+      if (cf > 0.2) g.filter = `blur(${cf}px)`; g.drawImage(this.clipMask(L), 0, 0); g.restore(); }
   }
   maskSource(i) {
     const L = this.layers[i]; if (!L || !L.mask.by) return null;
@@ -1801,7 +1918,8 @@ class Director {
       lc.save(); lc.clearRect(0, 0, PW, PH);
       if (L.kind === "adjust") {
         lc.filter = this.filterOf(L.adjust); lc.drawImage(target, 0, 0); lc.filter = "none";
-        if (L.clip) { lc.globalCompositeOperation = "destination-in"; lc.drawImage(this.clipMask(L), 0, 0); }
+        if (L.clip) { lc.globalCompositeOperation = "destination-in"; const cf = (+L.clip_feather || 0) * this.k / 2;
+          if (cf > 0.2) lc.filter = `blur(${cf}px)`; lc.drawImage(this.clipMask(L), 0, 0); lc.filter = "none"; }
       } else this.drawContent(lc, L);
       lc.restore();
       if (fxf) {                                     // the layer's effects, before masks by other layers
@@ -2036,6 +2154,7 @@ class Director {
           <div class="kkd-field"><span>opacity</span><input type="range" data-id="i-op" min="0" max="1" step="0.01"><span class="v" data-id="i-op-v"></span></div>
           <div class="kkd-field" data-id="g-holes"><span>holes</span><input type="text" autocomplete="off" data-id="i-holes" placeholder="none" data-tip="Cut regions out of the base: layers below it show through · a name, group:NAME or W_F1_* (see the names in the regions view)"><span></span></div>
           <div class="kkd-field" data-id="g-clip"><span>clip to</span><input type="text" autocomplete="off" data-id="i-clip" placeholder="anywhere" data-tip="Keep the layer inside these regions · type a name, group:NAME or W_F1_*, or click a region with the R tool|R"><span></span></div>
+          <div class="kkd-field" data-id="g-clipf" data-tip="Soft edge of the clip, in pixels of the delivery size"><span>clip feather</span><input type="range" data-id="i-clipf" min="0" max="200" step="1"><span class="v" data-id="i-clipf-v"></span></div>
           <div class="kkd-field" data-id="g-mask"><span>mask by</span><select data-id="i-mask" data-tip="Use another layer to keep or cut this one · the mask layer can stay hidden|Ctrl Alt G"></select><span></span></div>
           <div class="kkd-field" data-id="g-maskopt"><span></span><div class="kkd-seg" data-id="i-mmode">
             <button class="kkd-pill" data-m="shape" data-tip="Keep where the mask layer has pixels (its alpha)">shape</button>
@@ -2201,6 +2320,7 @@ class Director {
     const typing = el => el === document.activeElement && this.regLayer === L;      // do not overwrite what is being typed
     $("g-holes").hidden = L.kind !== "base"; if (!typing($("i-holes"))) $("i-holes").value = L.holes || "";
     $("g-clip").hidden = L.kind === "base"; if (!typing($("i-clip"))) $("i-clip").value = L.clip || "";
+    $("g-clipf").hidden = L.kind === "base" || !L.clip; $("i-clipf").value = +L.clip_feather || 0; $("i-clipf-v").textContent = (+L.clip_feather || 0) + " px";
     const opts = [["", "none"], ["below", "layer below (clipping)"], ...this.layers.filter(q => q !== L && q.kind !== "adjust").map(q => [q.id, q.name + (q.visible ? "" : " (hidden)")])];
     $("i-mask").kkdHTML = opts.map(([v, t]) => `<option value="${esc(v)}" ${L.mask.by === v ? "selected" : ""}>${esc(t)}</option>`).join("");
     $("g-mask").hidden = L.kind === "base"; $("g-maskopt").hidden = !L.mask.by || L.kind === "base";
@@ -2903,6 +3023,8 @@ class Director {
     $("i-name").oninput = e => { this.once(); L().name = e.target.value; this.renderLayers(); $("insp-title").textContent = L().name; };
     $("i-blend").onchange = e => { this.snap(); L().blend = e.target.value; this.refresh(); };
     $("i-op").oninput = e => { this.once(); L().opacity = +e.target.value; $("i-op-v").textContent = Math.round(L().opacity * 100) + "%"; this.draw(); };
+    $("i-clipf").oninput = e => { this.once(); const v = +e.target.value; if (v > 0) L().clip_feather = v; else delete L().clip_feather;
+      $("i-clipf-v").textContent = v + " px"; this.fillRanges(); this.draw(); this.scheduleDraft(); };
     const setReg = (input, v) => { v = v.trim(); input.value = v; const key = input.dataset.id === "i-holes" ? "holes" : "clip";
       const q = this.regLayer && this.layers.includes(this.regLayer) ? this.regLayer : L();
       if ((q[key] || "") !== v) { this.snap(); q[key] = v; this.refresh(); } };
@@ -2959,27 +3081,33 @@ class Director {
     $("g-motion").addEventListener("input", e => { const b = MV(e), k = e.target.dataset.mk; if (!b || !e.target.hasAttribute("data-num")) return;
       this.once(); const v = parseFloat(String(e.target.value).replace(",", "."));
       if (k === "t_end" && !Number.isFinite(v)) b.t_end = -1; else if (Number.isFinite(v)) b[k] = k === "seed" ? Math.round(v) : v;
+      if (b.type === "swap" && k === "fade") {       // the fade style shows with a fade (after the edit, the field keeps its focus)
+        clearTimeout(this._swapFadeT); this._swapFadeT = setTimeout(() => { if (!this.closed && document.activeElement?.dataset?.mk !== "fade") this.renderInspector(); }, 600); }
       motionChanged(); });
     $("g-motion").addEventListener("change", e => { const q = L();
       if (e.target.dataset.id === "m-add") { const pr = M_PRESETS[+e.target.value]; if (!pr) return; this.snap();
         const b = { id: this.newId("m", q.motion || []), on: true, t_start: 0, t_end: -1, fade: 0, ...JSON.parse(JSON.stringify(pr[2])) };
-        if (b.path && b.type !== "loop" && b.type !== "stagger" && b.type !== "repeat" && !this.motionPaths(q).includes(b.path)) b.path = "";
+        if (b.path && b.type !== "loop" && b.type !== "stagger" && b.type !== "swap" && b.type !== "repeat" && !this.motionPaths(q).includes(b.path)) b.path = "";
         if (!b.path) b.path = b.type === "loop" ? (this.loopPaths(q)[0] || "") : this.motionPaths(q).find(p => p !== "position" && p !== "scale") || this.motionPaths(q)[0];
         if (String(b.path).startsWith("fx.") && !q.fx) q.fx = { ...fxOf(q) };
         (q.motion = q.motion || []).push(b); this.renderInspector(); motionChanged(); return; }
       const b = MV(e), k = e.target.dataset.mk; if (!b || e.target.hasAttribute("data-num")) return; this.snap();
+      if (e.target.dataset.mwith !== undefined) {    // swap masks: the layers that take part
+        const id = e.target.dataset.mwith, w = (Array.isArray(b.with) ? b.with : []).filter(x => x !== id && this.layers.some(z => z.id === x));
+        if (e.target.checked) w.push(id); b.with = w; this.renderInspector(); motionChanged(); return; }
       if (k === "on" || k === "orient") b[k] = e.target.checked; else b[k] = e.target.value;
       if (k === "type") {                            // a valid path, mode and the type's defaults
         const T = b.type, pr = (M_PRESETS.find(x => x[2].type === T && !x[2].path) || M_PRESETS.find(x => x[2].type === T))[2];
         for (const [dk, dv] of Object.entries(pr)) if (b[dk] === undefined && dk !== "path") b[dk] = dv;
         if (T === "repeat") b.path = "copies";
         else if (T === "stagger") { b.path = "regions"; if (!["sequence", "chase", "wave", "random"].includes(b.mode)) b.mode = "sequence"; }
+        else if (T === "swap") { b.path = "masks"; delete b.mode; if (!SWAP_ORDERS.includes(b.order)) b.order = "loop"; if (!SWAP_TRIGGERS.includes(b.trigger)) b.trigger = "beats"; if (!Array.isArray(b.with)) b.with = []; }
         else if (T === "loop") { b.mode = ["cycle", "pingpong", "continue"].includes(b.mode) ? b.mode : "cycle"; b.path = this.loopPaths(q).includes(b.path) ? b.path : this.loopPaths(q)[0] || ""; }
         else { delete b.mode; if (!this.motionPaths(q).includes(b.path)) b.path = this.motionPaths(q).find(p => p !== "position" && p !== "scale") || this.motionPaths(q)[0]; }
         if (String(b.path).startsWith("fx.") && !q.fx) q.fx = { ...fxOf(q) };
       }
       if (k === "path" && String(b.path).startsWith("fx.") && !q.fx) q.fx = { ...fxOf(q) };
-      if (k === "type" || k === "path" || k === "wave" || k === "trigger" || k === "mode" || k === "order" || k === "layout") this.renderInspector();
+      if (k === "type" || k === "path" || k === "wave" || k === "trigger" || k === "mode" || k === "order" || k === "layout" || k === "band") this.renderInspector();
       motionChanged(); });
     $("g-motion").addEventListener("click", e => { const d = e.target.closest("[data-mdel]"); if (!d) return; this.snap();
       const q = L(); q.motion.splice(+d.dataset.mdel, 1); if (!q.motion.length) delete q.motion; this.renderInspector(); motionChanged(); });

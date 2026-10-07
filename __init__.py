@@ -27,6 +27,7 @@ _MODULES = [                        # nodes/<menu group>/<module>
     "nodes.director.nodes_director",
     "nodes.motion.nodes_video",
     "nodes.motion.nodes_keyframes",
+    "nodes.motion.nodes_soundswap",
     "nodes.motion.ltxv_trim_exact_Kub",
     "nodes.post.nodes_post",
     "nodes.scene3d.nodes_scene3d",

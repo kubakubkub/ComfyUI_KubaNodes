@@ -36,6 +36,7 @@ from ...kubakub.director import projmask as pmk
 from ...kubakub.director import render as rd
 from ...kubakub.director import motion as mo
 from ...kubakub import keyframes as kf
+from ...kubakub import sound as snd
 from ...kubakub.director.blend import MODES
 from ...kubakub.io_types import DirectorType, RegionsType, SceneType
 from ...kubakub.types import Regions
@@ -507,14 +508,49 @@ def level_of(name):
     return _LEVEL_CACHE[key]
 
 
+_SOUND_CACHE = {}
+
+
+def sound_of(name):
+    """The bands of a sound file in input/ (kubakub/sound.py analyze: loudness and hits in low / mid / high), cached
+    per file + mtime; None when missing. The window fetches the same numbers (/kubakub/director/level, bands)."""
+    path = _input_path(str(name or "")) if name else None
+    if not path:
+        return None
+    key = (path, os.path.getmtime(path))
+    if key not in _SOUND_CACHE:
+        from comfy_extras.nodes_audio import load as load_audio
+        wave, sr = load_audio(path)
+        if len(_SOUND_CACHE) > 4:
+            _SOUND_CACHE.clear()
+        _SOUND_CACHE[key] = snd.analyze(wave.float().mean(dim=0).numpy(), int(sr))
+    return _SOUND_CACHE[key]
+
+
+def motion_needs(doc):
+    """(loudness curve wanted, bands wanted) by the behaviours of a document: sound level, sound level of a band,
+    swap masks on low / mid / high."""
+    level = bands = False
+    for L in (doc or {}).get("layers", []):
+        for b in (L.get("motion") or []) if isinstance(L, dict) else []:
+            if not isinstance(b, dict) or b.get("on") is False:
+                continue
+            if b.get("type") == "audio":
+                if b.get("band") in mo.BANDS:
+                    bands = True
+                else:
+                    level = True
+            elif b.get("type") == "swap" and b.get("trigger") in mo.BANDS:
+                bands = True
+    return level, bands
+
+
 def motion_context(doc):
-    """Beats / markers for pulse behaviours and, when a layer uses an audio behaviour, the loudness curve of the
-    timeline's sound file."""
-    level = None
-    if any(isinstance(L, dict) and any(isinstance(b, dict) and b.get("type") == "audio" and b.get("on") is not False
-                                       for b in L.get("motion") or []) for L in (doc or {}).get("layers", [])):
-        level = level_of((((doc or {}).get("timeline") or {}).get("audio") or {}).get("file"))
-    return mo.context(doc, level)
+    """Beats / markers for pulse and swap behaviours and, when a behaviour listens to the sound, the loudness curve
+    and the bands of the timeline's sound file."""
+    want_level, want_bands = motion_needs(doc)
+    name = (((doc or {}).get("timeline") or {}).get("audio") or {}).get("file")
+    return mo.context(doc, level_of(name) if want_level else None, sound_of(name) if want_bands else None)
 
 
 def timeline_audio(doc, sample_rate=44100):
@@ -1215,14 +1251,19 @@ def _register_routes():
             return web.json_response({"error": str(e).splitlines()[0]}, status=500)
 
     async def level(request):
-        """{file} (in input/) -> {"rate": 100, "level": [...]}: the loudness curve the node animates audio behaviours with."""
+        """{file} (in input/) -> {"rate": 100, "level": [...]}: the loudness curve the node animates audio behaviours with.
+        {file, bands: true} -> also "bands" {low / mid / high: [...]} and "hits" {low / mid / high: [[t, strength]]}."""
         import asyncio
         try:
             body = await request.json()
             lv = await asyncio.get_running_loop().run_in_executor(None, level_of, body.get("file"))
             if lv is None:
                 return web.json_response({"error": "sound not found"}, status=404)
-            return web.json_response({"rate": mo.LEVEL_RATE, "level": [round(v, 5) for v in lv]})
+            out = {"rate": mo.LEVEL_RATE, "level": [round(v, 5) for v in lv]}
+            if body.get("bands"):
+                s = await asyncio.get_running_loop().run_in_executor(None, sound_of, body.get("file"))
+                out.update(bands=s["curves"], hits=s["hits"])
+            return web.json_response(out)
         except Exception as e:  # noqa: BLE001
             log.exception("[KUBA director] level curve failed")
             return web.json_response({"error": str(e).splitlines()[0]}, status=500)

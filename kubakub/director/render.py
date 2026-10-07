@@ -12,6 +12,7 @@ Document (version 1):
         "visible": true, "opacity": 1.0, "blend": "normal",
         "x": 0, "y": 0, "w": 100, "h": 100, "rotation": 0, "flip_h": false, "flip_v": false,   image placement
         "clip": "",                  region selector (plan syntax): the layer only shows inside those regions
+        "clip_feather": 0,           soft edge of the clip, canvas px
         "mask": {"by": "", "mode": "shape" | "brightness", "invert": false},   by = layer id or "below"
         "holes": "",                 base only: region selector cut open, layers below show through
         "adjust": {"brightness": 1, "contrast": 1, "saturate": 1, "hue": 0, "sepia": 0},
@@ -208,6 +209,9 @@ def parse(doc) -> dict:
             "shape": _shape(raw.get("shape")) if kind == "shape" else None,
             "stagger": [b for b in raw.get("motion") or [] if isinstance(b, dict) and b.get("type") == "stagger" and b.get("on") is not False]
                        if raw.get("clip") else [],
+            "clip_feather": max(0.0, _num(raw, "clip_feather", 0)) if raw.get("clip") else 0.0,
+            "clip_mix": [[str(m[0]), min(max(float(m[1]), 0.0), 1.0)] for m in raw.get("clip_mix") or []
+                         if isinstance(m, (list, tuple)) and len(m) == 2 and _is_num(m[1])] if raw.get("clip") else [],
         })
     if sum(1 for q in out if q["kind"] == "base") != 1:
         raise DocumentError("the document needs exactly one base layer")
@@ -464,10 +468,16 @@ def animate(doc, t, ctx=None):
 
     out = []
     src_layers = d.get("layers", [])
+    swaps = mo.swap_clips(src_layers, t, dur, ctx) if any(isinstance(L, dict) and mo.swap_of(L.get("motion")) for L in src_layers) else {}
     for idx, L in enumerate(src_layers):
         if not isinstance(L, dict):
             out.append(L)
             continue
+        mix = swaps.get(str(L.get("id")))
+        if mix and mix != [[L.get("clip"), 1.0]]:     # the masks this layer shows through now (swap behaviour)
+            L["clip_mix"] = mix
+        else:
+            L.pop("clip_mix", None)
         rb = mo.repeat_of(L.get("motion")) if L.get("kind") in ("image", "shape") else None
         if rb and isinstance(L.get("mask"), dict) and L["mask"].get("by") == "below":
             nxt = src_layers[idx + 1] if idx + 1 < len(src_layers) and isinstance(src_layers[idx + 1], dict) else None
@@ -488,7 +498,7 @@ def animate(doc, t, ctx=None):
                     c = _copy1(L)
                 c["id"] = f"{L.get('id')}~{k}"
                 out.append(mo.repeat_apply(c, rb, k))
-    for L in out:                                     # applied: the frame needs no keys, only the stagger (clip weights)
+    for L in out:                                     # applied: the frame needs no keys, only the stagger (clip weights; swaps are in clip_mix)
         if isinstance(L, dict):
             L.pop("anim", None)
             if L.get("motion"):
@@ -510,6 +520,8 @@ def scale_doc(doc, s):
                     L["fx"][key] = L["fx"][key] * s
         if isinstance(L.get("shape"), dict) and _is_num(L["shape"].get("feather")):
             L["shape"]["feather"] = L["shape"]["feather"] * s
+        if _is_num(L.get("clip_feather")):
+            L["clip_feather"] = L["clip_feather"] * s
     if isinstance(d.get("canvas"), list) and len(d["canvas"]) == 2:
         d["canvas"] = [max(1, round(d["canvas"][0] * s)), max(1, round(d["canvas"][1] * s))]
     return d
@@ -538,6 +550,14 @@ def layer_shape(doc, layer_id, sources, labels=None, table=None, W=0, H=0):
         return None
     if L["clip"]:
         cm = region_mask(labels, table, L["clip"])
+        if L["clip_mix"]:
+            cm = None
+            for sel, wt in L["clip_mix"]:
+                one = region_mask(labels, table, sel)
+                if one is not None:
+                    cm = one * wt if cm is None else np.minimum(1.0, cm + one * wt)
+        if cm is not None and L["clip_feather"] >= 0.5:
+            cm = cv2.GaussianBlur(np.ascontiguousarray(cm, np.float32), (0, 0), L["clip_feather"] / 2.0, borderType=cv2.BORDER_REPLICATE)
         m = m * cm if cm is not None and cm.shape == m.shape else np.zeros_like(m)
     return m
 
@@ -632,23 +652,48 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
     stagger_luts = {}                                   # this render (one time): per selection + stagger settings
 
     def clip_crop(L, ids, box):
-        """The clip mask; with stagger behaviours each region weighted by its stagger value at the document time."""
-        if not L["stagger"] or labels is None or not ids:
+        """The clip mask of a box, with the layer's clip feather: a soft edge, in canvas pixels."""
+        f = L["clip_feather"]
+        x0, y0, x1, y1 = box
+        if f < 0.5 or x1 <= x0 or y1 <= y0:
+            return clip_hard(L, ids, box)
+        mg = int(f * 1.5) + 2                           # the blur reaches 3 sigma, sigma = feather / 2
+        X0, Y0, X1, Y1 = max(0, x0 - mg), max(0, y0 - mg), min(W, x1 + mg), min(H, y1 + mg)
+        big = cv2.GaussianBlur(np.ascontiguousarray(clip_hard(L, ids, (X0, Y0, X1, Y1)), np.float32), (0, 0), f / 2.0,
+                               borderType=cv2.BORDER_REPLICATE)
+        return big[y0 - Y0:y1 - Y0, x0 - X0:x1 - X0]
+
+    def clip_hard(L, ids, box):
+        """The clip mask; with stagger behaviours each region weighted by its stagger value at the document time.
+        A layer in a swap (clip_mix from animate) shows through the masks it holds now, each at its weight."""
+        mix = L["clip_mix"]
+        if (not L["stagger"] and not mix) or labels is None or not (ids or mix):
             return region_crop(ids, box)
-        key = (tuple(ids), json.dumps(L["stagger"], sort_keys=True))
+        key = (tuple(ids), json.dumps([L["stagger"], mix], sort_keys=True))
         lut = stagger_luts.get(key)
         if lut is None:
-            geo = (table or {}).get("canvas_bbox") or {g["region_id"]: g.get("bbox", [0, 0, 0, 0]) for g in (table or {}).get("regions", [])}
-            cw, ch = (table or {}).get("canvas_size") or (W, H)
-            regs = [(int(i), list(geo[i])) for i in ids if i in geo]
-            wts = mo.stagger_weights(L["stagger"], tl_now["time"], tl_now["duration"], regs, cw, ch) or {}
             lmax = mc.get(("lmax",))
             if lmax is None:
                 lmax = mc[("lmax",)] = int(labels.max()) if labels.size else 0
             lut = np.zeros(lmax + 1, np.float32)
-            for i in ids:
-                if 0 <= i <= lmax:
-                    lut[i] = wts.get(int(i), 1.0)
+            if mix:
+                ids = []
+                for sel, wt in mix:
+                    for i in ids_of(sel, f"{L['name']} swap"):
+                        if 0 <= i <= lmax:
+                            lut[i] = min(1.0, lut[i] + wt)
+                            ids.append(i)
+                ids = sorted(set(ids))
+            else:
+                lut[[i for i in ids if 0 <= i <= lmax]] = 1.0
+            if L["stagger"]:
+                geo = (table or {}).get("canvas_bbox") or {g["region_id"]: g.get("bbox", [0, 0, 0, 0]) for g in (table or {}).get("regions", [])}
+                cw, ch = (table or {}).get("canvas_size") or (W, H)
+                regs = [(int(i), list(geo[i])) for i in ids if i in geo]
+                wts = mo.stagger_weights(L["stagger"], tl_now["time"], tl_now["duration"], regs, cw, ch) or {}
+                for i in ids:
+                    if 0 <= i <= lmax:
+                        lut[i] *= wts.get(int(i), 1.0)
             stagger_luts[key] = lut
         x0, y0, x1, y1 = box
         return lut[labels[y0:y1, x0:x1]]

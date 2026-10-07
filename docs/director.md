@@ -173,13 +173,47 @@ each has a time range (from / to), a fade and an on / off switch. The timeline s
 | random steps | a new random value every n seconds | the same |
 | loop keyframes | cycle / ping-pong / continue after the last key | a keyed value |
 | pulse | a kick on beats, bars, markers or every n s (attack, decay, every nth) | the same numbers |
-| sound level | the loudness of the timeline sound (release) | the same numbers |
+| sound level | the loudness of the timeline sound (release); `listen to`: everything, or only its low (kick, bass), mid or high (hats, clicks) frequencies | the same numbers |
 | stagger | the regions a layer is clipped to light up one after another: sequence in / out, chase, wave, random; order left / right / top / bottom / centre / outside / size / random | a layer clipped to regions |
+| swap | layers trade their masks in time with the sound (see below) | layers clipped to regions |
 | repeat | copies in a line / grid / ring, rotation / scale / opacity per copy, a delay per copy replays the animation later (echo trails) | image and shape layers |
 
 Presets: wiggle position / rotation, breathe, orbit, sway, spin, drift, flicker, pulse, pulse on beats, kick on
 markers, flash on bars (glow), sound → scale / opacity, regions on in order, chase, wave across, random flicker,
-repeat in a row / grid / ring, echo trail.
+repeat in a row / grid / ring, echo trail, swap masks on beats / low hits / high hits, sound → opacity (low).
+
+### Swap masks: layers trade their masks with the sound
+
+Several layers, each clipped to its own regions (`clip to`): a look for the top windows, another for the middle
+floor, a third for the arches. **swap masks** makes them trade places: at every step each picture moves on to the
+mask of the next layer. The pictures stay where they are on the facade; only the masks move, so nothing slides.
+
+1. Give each layer its own `clip to`.
+2. Select one of them, **behaviours → + behaviour → swap masks: on beats** (or on low hits / on high hits).
+3. Tick the other layers in the card. The status line counts the steps it found.
+
+| setting | what it does |
+|---|---|
+| order | loop (on to the next mask), there and back, random (a new shuffle every step, never the same twice) |
+| step on | beats, bars, markers (M in the timeline), every … s, or low / mid / high hits of the timeline sound |
+| every nth | only every nth beat, bar, marker or hit |
+| hit strength, min gap | low / mid / high: how strong a hit has to be (0-1) and the shortest time between two steps |
+| fade s | 0 = the picture just appears in the new mask; above 0 it fades |
+| fade style | crossfade (the new picture fades in over the old one, the base never shows through) or out, then in |
+| from s / to s | before `from` every layer has its own mask; after `to` the last arrangement holds |
+
+Soft edges: **clip feather** under `clip to` in the inspector (pixels of the delivery size) softens the clip of any
+layer, swapping or not. It belongs to the layer, so the picture takes its soft edge along into every mask it holds.
+
+The layers trade in the order of the layer list, top down, whichever of them carries the behaviour. A layer can be
+in one swap. A stagger on a layer works on the mask it holds at that moment. The saved document keeps every
+layer's own `clip to`; the node works the swap out per frame, exactly like the window (same engine, 1300 cases in
+tests/test_motion.py). The hits come from the node (kubakub/sound.py), so the preview is what renders.
+
+A control wav or a list of times as the trigger is in the node below; in the director, put markers (M) where the
+steps should be and use `step on = markers`.
+
+For the same thing without the window, see **kubakub sound mask swap** below.
 
 How it stays exact: the window and the node run the same engine (kubakub/director/motion.py and its twin in
 web/kubakub_director.js, integer-hash noise, identical rounding); tests/test_motion.py runs ~500 cases through both.
@@ -188,5 +222,44 @@ behaviour's offset); the node adds them per frame (render.animate), the still re
 the saved tempo, the loudness curve from the sound file (the window fetches the node's own curve), the stagger order
 from the same region boxes. A drag of a moving layer moves its rest position.
 
-Test in the UI: a shape + "orbit" or "breathe", play; a layer clipped to `*` + "stagger: regions on in order";
+Test in the UI: three shapes of different colours, each clipped to another floor of windows, a song (♪ audio),
+"swap masks: on beats" on one of them, tick the other two, play. A shape + "orbit" or "breathe", play; a layer clipped to `*` + "stagger: regions on in order";
 a song (♪ audio) + "pulse on beats (scale)"; "echo trail" on a keyed shape.
+
+## kubakub sound mask swap (2d / motion)
+
+One node that does the swap without the director: masks in, moving masks and finished frames out.
+
+```
+Load Audio ─ audio ┐
+picture ─ background ┤
+mask batch ─ masks ┼─ kubakub sound mask swap ─ frames / fps / audio ─ Create Video ─ Save Video
+image batch ─ pictures ┘                      └ mask (the moving mask of one layer)
+```
+
+Nothing connected runs a sample: the sample facade, its windows as four layers (one per floor) and a built-in
+beat. Example: `example_workflows/sound_mask_swap.json`.
+
+| input | what it is |
+|---|---|
+| audio | the sound; it also sets the length |
+| background | the picture behind the layers; it gives the size |
+| masks | one mask per layer (a mask batch, at least two) |
+| pictures | one whole picture per layer (an image batch; repeated when there are fewer). Empty = a colour per layer |
+| order | loop, pingpong (there and back), random |
+| step_on | beats, bars, every, low / mid / high (hits in those frequencies), signal, list |
+| nth | every nth beat, bar or hit |
+| fade, fade_style | 0 = the picture just appears; above 0 a crossfade, or out, then in |
+| feather | soft mask edges in pixels of the background |
+| threshold | how strong a hit has to be (0-1); for `signal` the level it has to rise through |
+| fps, seconds, scale | frames per second, length (0 = the whole sound), size of the frames |
+| mask_of | which layer's moving mask goes out on `mask` |
+| signal | step_on = signal: a control track as a wav (gate, trigger, LFO, envelope, CV recorded from a synth). A step each time it rises through `threshold`; it has to fall below half of it before the next |
+| step_times | step_on = list: times in seconds, e.g. `0.5, 1, 1.75, 3` |
+| start, bpm, every, gap, seed (advanced) | where in the sound the frames start, a tempo you know (0 = found), the fixed time, the shortest time between two steps, the shuffle |
+
+The first mask of the batch is the top layer. `mask` is what is seen of that layer, so during a crossfade it is
+the part the layer above has not covered yet. `report` says what was found: tempo or hits, steps, frames.
+
+RAM: 250 frames at 1600x1080 are about 7 GB; lower `scale` or `seconds` for long sounds (the node says so before
+it starts). Test without ComfyUI: `tests/test_soundswap.py`.
