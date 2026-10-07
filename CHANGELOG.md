@@ -4,6 +4,13 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## Not released yet
+
+- **The example workflows say where their models are.** Open one without its models and ComfyUI's missing-models
+  dialog can offer the files (Klein, Qwen Image 2.1, LTX 2.5, SAM 3.1 and most of the MiniMax H3 set). The nodes
+  themselves still download nothing. Without a link so far: the LTX video VAE and the H3 model and LoRA files; see
+  [docs/MODELS.md](docs/MODELS.md). For maintainers: `python tools/add_model_links.py` writes the links.
+
 ## 0.2.0 (2026-10-06)
 
 The building in its street, and the lit place seen from where the audience stands.

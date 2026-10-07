@@ -284,7 +284,14 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "UNETLoader"
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "flux-2-klein-4b.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/diffusion_models/flux-2-klein-4b.safetensors",
+      "directory": "diffusion_models"
+     }
+    ]
    },
    "widgets_values": [
     "flux-2-klein-4b.safetensors",
@@ -318,7 +325,14 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "CLIPLoader"
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "qwen_3_4b.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
+      "directory": "text_encoders"
+     }
+    ]
    },
    "widgets_values": [
     "qwen_3_4b.safetensors",
@@ -353,7 +367,14 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "VAELoader"
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "flux2-vae.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+      "directory": "vae"
+     }
+    ]
    },
    "widgets_values": [
     "flux2-vae.safetensors"

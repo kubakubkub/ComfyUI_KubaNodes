@@ -652,7 +652,14 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "CLIPLoader"
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "directory": "text_encoders"
+     }
+    ]
    },
    "widgets_values": [
     "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
@@ -687,7 +694,14 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "CLIPLoader"
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors",
+      "directory": "text_encoders"
+     }
+    ]
    },
    "widgets_values": [
     "qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors",
@@ -722,7 +736,14 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "VAELoader"
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "minimax_h3_video_vae_int8_convrot.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors",
+      "directory": "vae"
+     }
+    ]
    },
    "widgets_values": [
     "minimax_h3_video_vae_int8_convrot.safetensors"
@@ -755,7 +776,14 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "VAELoader"
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "minimax_h3_audio_vae_fp32.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors",
+      "directory": "vae"
+     }
+    ]
    },
    "widgets_values": [
     "minimax_h3_audio_vae_fp32.safetensors"
