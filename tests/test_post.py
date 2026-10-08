@@ -39,6 +39,16 @@ m2 = pp.colour_apply(src, fit2)
 check("mean_std: channel means match", np.allclose(m2.reshape(-1, 3).mean(0), ref.reshape(-1, 3).mean(0), atol=0.01))
 check("strength 0 = unchanged", np.allclose(pp.colour_apply(src, fit, 0.0), src))
 
+# --- mask: a change only inside it
+half = np.zeros(src.shape[:2], np.float32)
+half[:, :80] = 1.0
+mb = pp.mask_blend(src, ref, half)
+check("mask blend: the change inside, the frame outside", np.allclose(mb[:, :80], ref[:, :80]) and np.allclose(mb[:, 80:], src[:, 80:]))
+mb = pp.mask_blend(src, ref, half[::2, ::2])
+check("mask blend: a mask of another size is resized", mb.shape == src.shape and np.allclose(mb[:, :76], ref[:, :76])
+      and np.allclose(mb[:, 84:], src[:, 84:]))
+check("mask blend: grey = half way", np.allclose(pp.mask_blend(src, ref, np.full(src.shape[:2], 0.5)), (src + ref) / 2, atol=1e-6))
+
 # --- LUTs
 with tempfile.TemporaryDirectory() as d:
     p = pp.write_cube(os.path.join(d, "id.cube"), lambda g: g, 17)
@@ -83,6 +93,9 @@ ts = pp.retime_times(5, 0.5)
 check("speed 0.5: 9 frames from 5", len(ts) == 9 and np.allclose(ts[1], 0.5))
 check("exact frame count", len(pp.retime_times(5, 1.0, 13)) == 13)
 check("speed 2: every second frame", np.allclose(pp.retime_times(5, 2.0), [0, 2, 4]))
+check("fps by speed: the same fps, 9 frames at 25 = 0.36 s", pp.retime_fps(5, 9, 25.0) == (25.0, 9 / 25.0))
+check("fps by frame count: 5 -> 13 frames last as long as before", np.allclose(pp.retime_fps(5, 13, 25.0, True), (65.0, 0.2)))
+check("fps unknown (0) -> 0 and 0 s", pp.retime_fps(5, 9, 0.0) == (0.0, 0.0))
 mid = pp.between(seq[1], seq[2], 0.5, "flow")
 xs = np.nonzero(mid[45].max(-1) > 0.5)[0]
 cx = xs.mean() if len(xs) else -1

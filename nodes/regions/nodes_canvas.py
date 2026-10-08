@@ -97,6 +97,11 @@ class KUBA_CanvasPlan(io.ComfyNode):
                 io.Float.Output("fps", tooltip="Frame rate the model generates at."),
                 io.String.Output("plan_json", tooltip="The plan as text, for saving or checking."),
                 io.String.Output("report", tooltip="Readable summary: work size, padding, k, frames."),
+                io.Float.Output("k", tooltip="The downscale factor that was used (target = work x k), "
+                                             "e.g. 2.0 or 3.75. Useful after 'auto'."),
+                io.Int.Output("target_width", tooltip="Width of the final image in pixels (from the widget "
+                                                      "or size_from)."),
+                io.Int.Output("target_height", tooltip="Height of the final image in pixels."),
             ],
         )
 
@@ -117,6 +122,7 @@ class KUBA_CanvasPlan(io.ComfyNode):
         frames = plan.work_frames or 1
         return io.NodeOutput(plan, plan.padded_w, plan.padded_h, frames, float(plan.fps or g.fps),
                              json.dumps(plan.to_dict(), indent=1), report,
+                             plan.k_float, plan.target_w, plan.target_h,
                              ui=ui.PreviewText(report))
 
 

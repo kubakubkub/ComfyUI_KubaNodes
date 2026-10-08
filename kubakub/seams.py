@@ -232,12 +232,13 @@ def tile_prompt(entries: list, labels: torch.Tensor, weight: torch.Tensor, share
 
 def refine_tiles(adapter, canvas: torch.Tensor, rp, denoise: float = 0.4, tile_px: int = 1024, seed: int = 0,
                  steps: int = 0, sampler_name: str = "", scheduler: str = "", style=None, cache=None,
-                 progress=None, check_interrupt=None, whole: bool = False):
+                 progress=None, check_interrupt=None, whole: bool = False, cfg: float = 0.0):
     """
     Resample everything inside the regions (and the scope) tile by tile at 1:1 with a low denoise, each tile
     with the prompts of the regions in it and the tile itself as reference: detail at full resolution on a
     canvas that already has the picture (an upscaled draft). keep regions stay untouched.
     whole = the canvas as a single tile (the unify pass of kubakub versions, on a draft).
+    cfg 0 = the adapter's default.
     Returns (canvas, report lines).
     """
     from .strategies import _inpaint_crop
@@ -271,7 +272,7 @@ def refine_tiles(adapter, canvas: torch.Tensor, rp, denoise: float = 0.4, tile_p
             check_interrupt()
         t0 = time.perf_counter()
         m = ops.crop(mask, cp)
-        sampling = dict(seed=int(seed) + 200_000 + i, steps=steps, cfg=0.0, sampler_name=sampler_name,
+        sampling = dict(seed=int(seed) + 200_000 + i, steps=steps, cfg=float(cfg), sampler_name=sampler_name,
                         scheduler=scheduler)
         canvas, dummy = _inpaint_crop(adapter, canvas, dummy, cp, m, m * tile_ramp(cp, W, H, overlap), prompt,
                                       negative, denoise, reference, "none", sampling, where=f"refine tile {i}",

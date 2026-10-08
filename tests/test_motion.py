@@ -162,6 +162,43 @@ BCASES = [{"t": t, "motion": [{"type": "audio", "path": "opacity", "amount": 1, 
 BASE = {"x": 100, "y": 60, "w": 50, "h": 30, "rotation": 3, "opacity": 0.8, "light.lights.#p1.power": 500}
 
 
+# ---- field: the clip along a grey ramp (motion.field_*, kubakub/maskfields.py field / along)
+FB = {"type": "field", "field": "direction", "effect": "reveal", "cycle": 1.3, "from": 0.1, "to": 0.9}
+FCASES = [{"t": t, "b": dict(FB, curve=cv, easing=es, trail=tr, steps=st, nth=nth, t_start=ts, t_end=te, phase=ph, seed=4, duty=0.3,
+                             threshold=0.3, gap=0.1, band=bd, amount=1.4, smooth=0.1)}
+          for t in (0, 0.2, 0.51, 1.02, 1.9, 2.6, 4.4, 5.9) for cv in mo.FIELD_CURVES
+          for es, tr, st, nth, ts, te, ph, bd in (("linear", 0, 1, 1, 0, -1, 0, "all"), ("ease in out", 0.3, 3, 1, 0.4, 5.0, 0.25, "low"),
+                                               ("ease out", 1.5, 1, 2, 0, -1, 0, "high"))]
+FMAP_W, FMAP_H = 60, 40
+FMAP = [[-1] * FMAP_W for _ in range(FMAP_H)]
+for y_ in range(FMAP_H):
+    for x_ in range(FMAP_W):
+        if 3 <= x_ < 20 and 4 <= y_ < 30 and not (9 <= x_ < 20 and 12 <= y_ < 30):
+            FMAP[y_][x_] = 5                             # an L
+        elif (x_ - 38) ** 2 + (y_ - 14) ** 2 <= 81:
+            FMAP[y_][x_] = 2                             # a disc
+        elif 24 <= x_ < 57 and 31 <= y_ < 37:
+            FMAP[y_][x_] = 9                             # a bar
+        elif 52 <= x_ < 58 and 3 <= y_ < 9:
+            FMAP[y_][x_] = 4                             # a small square
+FIDS = [5, 2, 9, 4]
+FRAMPS = [dict(field=k, per=pr, angle=an, cx=0.3, cy=0.7, order=od, seed=sd, noise_px=9.0, invert=inv)
+          for k in mo.FIELD_KINDS for pr in mo.FIELD_PER
+          for an, od, sd, inv in ((0, "left", 1, False), (37, "centre", 3, True), (90, "random", 7, False), (200, "size", 2, False))]
+FALONG = [(f / 20, p / 10, ef, sf, wd, rg) for f in range(21) for p in range(-1, 12) for ef in mo.FIELD_EFFECTS
+          for sf, wd, rg in ((0.05, 0.2, 3), (0.01, 0.5, 1), (0.4, 0.05, 6))]
+
+
+def py_fields():
+    import numpy as np
+    from kubakub import maskfields as mf
+    lab, n = mf.compact(np.array(FMAP, np.int32), FIDS)
+    ramps = [mf.field(lab, n, c["field"], c["per"], c["angle"], (c["cx"], c["cy"]), c["order"], c["seed"], c["noise_px"], c["invert"],
+                      px_scale=2.5, ids=FIDS)[0].ravel().tolist() for c in FRAMPS]
+    along = [float(mf.along(np.array([[f]], np.float32), p, ef, sf, wd, rg)[0, 0]) for f, p, ef, sf, wd, rg in FALONG]
+    return ramps, along
+
+
 def py_side():
     out = {"offsets": [], "compose": [], "loops": [], "hash": [mo.hash01(i, s) for i in (0, 1, 7, 99999, 2 ** 31 + 5) for s in (0, 1, 123456)]}
     for c_ in CASES:
@@ -180,6 +217,10 @@ def py_side():
     out["swaptimes"] = [mo.swap_times(c_["b"], sctx, 6.0) for c_ in SWCASES[:54]]
     out["swapclips"] = [mo.swap_clips(SWLAYERS, t, 6.0, sctx) for t in SWTIMES]
     out["band"] = [mo.offsets(c_["motion"], c_["t"], 4.0, sctx) for c_ in BCASES]
+    out["field"] = [mo.field_values(c_["b"], c_["t"], 6.0, sctx) for c_ in FCASES]
+    from kubakub import maskfields as mf
+    out["pruned"] = [[list(v) for v in mf.pruned(vals, ef)] for vals in out["field"] for ef in mo.FIELD_EFFECTS]
+    out["ramps"], out["along"] = py_fields()
     return out
 
 
@@ -187,7 +228,8 @@ PY = py_side()
 import tempfile  # noqa: E402
 VEC = os.path.join(tempfile.gettempdir(), "kuba_motion_vectors.json")        # the cases for the window twin
 json.dump({"cases": CASES, "loops": LOOPS, "base": BASE, "pcases": PCASES, "scases": SCASES, "rcases": RCASES, "regs": REGS, "ctx": actx, "sig": sig, "sr": sr, "expect": PY,
-           "sctx": SCTX, "swcases": SWCASES, "swlayers": SWLAYERS, "swtimes": SWTIMES, "bcases": BCASES}, open(VEC, "w"))
+           "sctx": SCTX, "swcases": SWCASES, "swlayers": SWLAYERS, "swtimes": SWTIMES, "bcases": BCASES,
+           "fcases": FCASES, "fmap": FMAP, "framps": FRAMPS, "falong": FALONG}, open(VEC, "w"))
 
 node = shutil.which("node")
 if not node:
@@ -211,6 +253,14 @@ out.swap = V.swcases.map(c => swapMix(c.b, c.t, 6.0, c.n, V.sctx));
 out.swaptimes = V.swcases.slice(0, 54).map(c => swapTimes(c.b, V.sctx, 6.0));
 out.swapclips = V.swtimes.map(t => swapClips(V.swlayers, t, 6.0, V.sctx));
 out.band = V.bcases.map(c => motionOffsets(c.motion, c.t, 4.0, V.sctx));
+out.field = V.fcases.map(c => fieldValues(c.b, c.t, 6.0, V.sctx));
+out.pruned = out.field.flatMap(vals => FIELD_EFFECTS.map(ef => fieldPruned(vals, ef)));
+const LW = V.fmap[0].length, LH = V.fmap.length, byId = new Map();
+V.fmap.forEach((row, y) => row.forEach((id, x) => { if (id < 0) return; if (!byId.has(id)) byId.set(id, { id, pos: [], box: [LW, LH, 0, 0] });
+  const r = byId.get(id); r.pos.push(y * LW + x); r.box[0] = Math.min(r.box[0], x); r.box[1] = Math.min(r.box[1], y); r.box[2] = Math.max(r.box[2], x + 1); r.box[3] = Math.max(r.box[3], y + 1); }));
+const rp = [...byId.values()].map(r => ({ ...r, pos: Uint32Array.from(r.pos) }));
+out.ramps = V.framps.map(c => Array.from(fieldRamp(rp, LW, LH, c, 2.5)));
+out.along = V.falong.map(([f, p, ef, sf, wd, rg]) => fieldAlong(f, p, ef, Math.max(1e-6, sf), Math.max(1e-6, wd), Math.max(1, rg)));
 console.log(JSON.stringify(out));
 """
     tmp = os.path.join(HERE, "_motion_twin.cjs")
@@ -246,9 +296,68 @@ console.log(JSON.stringify(out));
         check("window twin: swap step times agree", close(PY["swaptimes"], JS["swaptimes"]))
         check("window twin: swap groups of a document agree", close(PY["swapclips"], JS["swapclips"]), f"{PY['swapclips'][2]} vs {JS['swapclips'][2]}")
         check(f"window twin: {len(BCASES)} sound level per band cases agree", close(PY["band"], JS["band"]))
+        badf = [i for i, (p, q) in enumerate(zip(PY["field"], JS["field"])) if not close(p, q)]
+        check(f"window twin: {len(FCASES)} field cases agree (curve, triggers, sound level, trail)", not badf and len(JS["field"]) == len(FCASES),
+              f"first bad {badf[:1]}: {FCASES[badf[0]] if badf else ''} {PY['field'][badf[0]] if badf else ''} vs {JS['field'][badf[0]] if badf else ''}")
+        check("window twin: the trail is thinned the same way (what cannot win the maximum is left out)",
+              close(PY["pruned"], JS["pruned"]) and any(len(v) == 1 for v in PY["pruned"]) and any(len(v) > 3 for v in PY["pruned"]))
+        worst = [max(abs(a - b) for a, b in zip(p, q)) for p, q in zip(PY["ramps"], JS["ramps"])]
+        check(f"window twin: {len(FRAMPS)} field ramps agree per pixel (edge distance, direction, radial, order, noise)",
+              len(worst) == len(FRAMPS) and max(worst) < 2e-4, f"worst {max(worst):.5f} in {FRAMPS[worst.index(max(worst))]}")
+        check(f"window twin: {len(FALONG)} reveal / hide / band / rings values agree",
+              len(JS["along"]) == len(FALONG) and max(abs(a - b) for a, b in zip(PY["along"], JS["along"])) < 1e-4)
         check("window twin: beat times agree", close(PY["beats"], JS["beats"]))
         check("window twin: loudness curve agrees", close(PY["level"], JS["level"]))
         check("window twin: looped keyframes agree", close(PY["loops"], JS["loops"]), f"{PY['loops']} vs {JS['loops']}")
+
+# ---- field through the renderer: animate writes clip_field, the clip follows the move
+import numpy as np  # noqa: E402
+fl = np.full((40, 60), -1, np.int32)
+fl[10:30, 5:25] = 0
+fl[10:30, 35:55] = 1
+ftab = {"regions": [{"region_id": 0, "name": "a_01", "group_id": "a", "bbox": [5, 10, 20, 20]}, {"region_id": 1, "name": "a_02", "group_id": "a", "bbox": [35, 10, 20, 20]}]}
+fdoc = {"canvas": {"w": 60, "h": 40}, "timeline": {"duration": 4, "fps": 10},
+        "layers": [{"id": "s", "kind": "shape", "shape": {"type": "solid"}, "color": "#ffffff", "x": 0, "y": 0, "w": 60, "h": 40, "clip": "a_*",
+                    "motion": [{"type": "field", "field": "direction", "per": "all together", "effect": "reveal", "curve": "ramp", "cycle": 2, "soft": 0.01}]},
+                   {"id": "base", "kind": "base"}]}
+
+
+def fframe(t):
+    d = rd.animate(fdoc, t)
+    return d, rd.render(d, np.zeros((40, 60, 3), np.float32), {}, fl, ftab)
+
+
+try:
+    d0, r0 = fframe(0.0)
+    d1, r1 = fframe(1.0)
+    d2, r2 = fframe(2.0)
+    img = lambda r: r["image"][..., 0]      # noqa: E731
+    check("animate writes the values of the field for the clip", d1["layers"][0].get("clip_field", {}).get("values") == [[0.5, 1.0]])
+    check("renderer: a wipe across both regions: nothing, the left half, everything",
+          img(r0).max() < 0.01 and img(r1)[20, 15] > 0.99 and img(r1)[20, 45] < 0.01 and img(r2)[20, 15] > 0.99 and img(r2)[20, 45] > 0.99
+          and img(r2)[5, 15] < 0.01, f"{img(r0).max()} {img(r1)[20, 15]} {img(r1)[20, 45]} {img(r2)[20, 45]}")
+except Exception as e:  # noqa: BLE001
+    check("renderer: a field behaviour renders", False, repr(e))
+
+bctx = {"beats": [k * 0.5 for k in range(12)], "markers": [], "offset": 0.0, "hits": {}}
+fbeat = {"type": "field", "curve": "beats", "cycle": 0.4, "from": 0, "to": 1}
+check("field on beats: the beat on the start of the range counts, every nth from the first",
+      abs(mo.field_progress(fbeat, 0.2, 6.0, bctx) - 0.5) < 1e-9 and mo.field_progress(dict(fbeat, nth=4), 0.2, 6.0, bctx) == 0.5
+      and mo.field_progress(dict(fbeat, nth=4), 0.7, 6.0, bctx) == 1.0 and abs(mo.field_progress(dict(fbeat, nth=4), 2.1, 6.0, bctx) - 0.25) < 1e-9
+      and mo.field_progress(dict(fbeat, t_start=0.75), 0.9, 6.0, bctx) == 0.0)
+
+# ---- the thinned trail gives exactly the same mask
+import itertools  # noqa: E402
+from kubakub import maskfields as mf  # noqa: E402
+ramp = np.linspace(0, 1, 97, dtype=np.float32)[None]
+same = True
+for vals, ef in itertools.product([c_ for c_ in PY["field"] if len(c_) > 1][::7], mo.FIELD_EFFECTS):
+    full = None
+    for p_, w_ in vals:
+        m_ = mf.along(ramp, p_, ef, 0.05, 0.2, 3) * w_
+        full = m_ if full is None else np.maximum(full, m_)
+    same = same and float(np.abs(full - mf.mask_at(ramp, vals, ef, 0.05, 0.2, 3)).max()) < 1e-6
+check("a thinned trail gives the same mask as every one of its moments", same)
 
 print()
 if failures:

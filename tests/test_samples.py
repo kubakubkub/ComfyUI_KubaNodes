@@ -75,6 +75,16 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:   # the PD
     check("mask folder: Groups / Windows read by the mask atlas", lab.shape == (360, 640) and len(meta) >= 27, str(len(meta)))
     check("... one folder per size", samples.mask_folder(root, 320, 180) != folder)
 
+    folder = samples.frames(root)
+    names = sorted(os.listdir(folder))
+    check("image folder: 12 numbered frames of the sample facade", [n for n in names if n.endswith(".png")]
+          == sorted(f"sample_{i}.png" for i in range(1, 13)) and samples.frames(root) == folder, str(names))
+    import cv2  # noqa: E402
+    a = cv2.imdecode(np.fromfile(os.path.join(folder, "sample_1.png"), np.uint8), cv2.IMREAD_COLOR)
+    z = cv2.imdecode(np.fromfile(os.path.join(folder, "sample_12.png"), np.uint8), cv2.IMREAD_COLOR)
+    check("... 640 x 360, the light is on the left in the first and on the right in the last",
+          a.shape == (360, 640, 3) and a[:, :160].mean() > z[:, :160].mean() and a[:, 480:].mean() < z[:, 480:].mean())
+
     try:
         import fitz  # noqa: F401
     except ImportError:

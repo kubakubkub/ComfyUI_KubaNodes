@@ -207,6 +207,10 @@ class KUBA_FrameCompose(io.ComfyNode):
                 io.Mask.Output("shadow", tooltip="Where parasites darken the facade."),
                 io.String.Output("frames_json", tooltip="Per frame: depth, source, scale, outline, back_quad (corner pin)."),
                 io.String.Output("report", tooltip="The frames with their depth, source and scale."),
+                RegionsType.Output("regions", tooltip="The regions of the plan output, with the '<name>_out' "
+                                                      "regions of the parasites: for masks, previews and other "
+                                                      "nodes that take regions. Without parasites these are the "
+                                                      "plan's own regions."),
             ],
         )
 
@@ -259,7 +263,7 @@ class KUBA_FrameCompose(io.ComfyNode):
         mask = lambda a: torch.from_numpy(a.astype(np.float32))[None]  # noqa: E731
         return io.NodeOutput(_img(out), new_plan, mask(r["area"]), mask(gen), mask(r["back"]), mask(r["walls"]),
                              mask(r["shadow"]), json.dumps({"foot_px": r["foot"], "frames": r["frames"]}, indent=1),
-                             report,
+                             report, new_plan.regions,
                              ui=ui.PreviewImage(_img(out), cls=cls))
 
 

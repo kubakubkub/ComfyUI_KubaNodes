@@ -26,6 +26,7 @@ import numpy as np
 import torch
 
 from comfy_api.latest import io, ui
+from comfy_execution.graph_utils import ExecutionBlocker
 
 from ...kubakub import facade_core as fc
 from ...kubakub import save_paths
@@ -95,6 +96,11 @@ class KUBA_RegionsFromMasks(io.ComfyNode):
                                                          "boxes, notes)."),
                 io.Image.Output("preview", tooltip="One colour per group, region borders and ids over "
                                                    "a grey copy of the matrix."),
+                io.String.Output("report", tooltip="How many masks became how many regions and groups, pixels "
+                                                   "left without a region, and the notes (renamed, resized, "
+                                                   "merged or dropped masks)."),
+                io.Mask.Output("scope", tooltip="The scope that was used: 1 where regions may be (all 1 "
+                                                "without a scope)."),
             ],
         )
 
@@ -152,8 +158,12 @@ class KUBA_RegionsFromMasks(io.ComfyNode):
                  atlas["mode"], atlas["unassigned_px"], time.perf_counter() - t0)
         for note in atlas["notes"]:
             log.info("[KUBA regions]   %s", note)
+        report = "\n".join([
+            f"{int(masks.shape[0])} masks -> {len(atlas['regions'])} regions in {len(atlas['groups'])} groups, "
+            f"{width}x{height}, {atlas['unassigned_px']} px without a region", *atlas["notes"]])
+        scope_out = regions.scope if regions.scope is not None else torch.ones((1, height, width))
 
-        return io.NodeOutput(regions, regions.masks(), json.dumps(atlas, indent=1), preview,
+        return io.NodeOutput(regions, regions.masks(), json.dumps(atlas, indent=1), preview, report, scope_out,
                              ui=ui.PreviewImage(preview, cls=cls))
 
 
@@ -162,6 +172,14 @@ class KUBA_RegionsFromMasks(io.ComfyNode):
 # --------------------------------------------------------------------------
 
 BBoxType = io.Custom("BBOX")   # KJNodes Points Editor box output (list of xyxy tuples)
+
+
+def _core_boxes(boxes):
+    """Core BOUNDING_BOX (one dict, a list of dicts, or one list per frame) -> what sam_prompts.parse_boxes reads."""
+    if isinstance(boxes, (list, tuple)) and boxes and all(isinstance(b, (list, tuple)) for b in boxes) \
+            and any(b and isinstance(b[0], dict) for b in boxes):
+        return list(boxes[0])          # per frame: this node segments the first image
+    return boxes
 POINT_MODES = ("one region per point", "all points one region")
 
 
@@ -228,8 +246,8 @@ class KUBA_RegionsSAM3Masks(io.ComfyNode):
                                tooltip="Boxes (Points Editor bbox, xyxy); one object per box."),
                 io.String.Input("point_names", multiline=True, default="", optional=True,
                                 placeholder="W_F1_01\nW_F1_02",
-                                tooltip="Names for the point objects in click order, then the boxes. "
-                                        "Missing: point_01.., box_01.."),
+                                tooltip="Names for the point objects in click order, then the boxes "
+                                        "(bboxes first, then boxes). Missing: point_01.., box_01.."),
                 io.Combo.Input("point_mode", options=list(POINT_MODES), default=POINT_MODES[0],
                                tooltip="one region per point: each positive point is its own object "
                                        "(negative points apply to all). all points one region: core "
@@ -255,6 +273,10 @@ class KUBA_RegionsSAM3Masks(io.ComfyNode):
                                         "size) into this folder, e.g. the project Masks folder."),
                 io.Boolean.Input("overwrite", advanced=True, default=False, optional=True,
                                  tooltip="Replace existing PNGs of the same name in save_folder."),
+                io.BoundingBox.Input("boxes", force_input=True, optional=True,
+                                     tooltip="Boxes from core nodes (the bboxes output of SAM3 Detect, in image "
+                                             "pixels); one object per box, added after the Points Editor "
+                                             "boxes. Of a batch, the boxes of the first image are used."),
             ],
             outputs=[
                 io.Mask.Output("masks", tooltip="One mask per object (batch), same order as names."),
@@ -268,14 +290,14 @@ class KUBA_RegionsSAM3Masks(io.ComfyNode):
     @classmethod
     def execute(cls, model, image, prompts, point_mode, threshold, refine_iterations, detail, drop_groups,
                 min_area, clip=None, positive_coords=None, negative_coords=None, bboxes=None, point_names="",
-                scope=None, save_folder="", overwrite=False) -> io.NodeOutput:
+                scope=None, save_folder="", overwrite=False, boxes=None) -> io.NodeOutput:
         t0 = time.perf_counter()
         img = image[:1]
         H, W = int(img.shape[1]), int(img.shape[2])
         lines, notes = sp.parse_prompt_lines(prompts)
         pos = sp.parse_points(positive_coords, W, H)
         neg = sp.parse_points(negative_coords, W, H)
-        boxes = sp.parse_boxes(bboxes)
+        boxes = sp.parse_boxes(bboxes) + sp.parse_boxes(_core_boxes(boxes))   # Points Editor boxes first, then core
         if lines and clip is None:
             raise ValueError("prompts need the clip input (CLIP output of the SAM 3.1 Load Checkpoint).")
         if not (lines or pos or boxes):
@@ -665,6 +687,9 @@ class KUBA_RegionsFromIDMaps(io.ComfyNode):
                              ui=ui.PreviewImage(preview, cls=cls))
 
 
+REGION_MASKS_MAX_GB = 4.0      # regions to mask: largest region_masks batch (float32) it will build
+
+
 class KUBA_RegionsMask(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -682,15 +707,25 @@ class KUBA_RegionsMask(io.ComfyNode):
                 RegionsType.Input("regions", tooltip="From any kubakub regions node (e.g. regions from masks)."),
                 io.String.Input("select", default="*", tooltip="Plan selector, e.g. 'group:Windows, W_F0_*' or 'tag:underside'."),
                 io.Int.Input("grow_px", default=0, min=-256, max=256, tooltip="Grow (> 0) or shrink (< 0) the mask."),
-                io.Int.Input("feather_px", default=0, min=0, max=256, tooltip="Soft edge width."),
+                io.Int.Input("feather_px", default=0, min=0, max=256,
+                             tooltip="Soft edge: blurs the edge both ways, inwards and outwards, over about "
+                                     "this many pixels in total."),
                 io.Boolean.Input("invert", default=False,
                                  tooltip="On: the mask covers everything except the selected regions."),
+                io.Boolean.Input("per_region_masks", default=False, optional=True,
+                                 tooltip="On: region_masks gives one mask per selected region. Takes regions x "
+                                         "width x height x 4 bytes of RAM (100 regions at 3840x2160 = 3.3 GB), "
+                                         "so it is off until you need it."),
             ],
-            outputs=[io.Mask.Output("mask", tooltip="1 on the selected regions (after grow, feather, invert)."), io.String.Output("names", tooltip="The matching region names.")],
+            outputs=[io.Mask.Output("mask", tooltip="1 on the selected regions (after grow, feather, invert)."), io.String.Output("names", tooltip="The matching region names."),
+                     io.Mask.Output("region_masks", tooltip="One mask per selected region (batch), in the order of "
+                                                            "names, before grow, feather and invert. Needs "
+                                                            "per_region_masks on. Above 4 GB of RAM the node "
+                                                            "stops and asks for a narrower select.")],
         )
 
     @classmethod
-    def execute(cls, regions, select, grow_px, feather_px, invert) -> io.NodeOutput:
+    def execute(cls, regions, select, grow_px, feather_px, invert, per_region_masks=False) -> io.NodeOutput:
         import cv2
         from ...kubakub.director.render import select_regions
         all_ids = [r["region_id"] for r in regions.table.get("regions", [])]
@@ -707,8 +742,23 @@ class KUBA_RegionsMask(io.ComfyNode):
             m = cv2.GaussianBlur(m, (0, 0), feather_px / 2.0)
         if invert:
             m = 1 - m
-        names = [r["name"] for r in regions.table.get("regions", []) if r["region_id"] in set(ids)]
-        return io.NodeOutput(torch.from_numpy(np.clip(m, 0, 1))[None], chr(10).join(names))
+        chosen = [r for r in regions.table.get("regions", []) if r["region_id"] in set(ids)]
+        names = [r["name"] for r in chosen]
+        gb = len(chosen) * lab.shape[0] * lab.shape[1] * 4 / 1024 ** 3
+        if not per_region_masks:
+            # a node reading region_masks stops with this message instead of working on an empty mask
+            each = ExecutionBlocker("kubakub regions to mask: switch on 'per_region_masks' to get region_masks.")
+        elif gb > REGION_MASKS_MAX_GB:
+            raise ValueError(f"region_masks: {len(chosen)} regions at {lab.shape[1]}x{lab.shape[0]} would take "
+                             f"{gb:.1f} GB of RAM (the limit is {REGION_MASKS_MAX_GB:g} GB). Narrow 'select' to "
+                             "fewer regions, or switch per_region_masks off.")
+        elif not chosen:                                # a table without regions
+            each = torch.zeros((1, *lab.shape), dtype=torch.float32)
+        else:
+            each = torch.zeros((len(chosen), *lab.shape), dtype=torch.float32)
+            for i, r in enumerate(chosen):              # one at a time: no second full batch as bool
+                each[i] = torch.from_numpy(lab == r["region_id"])
+        return io.NodeOutput(torch.from_numpy(np.clip(m, 0, 1))[None], chr(10).join(names), each)
 
 
 NODE_CLASS_MAPPINGS = {

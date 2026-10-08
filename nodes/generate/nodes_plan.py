@@ -16,6 +16,7 @@ import json
 import logging
 import os
 
+import cv2
 import numpy as np
 import torch
 
@@ -97,7 +98,8 @@ class KUBA_RegionPlan(io.ComfyNode):
                                 tooltip="Optional .txt with rules, e.g. kept in the project folder. "
                                         "Read only."),
                 io.Image.Input("image", optional=True,
-                               tooltip="Background for the preview (the matrix)."),
+                               tooltip="Background for the preview (the matrix). Another size than the "
+                                       "regions is scaled to fit, for the preview only."),
             ],
             outputs=[
                 PlanType.Output("plan", tooltip="Connect to kubakub region sampler and seam pass."),
@@ -138,8 +140,16 @@ class KUBA_RegionPlan(io.ComfyNode):
 
         labels = regions.labels[0].cpu().numpy()
         h, w = labels.shape
-        if image is not None and tuple(image.shape[1:3]) == (h, w):
+        if image is not None:
             bg = image[0].detach().cpu().float().numpy()
+            if bg.shape[:2] != (h, w):
+                # another size than the regions: scaled for the preview only (the samplers need the exact size)
+                ih, iw = bg.shape[:2]
+                bg = cv2.resize(bg, (w, h), interpolation=cv2.INTER_AREA if iw * ih > w * h else cv2.INTER_LINEAR)
+                note = (f"the image is {iw}x{ih}, the regions are {w}x{h}: it was scaled for the preview only. "
+                        f"The region sampler needs an image of exactly {w}x{h}.")
+                rep += "\nnote: " + note
+                log.info("[KUBA regions] plan: %s", note)
         else:
             bg = np.full((h, w, 3), 0.5, np.float32)
         preview = torch.from_numpy(plan_preview(bg, labels, plan))[None]

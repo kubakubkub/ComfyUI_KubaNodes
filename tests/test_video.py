@@ -225,13 +225,82 @@ def test_lazy_status():
 
 
 def test_pass_through():
-    frames, report = _run(_plan(RULES0), _NoOps(), models={}).args
+    frames, report = _run(_plan(RULES0), _NoOps(), models={}).args[:2]
     assert frames.shape == (17, 192, 320, 3) and torch.equal(frames[5], STILL[0]), "the still, F times"
     assert "no animated regions" in report, report
     bg = torch.rand(11, 192, 320, 3)
-    frames, report = _run(_plan(RULES0), _NoOps(), models={}, background=bg, output_scale=0.5).args
+    frames, report = _run(_plan(RULES0), _NoOps(), models={}, background=bg, output_scale=0.5).args[:2]
     assert torch.equal(frames, bg), "the background passes through unchanged (at its own size)"
     return "no animated region: frames through, no model step, no error"
+
+
+def test_only_selectors():
+    table = {"regions": [{"region_id": i, "name": n, "group_id": g, "tags": t} for i, (n, g, t) in
+                         enumerate([("W_F1_C01", "Windows", ["front"]), ("W_F1_C02", "Windows", ["side"]),
+                                    ("Door Main", "Doors", ["front"]), ("wall", "Groups", [])])]}
+    entries = rp.resolve(table, "[default]\nanimate = on\nvideo_prompt = it moves\n", seed=1)["regions"]
+
+    def ids(only):
+        return sorted(i for g in vd.clip_groups(entries, only) for i in g["ids"])
+
+    assert ids("") == ids(None) == [0, 1, 2, 3], "empty = all"
+    assert ids("W_F1_*") == [0, 1] and ids("w_f1_c02, WALL") == [1, 3] and ids("wall\nW_F1_C01") == [0, 3], \
+        "names and wildcards as before"
+    assert ids("door main") == [2], "a name with a space still matches as a whole"
+    assert ids("group:Windows") == [0, 1] and ids("group:win*, wall") == [0, 1, 3], "group selector"
+    assert ids("tag:front") == [0, 2] and ids("tag:front group:Windows") == [0], "tag, space = and"
+    assert ids("region:2-3") == [2, 3] and ids("group:Windows !W_F1_C01") == [1], "region range, not"
+    assert ids("X_*") == [] and ids("bogus:thing") == [] and ids("group:") == [], "no match / no selector: nothing"
+    assert vd.only_filter("  ,\n") is None
+
+    out = _run(_plan(RULES2), _NoOps(), models={}, only="group:Doors").args
+    assert "only = 'group:Doors' matches no animated region" in out[1] and "W_F1_C01" in out[1], out[1]
+    assert torch.equal(out[0][3], STILL[0]) and float(out[4].max()) == 0, "nothing rendered, empty mask"
+    nv._CLIP_CACHE.clear()
+    ops = _StubOps()
+    out = _run(_plan(RULES2), ops, only="group:Windows")
+    assert [c[0] for c in ops.calls].count("vae_encode") == 2 and "matches no" not in out.args[1], out.args[1]
+    nv._CLIP_CACHE.clear()
+    return "names, wildcards, group:, tag:, region:, and / not; a miss is reported"
+
+
+def test_outputs_and_inputs():
+    schema = nv.KUBA_RegionVideoSampler.define_schema()
+    assert [o.id for o in schema.outputs] == ["frames", "report", "fps", "audio", "mask"], "new outputs at the end"
+    inputs = {i.id: i for i in schema.inputs}
+    assert inputs["image"].optional and inputs["fps"].step == 0.01
+    assert "background" in inputs["frames"].tooltip and "background" in inputs["output_scale"].tooltip
+    assert all(x.tooltip for x in list(schema.inputs) + list(schema.outputs)), "every socket has a tooltip"
+    try:
+        _run(_plan(RULES2), _NoOps(), models={}, image=None)
+        raise AssertionError("no image and no background must raise")
+    except ValueError as e:
+        assert "'image'" in str(e) and "'background'" in str(e)
+
+    nv._CLIP_CACHE.clear()
+    frames, report, fps, audio, mask = _run(_plan(RULES2), _StubOps(), fps=29.97, output_scale=0.5).args
+    assert fps == 29.97 and frames.shape == (17, 96, 160, 3)
+    n = int(round(17 / 29.97 * 44100))
+    assert audio["sample_rate"] == 44100 and audio["waveform"].shape == (1, 2, n) and not audio["waveform"].any(), \
+        "no audio: silence as long as the frames"
+    assert mask.shape == (1, 96, 160) and mask.dtype == torch.float32, "one mask at the size of the frames"
+    assert mask[0, 20, 30] == 1 and mask[0, 65, 120] == 1 and mask[0, 90, 10] == 0, "the animated regions, not the wall"
+    full = _run(_plan(RULES2), _StubOps(), only="W_F2_*").args[4]
+    assert full.shape == (1, 192, 320) and full[0, 130, 240] == 1 and full[0, 40, 60] == 0, "only the rendered clips"
+
+    long = {"waveform": torch.rand(2, 2, 8000 * 5), "sample_rate": 8000}
+    a = _run(_plan(RULES2), _StubOps(), audio=long).args[3]                    # 17 frames at 8 fps = 2.125 s
+    assert a["waveform"].shape == (1, 2, 17000) and torch.equal(a["waveform"], long["waveform"][:1, :, :17000]), "cut"
+    short = {"waveform": torch.ones(1, 1, 800), "sample_rate": 8000}
+    a = _run(_plan(RULES2), _StubOps(), audio=short).args[3]
+    assert a["waveform"].shape == (1, 1, 17000) and a["waveform"][0, 0, :800].min() == 1 \
+        and not a["waveform"][0, 0, 800:].any(), "padded with silence"
+    bg = torch.rand(11, 192, 320, 3)
+    out = _run(_plan(RULES2), _StubOps(), image=None, background=bg, output_scale=0.5).args
+    assert out[0].shape == (11, 192, 320, 3) and out[4].shape == (1, 192, 320), "background alone, at its own size"
+    assert out[3]["waveform"].shape[-1] == int(round(11 / 8.0 * 44100)), "silence as long as the background"
+    nv._CLIP_CACHE.clear()
+    return "fps, audio (cut / padded / silence) and mask outputs; image optional with a plain error"
 
 
 def test_phases_and_cache():

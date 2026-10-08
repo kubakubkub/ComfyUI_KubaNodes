@@ -103,6 +103,45 @@ def read_header(buf):
     return attrs, bool(flags & 0x200), i + 1
 
 
+def _headers(buf):
+    """Every header in the first bytes of a file -> [attrs] (IndexError when the bytes end inside a header)."""
+    multipart = bool(struct.unpack_from("<I", buf, 4)[0] & 0x1000)
+    out, i = [], 8
+    while True:
+        attrs = {}
+        while buf[i] != 0:
+            name, i = _cstr(buf, i)
+            typ, i = _cstr(buf, i)
+            size = struct.unpack_from("<i", buf, i)[0]
+            i += 4
+            if size < 0 or i + size > len(buf):
+                raise IndexError("header longer than the bytes read")
+            attrs[name] = _attr_value(typ, bytes(buf[i:i + size]))
+            i += size
+        i += 1
+        out.append(attrs)
+        if not multipart or buf[i] == 0:                               # a multipart file ends with an empty header
+            return out
+
+
+def read_headers(path):
+    """The header(s) of an EXR without its pixels -> [attrs], one per part (a multipart file has several). Works for
+    every compression: only the start of the file is read."""
+    size = 1 << 16
+    with open(path, "rb") as f:
+        while True:
+            f.seek(0)
+            buf = f.read(size)
+            if len(buf) < 8 or struct.unpack_from("<i", buf, 0)[0] != MAGIC:
+                raise ValueError("not an OpenEXR file")
+            try:
+                return _headers(buf)
+            except (IndexError, ValueError, struct.error):             # a long header (cryptomatte manifests): read on
+                if len(buf) < size:
+                    raise ValueError("broken OpenEXR header") from None
+                size *= 8
+
+
 # ---------------------------------------------------------------------------------------------------- decoding
 
 
@@ -144,10 +183,11 @@ def _decode(data, comp, expect):
     raise Unsupported(f"{comp} compression")
 
 
-def read(path):
-    """The whole image (see module doc). Falls back to OpenEXR / Blender's OpenImageIO for what numpy can't read."""
+def read(path, only=None):
+    """The whole image (see module doc). Falls back to OpenEXR / Blender's OpenImageIO for what numpy can't read.
+    only: channel names to keep (a big multilayer file: the others take no memory); the fallbacks return them all."""
     try:
-        return _read_own(path)
+        return _read_own(path, only)
     except Unsupported as e:
         try:
             return read_via_openexr(path)
@@ -160,7 +200,7 @@ def read(path):
                               "Blender 4.x (its OpenImageIO reads every EXR)") from None
 
 
-def _read_own(path):
+def _read_own(path, only=None):
     with open(path, "rb") as f:
         buf = f.read()
     attrs, tiled, pos = read_header(buf)
@@ -173,7 +213,7 @@ def _read_own(path):
     if any(c[2] != 1 or c[3] != 1 for c in chans):
         raise Unsupported("subsampled channels")
     px_bytes = sum(PIXEL[c[1]][1] for c in chans)
-    out = {c[0]: np.zeros((H, W), PIXEL[c[1]][0]) for c in chans}
+    out = {c[0]: np.zeros((H, W), PIXEL[c[1]][0]) for c in chans if only is None or c[0] in only}
     if not tiled:
         lpb = LINES_PER_BLOCK[comp]
         n = (H + lpb - 1) // lpb
@@ -206,8 +246,9 @@ def _scatter(raw, chans, out, r0, rows, c0, cols):
     pos = 0
     for name, ptype, _xs, _ys in chans:
         dt, nb = PIXEL[ptype]
-        part = np.ascontiguousarray(blk[:, pos:pos + cols * nb])
-        out[name][r0:r0 + rows, c0:c0 + cols] = part.view(np.dtype(dt).newbyteorder("<")).reshape(rows, cols)
+        if name in out:
+            part = np.ascontiguousarray(blk[:, pos:pos + cols * nb])
+            out[name][r0:r0 + rows, c0:c0 + cols] = part.view(np.dtype(dt).newbyteorder("<")).reshape(rows, cols)
         pos += cols * nb
 
 

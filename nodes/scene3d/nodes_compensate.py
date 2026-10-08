@@ -55,6 +55,10 @@ class KUBA_BrightnessCompensation(io.ComfyNode):
                 io.Image.Output("images", tooltip="The compensated frames."),
                 io.Image.Output("gain_map", tooltip="How much each part is changed (dark = darkened, colours as in scene measure)."),
                 io.String.Output("report", tooltip="Target, how much light is kept overall and how much clips."),
+                io.Mask.Output("gain", tooltip="The real gain as a mask at the size of your frames (in linear light): "
+                                               "white (1) = a gain of 1.0 (unchanged), or the highest gain when "
+                                               "lift_dim_up_to is above 1; darker = darkened more. The report says "
+                                               "the range."),
             ],
         )
 
@@ -80,13 +84,17 @@ class KUBA_BrightnessCompensation(io.ComfyNode):
             list(pool.map(one, range(n)))
         rgb, lo, hi = sv.colorize(gain, fg, lo=min(info["min"], 1.0), hi=max(info["max"], 1.0))
         preview = torch.from_numpy(np.ascontiguousarray(rgb, np.float32))[None]
+        top = max(float(g.max()), 1.0)                # the mask's white: gain 1 (unchanged) unless dim parts are lifted
+        gain_mask = np.clip(g / top, 0.0, 1.0).astype(np.float32)
         report = (f"{n} frame(s) {w}x{h}; evened to the {match} level ({info['target']:.2f} of a typical facade); "
                   f"({info['grazing'] * 100:.0f} % grazing surfaces ignored); gain {info['min']:.2f} .. {info['max']:.2f}; overall light kept {info['kept'] * 100:.0f} %"
                   + (f"; clipped {max(clipped) * 100:.1f} % of pixels (lift_dim_up_to)" if max(clipped) > 0 else "")
                   + ("; one gain per region" if labels is not None else "")
+                  + f"; gain mask: 0 .. 1 = a gain of 0 .. {top:.2f}"
                   + f"; {time.perf_counter() - t0:.1f} s")
         log.info("[KUBA compensate] %s", report)
-        return io.NodeOutput(torch.from_numpy(out), preview, report, ui=ui.PreviewImage(preview, cls=cls))
+        return io.NodeOutput(torch.from_numpy(out), preview, report, torch.from_numpy(gain_mask)[None],
+                             ui=ui.PreviewImage(preview, cls=cls))
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_BrightnessCompensation": KUBA_BrightnessCompensation}

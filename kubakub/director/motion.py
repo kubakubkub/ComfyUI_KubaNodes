@@ -386,6 +386,135 @@ def stagger_weights(motion, t, duration, regs, W, H):
     return out
 
 
+# ---- field: the layer's clip appears along a grey ramp over its regions, per pixel (layer clipped to regions, "field"
+#   behaviours; the same engine as the node kubakub mask animate, the ramp itself is kubakub/maskfields.py field()).
+#   field edge distance | direction | radial | region order | noise;  per each region | all together;  angle, order,
+#   cx, cy, noise_px, seed, invert;  effect reveal | hide | band | rings;  soft, width, rings, trail (s);
+#   curve ramp | saw | triangle | sine | square | random | noise | level | beats | bars | markers | low | mid | high;
+#   cycle (s), from, to, easing, phase, duty, steps, nth, threshold, gap, band, amount, smooth
+FIELD_KINDS = ("edge distance", "direction", "radial", "region order", "noise")
+FIELD_PER = ("each region", "all together")
+FIELD_EFFECTS = ("reveal", "hide", "band", "rings")
+FIELD_SHAPES = ("ramp", "saw", "triangle", "sine", "square", "random", "noise")
+FIELD_TRIGGERS = ("beats", "bars", "markers", "low", "mid", "high")
+FIELD_CURVES = FIELD_SHAPES + ("level",) + FIELD_TRIGGERS
+EASES = ("linear", "ease in", "ease out", "ease in out")
+TRAIL_STEPS = 16
+
+
+def ease(u, kind="linear"):
+    u = min(1.0, max(0.0, float(u)))
+    if kind == "ease in":
+        return u * u
+    if kind == "ease out":
+        return 1.0 - (1.0 - u) ** 2
+    if kind == "ease in out":
+        return u * u * (3.0 - 2.0 * u)
+    return u
+
+
+def curve_shape(kind, u, easing="linear", duty=0.5, seed=1):
+    """A time curve at u cycles (u >= 0) -> 0..1.
+
+    ramp      0 to 1 once, then it stays          saw       0 to 1, again and again
+    triangle  0 to 1 and back                     sine      a soft triangle
+    square    1 for `duty` of the cycle, else 0   random    a new value every cycle
+    noise     wanders softly, about one turn per cycle
+    """
+    whole = math.floor(u)
+    part = u - whole
+    if kind == "ramp":
+        return ease(u, easing)
+    if kind == "saw":
+        return ease(part, easing)
+    if kind == "triangle":
+        return ease(1.0 - abs(2.0 * part - 1.0), easing)
+    if kind == "sine":
+        return 0.5 - 0.5 * math.cos(2.0 * math.pi * u)
+    if kind == "square":
+        return 1.0 if part < duty else 0.0
+    if kind == "random":
+        return hash01(int(whole), seed)
+    if kind == "noise":
+        return min(1.0, max(0.0, 0.5 + 0.65 * noise(u, seed)))
+    return 0.0
+
+
+def progress_triggers(t, triggers, cycle, easing="linear", steps=1):
+    """Every trigger (sorted seconds) starts a ramp of cycle seconds. steps = 1: each trigger runs 0 to 1 again.
+    steps > 1: each trigger moves on by one of that many steps, and after the last step it starts again."""
+    k = bisect.bisect_right(triggers, t + 1e-9)
+    if k == 0:
+        return 0.0
+    run = ease((t - triggers[k - 1]) / cycle, easing) if cycle > 0 else 1.0
+    if steps <= 1:
+        return run
+    pos = (k - 1 + run) / float(steps)
+    fr = pos - math.floor(pos)
+    return 1.0 if fr < 1e-9 else fr
+
+
+def field_of(motion):
+    return next((b for b in motion or [] if isinstance(b, dict) and b.get("type") == "field" and b.get("on") is not False), None)
+
+
+def field_triggers(b, curve, ctx, duration):
+    """The times a field's ramp starts at: beats / bars / markers / hits inside its range. Unlike a swap's steps, one
+    on the very start counts and every nth is counted from the first (as kubakub mask animate does). Kept in ctx."""
+    s, e = span(b, duration)
+    nth = max(1, int(_num(b, "nth", 1)))
+    thr, gap = _num(b, "threshold", 0.3), max(0.0, _num(b, "gap", 0.1))
+    memo = ctx.setdefault("_field_triggers", {})
+    key = json.dumps([s, e, curve, nth, thr, gap])
+    if key not in memo:
+        if curve in ("beats", "bars"):
+            ts = (ctx.get("beats") or [])[::4 if curve == "bars" else 1]
+        elif curve == "markers":
+            ts = ctx.get("markers") or []
+        else:
+            off, ts, last = ctx.get("offset") or 0.0, [], None
+            for h in (ctx.get("hits") or {}).get(curve) or []:
+                x = h[0] - off
+                if h[1] >= thr and x >= s - 1e-9 and (last is None or x - last >= gap - 1e-9):
+                    ts.append(x)
+                    last = x
+        memo[key] = [x for x in ts if s - 1e-9 <= x <= e + 1e-9][::nth]
+    return memo[key]
+
+
+def field_progress(b, t, duration, ctx=None):
+    """Where the move is at t: the curve's value between `from` and `to`. Before the range it waits at the start,
+    after it the last value holds."""
+    s, e = span(b, duration)
+    curve = b.get("curve") if b.get("curve") in FIELD_CURVES else "ramp"
+    lo, hi = _num(b, "from", 0), _num(b, "to", 1)
+    cyc, easing = max(0.01, _num(b, "cycle", 2)), b.get("easing") if b.get("easing") in EASES else "linear"
+    tt = min(max(t, s), e)
+    if curve == "level":
+        v = min(1.0, max(0.0, _num(b, "amount", 1) * _level(ctx, tt, max(0.0, _num(b, "smooth", 0.15)), b.get("band") or "all")))
+    elif curve in FIELD_TRIGGERS:
+        ts = field_triggers(b, curve, ctx if isinstance(ctx, dict) else {}, duration)
+        v = progress_triggers(tt, ts, cyc, easing, int(_num(b, "steps", 1)))
+    else:
+        v = curve_shape(curve, (tt - s) / cyc + max(0.0, _num(b, "phase", 0)), easing, _num(b, "duty", 0.5), int(_num(b, "seed", 1)))
+    return lo + v * (hi - lo)
+
+
+def field_values(b, t, duration, ctx=None):
+    """[[progress, weight]] the mask is built from at t: now at weight 1 and, with a trail, earlier moments fading
+    out (the brightest wins per pixel)."""
+    out = [[field_progress(b, t, duration, ctx), 1.0]]
+    trail = max(0.0, _num(b, "trail", 0))
+    if trail > 0:
+        s, _e = span(b, duration)
+        dt = max(0.02, 2.5 * trail / TRAIL_STEPS)
+        for i in range(1, TRAIL_STEPS + 1):
+            if t - i * dt < s - 1e-9:
+                break
+            out.append([field_progress(b, t - i * dt, duration, ctx), math.exp(-i * dt / trail)])
+    return out
+
+
 # ---- swap: the layers of a group trade their masks (clips), one step per trigger. The owner layer carries the
 #   behaviour, "with" = the ids of the other layers. The pictures stay where they are, only the masks move on.
 #   order loop | pingpong | random;  trigger beats | bars | markers | every | low | mid | high;  nth (every nth

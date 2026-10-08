@@ -27,23 +27,32 @@ CATEGORY = "kubakub/2d/regions"
 MODES = ("outline", "centerline")
 
 
+def _old_match(r: dict, p: str) -> bool:
+    """The first selector of this node: one lowercase pattern, a name wildcard or group: / tag:."""
+    name, group = str(r.get("name", "")).lower(), str(r.get("group_id", "")).lower()
+    tags = [str(t).lower() for t in r.get("tags", [])]
+    return bool(p.startswith("group:") and fnmatch.fnmatchcase(group, p[6:]) or
+                p.startswith("tag:") and any(fnmatch.fnmatchcase(t, p[4:]) for t in tags) or
+                not p.startswith(("group:", "tag:")) and fnmatch.fnmatchcase(name, p))
+
+
 def select_ids(table: dict, text: str):
-    """'W_F1_*, group:Windows' (comma or line separated, name wildcards or group:/tag:) -> region ids; empty = all."""
-    pats = [p.strip().lower() for p in (text or "").replace("\n", ",").split(",") if p.strip()]
-    ids = []
-    for r in table.get("regions", []):
-        name, group = str(r.get("name", "")).lower(), str(r.get("group_id", "")).lower()
-        tags = [str(t).lower() for t in r.get("tags", [])]
-        if not pats:
-            ids.append(int(r["region_id"]))
-            continue
-        for p in pats:
-            if p.startswith("group:") and fnmatch.fnmatchcase(group, p[6:]) or \
-               p.startswith("tag:") and any(fnmatch.fnmatchcase(t, p[4:]) for t in tags) or \
-               not p.startswith(("group:", "tag:")) and fnmatch.fnmatchcase(name, p):
-                ids.append(int(r["region_id"]))
-                break
-    return ids
+    """
+    Region ids for a plan selector, as in regions to mask ('W_F1_*, group:Windows', 'tag:front !W_F0_*';
+    comma or new line = or, space = and, '!' = not); empty = all. A pattern the node's first selector
+    matched differently (a name with a space in it) keeps that match, so saved workflows select the same regions.
+    """
+    from ...kubakub.director.render import select_regions
+    regions = table.get("regions", [])
+    pats = [p.strip() for p in (text or "").replace("\n", ",").split(",") if p.strip()]
+    if not pats:
+        return [int(r["region_id"]) for r in regions]
+    hit = set()
+    for p in pats:
+        new = {int(i) for i in select_regions(table, p)}
+        old = {int(r["region_id"]) for r in regions if _old_match(r, p.lower())}
+        hit |= new if old <= new else old
+    return [int(r["region_id"]) for r in regions if int(r["region_id"]) in hit]
 
 
 class KUBA_RegionsToVector(io.ComfyNode):
@@ -66,7 +75,9 @@ class KUBA_RegionsToVector(io.ComfyNode):
                                   tooltip="The regions to vectorise (from any kubakub regions node)."),
                 io.Mask.Input("mask", optional=True, tooltip="Vectorise a mask instead (e.g. a painted line layer)."),
                 io.String.Input("select", default="", optional=True, placeholder="W_F1_*, group:Windows",
-                                tooltip="Which regions (name wildcards, group:, tag:); empty = all."),
+                                tooltip="Which regions, in plan syntax as in regions to mask: names with wildcards, "
+                                        "group:, tag:; comma = or, space = and, '!' = not. Empty = all. "
+                                        "Not used when a mask is connected."),
                 io.Combo.Input("mode", options=list(MODES), default="outline",
                                tooltip="outline: filled shapes per region (Illustrator, After Effects). "
                                        "centerline: single lines through the middle (plotter, laser, engraving)."),
@@ -74,14 +85,15 @@ class KUBA_RegionsToVector(io.ComfyNode):
                                tooltip="Real width of the whole image in mm (one uniform scale); 0 = pixels."),
                 io.Float.Input("simplify_px", default=1.0, min=0.0, max=50.0, step=0.1,
                                tooltip="Largest deviation from the pixel outline when simplifying."),
-                io.Float.Input("corner_deg", default=35.0, min=0.0, max=180.0, step=1.0,
+                io.Float.Input("corner_deg", default=35.0, min=0.0, max=180.0, step=1.0, advanced=True,
                                tooltip="outline: vertices turning more than this stay corners; 180 = no curves."),
                 io.Float.Input("min_area_px", default=16.0, min=0.0, max=1_000_000.0, step=1.0,
                                tooltip="Drop specks and holes smaller than this."),
-                io.Float.Input("spur_px", default=6.0, min=0.0, max=1000.0, step=0.5,
+                io.Float.Input("spur_px", default=6.0, min=0.0, max=1000.0, step=0.5, advanced=True,
                                tooltip="centerline: drop side branches shorter than this."),
-                io.Float.Input("kerf_mm", default=0.0, min=-100.0, max=100.0, step=0.01,
-                               tooltip="outline in mm: grow (+) or shrink (-) every outline by kerf / 2."),
+                io.Float.Input("kerf_mm", default=0.0, min=-100.0, max=100.0, step=0.01, advanced=True,
+                               tooltip="outline in mm: grow (+) or shrink (-) every outline by kerf / 2. "
+                                       "Ignored when width_mm is 0 (pixels have no millimetres)."),
                 io.Boolean.Input("svg", default=True, tooltip="Write an .svg (groups = region groups, ids = region names)."),
                 io.Boolean.Input("pdf", default=True, tooltip="Write a .pdf with one layer per region group."),
                 io.Boolean.Input("dxf", default=True, tooltip="Write a .dxf for CAD, CNC and laser software."),
@@ -106,7 +118,10 @@ class KUBA_RegionsToVector(io.ComfyNode):
         if regions is None and mask is None:            # left in a graph unconnected: nothing to write, no error
             empty = torch.zeros((1, 64, 64, 3))
             return io.NodeOutput(empty, "", "nothing to vectorise: connect regions or a mask")
+        notes = []
         if mask is not None:
+            if regions is not None or (select or "").strip():
+                notes.append("a mask is connected: the mask is vectorised, regions and select are not used")
             m = (mask[0] if mask.ndim == 3 else mask).cpu().float().numpy() > 0.5
             labels = np.where(m, 0, -1).astype(np.int32)
             table = {"regions": [{"region_id": 0, "name": filename_prefix, "group_id": filename_prefix}]}
@@ -138,7 +153,7 @@ class KUBA_RegionsToVector(io.ComfyNode):
                   f"nodes; {doc['width']:.1f} x {doc['height']:.1f} {u}"
                   + (f"; line length {st['length']:.1f} {u}, travel {st['travel']:.1f} {u}" if mode == "centerline"
                      else "") + (f"; kerf {kerf_mm:g} mm" if kerf_mm and u == "mm" else "")
-                  + "\n" + "\n".join(files))
+                  + "\n" + "\n".join(files + notes))
         log.info("[KUBA regions] to vector: %s", report.split("\n")[0])
         return io.NodeOutput(prev, "\n".join(files), report, ui=ui.PreviewImage(prev, cls=cls))
 

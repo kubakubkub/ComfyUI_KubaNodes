@@ -115,6 +115,7 @@ The menu is split into **2d** (images, masks, video) and **3d** (anything that n
 |---|---|
 | **project** | project settings (matrix size, fps, name, audience: link them into the other nodes), sample facade, sample model (the same facade as a 3D file) |
 | **2d / regions** | regions from matrix / masks (colours, line drawing, After Effects mask folders), regions from masks, regions from sam3, regions from illustrator (.ai / .pdf layers), regions to mask, regions to svg / pdf / dxf; canvas plan / to work / restore |
+| **2d / masks** | mask field (regions as a grey ramp: distance from the edge, a direction, from a point, one step per region, noise), mask animate (a mask per frame: reveal, band, rings along a field, or move, rotate, scale, strobe, with a trail; on a ramp, sine, saw, square, random, noise or a sound; the curve is drawn on the node) |
 | **2d / sketch** | scan to line (a phone photo of a drawing, straightened and cleaned), regions from sketch (closed shapes, coloured dots as names), line overlay (your line back on the render) |
 | **2d / generate** | region plan (rules: a prompt and settings per region), region sampler (Klein, Qwen Image 2.1), seam pass, versions (a sheet of looks, ideas per region, prompt rotation, LoRAs and style images: fast numbered drafts, then the picks at full size), audience viewpoint, frame in frame (rooms and worlds behind windows) |
 | **2d / director** | kubakub director (the window), director sequence (every frame, sound), director diffuse |
@@ -187,6 +188,7 @@ One page per menu group, with every input, the rule syntax, speeds and tests:
 | page | what is in it |
 |---|---|
 | [regions](docs/regions.md) | regions from a matrix, a line drawing, mask folders, any masks, SAM 3, Illustrator; regions to SVG / PDF / DXF; canvas plan / to work / restore |
+| [masks](docs/masks.md) | mask field, mask animate: effects, curves, things to try |
 | [sketch](docs/sketch.md) | scan to line, regions from sketch, line overlay |
 | [generate](docs/generate.md) | region plan (the rule text), region sampler (Klein, Qwen Image 2.1 and its LoRAs), seam pass, audience viewpoint, frame in frame |
 | [director](docs/director.md) | the director window: layers, timeline, sound, LTX and H3 clips, diffuse, light layers, video mapping, behaviours, export |

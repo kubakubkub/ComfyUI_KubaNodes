@@ -210,6 +210,8 @@ def parse(doc) -> dict:
             "stagger": [b for b in raw.get("motion") or [] if isinstance(b, dict) and b.get("type") == "stagger" and b.get("on") is not False]
                        if raw.get("clip") else [],
             "clip_feather": max(0.0, _num(raw, "clip_feather", 0)) if raw.get("clip") else 0.0,
+            "clip_field": raw.get("clip_field") if raw.get("clip") and isinstance(raw.get("clip_field"), dict)
+                          and isinstance(raw["clip_field"].get("values"), list) else None,
             "clip_mix": [[str(m[0]), min(max(float(m[1]), 0.0), 1.0)] for m in raw.get("clip_mix") or []
                          if isinstance(m, (list, tuple)) and len(m) == 2 and _is_num(m[1])] if raw.get("clip") else [],
         })
@@ -478,6 +480,11 @@ def animate(doc, t, ctx=None):
             L["clip_mix"] = mix
         else:
             L.pop("clip_mix", None)
+        fb = mo.field_of(L.get("motion")) if L.get("clip") else None
+        if fb:                                        # where its field move is now (and its trail), for the clip
+            L["clip_field"] = dict(fb, values=mo.field_values(fb, t, dur, ctx))
+        else:
+            L.pop("clip_field", None)
         rb = mo.repeat_of(L.get("motion")) if L.get("kind") in ("image", "shape") else None
         if rb and isinstance(L.get("mask"), dict) and L["mask"].get("by") == "below":
             nxt = src_layers[idx + 1] if idx + 1 < len(src_layers) and isinstance(src_layers[idx + 1], dict) else None
@@ -522,6 +529,9 @@ def scale_doc(doc, s):
             L["shape"]["feather"] = L["shape"]["feather"] * s
         if _is_num(L.get("clip_feather")):
             L["clip_feather"] = L["clip_feather"] * s
+        for b in [*(L.get("motion") or []), L.get("clip_field")]:     # a noise field's blobs are pixels too
+            if isinstance(b, dict) and (b.get("type") == "field" or "values" in b) and b.get("field") == "noise":
+                b["noise_px"] = (b["noise_px"] if _is_num(b.get("noise_px")) else 64.0) * s
     if isinstance(d.get("canvas"), list) and len(d["canvas"]) == 2:
         d["canvas"] = [max(1, round(d["canvas"][0] * s)), max(1, round(d["canvas"][1] * s))]
     return d
@@ -587,6 +597,7 @@ def _strips(y0, y1):
 # ------------------------------------------------------------------------------------------------
 
 _POOL, _POOL_LOCK = None, threading.Lock()
+_FIELD_LOCK = threading.Lock()
 
 
 def _pool():
@@ -664,7 +675,36 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
         return big[y0 - Y0:y1 - Y0, x0 - X0:x1 - X0]
 
     def clip_hard(L, ids, box):
-        """The clip mask; with stagger behaviours each region weighted by its stagger value at the document time.
+        """The clip mask, and with a field behaviour (clip_field from animate) only as far as its move has come."""
+        m = clip_regions(L, ids, box)
+        fb = L["clip_field"]
+        if not fb or labels is None:
+            return m
+        from .. import maskfields as mf
+        if L["clip_mix"]:                               # in a swap: the field runs over the masks it holds now
+            ids = sorted({i for sel, _wt in L["clip_mix"] for i in ids_of(sel, f"{L['name']} swap")})
+        num = lambda k, d: float(fb[k]) if _is_num(fb.get(k)) else d      # noqa: E731
+        kind = fb.get("field") if fb.get("field") in mo.FIELD_KINDS else "edge distance"
+        per = fb.get("per") if fb.get("per") in mo.FIELD_PER else "each region"
+        order, effect = str(fb.get("order") or "left"), fb.get("effect") if fb.get("effect") in mo.FIELD_EFFECTS else "reveal"
+        key = ("field", tuple(ids), kind, per, num("angle", 0.0), num("cx", 0.5), num("cy", 0.5), order, int(num("seed", 1)),
+               num("noise_px", 64.0), bool(fb.get("invert")))
+        f = mc.get(key)
+        if f is None:
+            with _FIELD_LOCK:                           # the frames of a sequence render in threads: built once
+                f = mc.get(key)
+                if f is None:
+                    own = [i for i in ids if i >= 0]
+                    lab, n = mf.compact(labels, own)
+                    f = mc[key] = mf.field(lab, n, kind, per, key[4], (key[5], key[6]), order, key[8], key[9], key[10], ids=own)[0]
+        x0, y0, x1, y1 = box
+        vals = [[float(v[0]), float(v[1])] for v in fb["values"] if isinstance(v, (list, tuple)) and len(v) == 2]
+        if not vals:
+            return m
+        return m * mf.mask_at(f[y0:y1, x0:x1], vals, effect, num("soft", 0.05), num("width", 0.2), int(num("rings", 3)))
+
+    def clip_regions(L, ids, box):
+        """The clip regions; with stagger behaviours each region weighted by its stagger value at the document time.
         A layer in a swap (clip_mix from animate) shows through the masks it holds now, each at its weight."""
         mix = L["clip_mix"]
         if (not L["stagger"] and not mix) or labels is None or not (ids or mix):

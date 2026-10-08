@@ -101,6 +101,11 @@ class KUBA_RegionSampler(io.ComfyNode):
                              tooltip="Added to every region seed, for a new variation of all regions."),
                 io.Combo.Input("adapter", options=adapters.families(), default="auto", advanced=True,
                                tooltip="Model family; auto detects Flux 2 and Qwen Image 2.1."),
+                # new inputs go last: saved workflows store the widget values by position
+                io.Image.Input("style", optional=True,
+                               tooltip="A style image for the regions whose plan says reference = style: the "
+                                       "model sees it as a second reference next to the region's own crop "
+                                       "(scaled to about 1 megapixel). Of a batch the first image is used."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The image with all processed regions pasted in."),
@@ -112,25 +117,45 @@ class KUBA_RegionSampler(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, clip, vae, plan, image, steps, cfg, sampler_name, scheduler, region_mp,
-                max_upscale, schedule="auto", only="", seed_offset=0, adapter="auto") -> io.NodeOutput:
+                max_upscale, schedule="auto", only="", seed_offset=0, adapter="auto",
+                style=None) -> io.NodeOutput:
         ad = adapters.make_adapter(model, clip, vae, adapter)
         ad.set_schedule(schedule)
         log.info("[KUBA regions] sampler: adapter %s, grid %d px, schedule %s", ad.family, ad.grid, ad.schedule)
         settings = st.SamplerSettings(steps=steps, cfg=cfg, sampler_name=sampler_name,
                                       scheduler=scheduler, region_mp=region_mp,
-                                      max_upscale=max_upscale, seed_offset=seed_offset)
+                                      max_upscale=max_upscale, seed_offset=seed_offset,
+                                      style=style[:1] if style is not None else None)
+        pick = only_filter(only)
+        notes = []
         if image.shape[0] > 1:
             log.warning("[KUBA regions] image batch has %d images; using the first.", image.shape[0])
+            notes.append(f"the image input is a batch of {image.shape[0]} images: only the first one is used")
+        # regions of this run that ask for the style image (frame_in_frame scenes take no reference)
+        entries = plan.plan["regions"]
+        want_style = [i for i in plan.order
+                      if entries[i]["strategy"] == "inpaint" and entries[i].get("reference", "self") == "style"
+                      and (pick is None or pick(entries[i]))]
+        if want_style and style is None:
+            notes.append(f"{len(want_style)} region(s) have reference = style but no style image is connected: "
+                         f"they use their own crop (reference = self). Connect an image to 'style'.")
+        elif style is not None and not want_style:
+            notes.append("a style image is connected but no region of this run has reference = style: "
+                         "it is not used. Write 'reference = style' into the plan.")
+        elif style is not None:
+            notes.append(f"style image used by {len(want_style)} region(s)")
+        for n in notes:
+            log.info("[KUBA regions] sampler: %s", n)
         pbar = None
         n_todo = len(plan.order)
         if n_todo:
             pbar = comfy.utils.ProgressBar(n_todo)
         out, changed, results = st.run_plan(
-            ad, image, plan, settings, only=only_filter(only),
+            ad, image, plan, settings, only=pick,
             progress=(lambda i, n: pbar.update_absolute(i, n)) if pbar else None,
             check_interrupt=comfy.model_management.throw_exception_if_processing_interrupted)
         report = (f"adapter {ad.family}, grid {ad.grid}, schedule {ad.schedule}; cache {rc.RESULTS.stats()}\n"
-                  + st.results_report(results))
+                  + st.results_report(results) + "".join(f"\nnote: {n}" for n in notes))
         log.info("[KUBA regions] %s", report.splitlines()[1])
         return io.NodeOutput(out, changed, report)
 
@@ -164,14 +189,14 @@ class KUBA_SeamPass(io.ComfyNode):
                 io.Float.Input("denoise", default=0.3, min=0.0, max=1.0, step=0.01,
                                tooltip="How much the seam band may change: low keeps the regions, "
                                        "higher blends more (0.3 = gentle)."),
-                io.Int.Input("steps", default=0, min=0, max=200,
+                io.Int.Input("steps", advanced=True, default=0, min=0, max=200,
                              tooltip="0 = the model's default (Klein 4, Qwen Image 2.1 25)."),
-                io.Float.Input("cfg", default=0.0, min=0.0, max=30.0, step=0.1, round=0.01,
+                io.Float.Input("cfg", advanced=True, default=0.0, min=0.0, max=30.0, step=0.1, round=0.01,
                                tooltip="0 = the model's default (1.0)."),
-                io.Combo.Input("sampler_name", options=comfy.samplers.KSampler.SAMPLERS, default="euler",
-                               tooltip="Sampler for the seam tiles (euler is a safe default)."),
-                io.Combo.Input("scheduler", options=comfy.samplers.KSampler.SCHEDULERS, default="simple",
-                               tooltip="Generic models only; Flux 2 uses its own schedule."),
+                io.Combo.Input("sampler_name", advanced=True, options=comfy.samplers.KSampler.SAMPLERS,
+                               default="euler", tooltip="Sampler for the seam tiles (euler is a safe default)."),
+                io.Combo.Input("scheduler", advanced=True, options=comfy.samplers.KSampler.SCHEDULERS,
+                               default="simple", tooltip="Generic models only; Flux 2 uses its own schedule."),
                 io.Boolean.Input("differential", default=True,
                                  tooltip="Differential diffusion: the soft band edge is denoised less "
                                          "than its centre, step by step (core DifferentialDiffusion)."),

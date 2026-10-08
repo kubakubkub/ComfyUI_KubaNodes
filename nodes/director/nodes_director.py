@@ -244,16 +244,6 @@ def _source_video(ref):
     return _input_path(name) if name and md.is_video(name) else None
 
 
-def _reachable_from_outside():
-    """ComfyUI was started with --listen on more than this computer: its routes answer other machines too."""
-    try:
-        from comfy.cli_args import args
-        hosts = [h.strip().lower() for h in str(getattr(args, "listen", "") or "").split(",")]
-    except Exception:  # noqa: BLE001
-        return False
-    return any(h not in ("", "127.0.0.1", "localhost", "::1") for h in hosts)
-
-
 PATHS_OFF = ("files by path are off while ComfyUI listens on the network (--listen). Put the file into ComfyUI's input "
              "folder, or allow it with  remote_paths = on  in kubakub.ini [settings]")
 
@@ -261,7 +251,7 @@ PATHS_OFF = ("files by path are off while ComfyUI listens on the network (--list
 def _route_paths_ok():
     """May a request to the window's routes name a file by its path ('path:...', hdri_file)? Yes on this computer
     only; with --listen only when kubakub.ini says remote_paths = on. A workflow that runs is not affected."""
-    return not _reachable_from_outside() or kst.switch("remote_paths", False)
+    return kst.route_paths_ok()
 
 
 def _doc_names_paths(doc):
@@ -527,6 +517,63 @@ def sound_of(name):
     return _SOUND_CACHE[key]
 
 
+def node_audio(audio):
+    """The sound connected to the director's audio input, written once as a 16 bit wav into input/kuba_director
+    (named by its content) -> (its name in input/, seconds, the waveform [C, S], sample rate). The window and the
+    node both read the timeline's sound from a file there, so the cable becomes that file."""
+    import wave as wavmod
+    w = audio["waveform"]
+    w = (w[0] if w.dim() == 3 else w.reshape(-1, w.shape[-1])).float().cpu()[:2]
+    sr = int(audio["sample_rate"])
+    name = f"{UPLOAD_SUB}/node_audio_{array_digest(w)[:12]}_{sr}.wav"
+    path = os.path.join(folder_paths.get_input_directory(), *name.split("/"))
+    if not os.path.isfile(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        pcm = (w.clamp(-1, 1).numpy().T * 32767.0).astype("<i2")
+        tmp = f"{path}.{os.getpid()}.part"              # a run stopped half way must not leave a short file under the name
+        with wavmod.open(tmp, "wb") as f:
+            f.setnchannels(pcm.shape[1])
+            f.setsampwidth(2)
+            f.setframerate(sr)
+            f.writeframes(pcm.tobytes())
+        os.replace(tmp, path)
+    return name, w.shape[-1] / float(sr), w, sr
+
+
+_BEAT_CACHE = {}                    # the tempo of a connected sound, per file name (= per content)
+
+
+def use_node_audio(doc_obj, audio, beats=True):
+    """Make the connected sound the timeline's sound (the cable wins over a sound picked in the window): its file, a
+    tempo found in it when the sound is new (beats), and for a composition without a length the sound's length."""
+    name, secs, w, sr = node_audio(audio)
+    if not isinstance(doc_obj.get("timeline"), dict):
+        doc_obj["timeline"] = {}
+    tl = doc_obj["timeline"]
+    cur = tl.get("audio") if isinstance(tl.get("audio"), dict) else {}
+    if cur.get("file") != name:
+        tl["audio"] = {"file": name, "offset": 0, "gain": cur.get("gain", 1)}
+        if beats and name not in _BEAT_CACHE:
+            if len(_BEAT_CACHE) > 16:
+                _BEAT_CACHE.clear()
+            _BEAT_CACHE[name] = snd.analyze_beats(snd.to_mono(w), sr)
+        beat = _BEAT_CACHE.get(name) if beats else None
+        if beat:
+            tl["beat"] = {"bpm": beat["bpm"], "phase": beat["phase"]}
+        else:
+            tl.pop("beat", None)
+    if not rd._is_num(tl.get("duration")):
+        tl["duration"] = min(600.0, max(0.5, round(secs, 1)))
+    return name
+
+
+def check_export_alpha(export, export_alpha):
+    """export_alpha needs a format that carries alpha: refuse the others before anything is rendered."""
+    if export and export != "none" and export_alpha and export not in exm.ALPHA_FORMATS:
+        raise ValueError(f"kubakub director: export_alpha needs a format with alpha, and '{exm.FORMATS[export]['label']}' has none. "
+                         f"Pick one of: {', '.join(exm.ALPHA_FORMATS)}; or turn export_alpha off.")
+
+
 def motion_needs(doc):
     """(loudness curve wanted, bands wanted) by the behaviours of a document: sound level, sound level of a band,
     swap masks on low / mid / high."""
@@ -542,6 +589,11 @@ def motion_needs(doc):
                     level = True
             elif b.get("type") == "swap" and b.get("trigger") in mo.BANDS:
                 bands = True
+            elif b.get("type") == "field":              # a field move on the sound level or on low / mid / high hits
+                if b.get("curve") in mo.BANDS or b.get("curve") == "level" and b.get("band") in mo.BANDS:
+                    bands = True
+                elif b.get("curve") == "level":
+                    level = True
     return level, bands
 
 
@@ -953,15 +1005,20 @@ def cached_sequence(key, make):
     return frames, report, False
 
 
-def cached_export(key, write):
+def cached_export(key, write, out=None):
     """write(written) -> report line (written: a list it fills with the folder and files), unless an export with the same content and settings was written this session and its
-    files are all still there: then a report pointing to it (delete that folder, or change a setting, to write again)."""
+    files are all still there: then a report pointing to it (delete that folder, or change a setting, to write again).
+    out: a list that gets the folder and the files, of this export or of the earlier one it points to."""
     hit = _EXPORTS.get(key)
     if hit is not None and hit[1] and all(os.path.exists(f) for f in hit[1]):
+        if out is not None:
+            out += hit[1]
         return (f"export unchanged since the last one, not written again: {hit[0]} (delete that folder or change a "
                 f"setting to write it again)")
     written = []
     rep = write(written)
+    if out is not None:
+        out += written
     if written:
         _EXPORTS[key] = (written[0], written, rep)
         while len(_EXPORTS) > 16:
@@ -1014,13 +1071,19 @@ def sequence_frames(doc, base, sources, labels, table, scene, W, H, scale, skip_
     return frames, "\n".join(lines + [rep])
 
 
-def export_cached(fmt, scale, alpha, name, doc, base, sources, labels, table, scene, W, H, pmask, audio):
-    """_export through the export cache (see cached_export)."""
+def export_cached(fmt, scale, alpha, name, doc, base, sources, labels, table, scene, W, H, pmask, audio, out=None):
+    """_export through the export cache (see cached_export). out: a list that gets the export folder and the files."""
     key = ("export", content_key(doc, base, sources, labels, table, scene, W, H, pmask), fmt, float(scale), bool(alpha),
            str(name), array_digest(audio["waveform"]) if audio is not None else "-",
            int(audio["sample_rate"]) if audio is not None else 0)
     return cached_export(key, lambda written: _export(fmt, scale, alpha, name, doc, base, sources, labels, table, scene, W, H,
-                                                     pmask, audio, written))
+                                                     pmask, audio, written), out)
+
+
+def _paths_out(written):
+    """[folder, file, ...] of an export -> the 'folder' and 'files' outputs (files: one path per line); '' when
+    nothing was written."""
+    return (written[0], "\n".join(written[1:])) if written else ("", "")
 
 
 class KUBA_Export(io.ComfyNode):
@@ -1039,7 +1102,9 @@ class KUBA_Export(io.ComfyNode):
             inputs=[
                 io.Image.Input("images", tooltip="The frames to write (a batch; one image = a one-frame file)."),
                 io.Float.Input("fps", default=25.0, min=1.0, max=120.0, step=0.001,
-                               tooltip="Frames per second of the file (e.g. 25, 30 or 29.97)."),
+                               tooltip="Frames per second of the file (e.g. 25, 30 or 29.97). Connect the fps output "
+                                       "of kubakub director sequence (or of the director) so the file plays at the "
+                                       "timeline's speed."),
                 io.Combo.Input("format", options=list(exm.FORMATS), default="prores422hq",
                                tooltip="png8 / png16 = PNG sequence + .wav; prores4444 (with alpha) / prores422hq = .mov; "
                                        "h264 / h264_444 / h265 = .mp4; preview = a small half-size .mp4."),
@@ -1047,9 +1112,16 @@ class KUBA_Export(io.ComfyNode):
                                 tooltip="Name of the export folder and files (a date and time is added to the folder)."),
                 io.Audio.Input("audio", optional=True,
                                tooltip="Sound for the file (PNG sequences get it as a .wav next to the frames)."),
-                io.Mask.Input("alpha", optional=True, tooltip="Alpha for PNG / ProRes 4444 (one mask or one per frame)."),
+                io.Mask.Input("alpha", optional=True,
+                              tooltip="Alpha for PNG / ProRes 4444 (one mask or one per frame). A mask of another size "
+                                      "is resized to the frames; other formats cannot carry alpha (the report says so)."),
             ],
-            outputs=[io.String.Output("report", tooltip="Format, frame count, size, the output folder and the written files.")],
+            outputs=[
+                io.String.Output("report", tooltip="Format, frame count, size, the output folder and the written files."),
+                io.String.Output("folder", tooltip="The export folder (full path)."),
+                io.String.Output("files", tooltip="What was written, one full path per line: the video file, or for a "
+                                                  "PNG sequence the folder of frames and the .wav."),
+            ],
         )
 
     @classmethod
@@ -1060,12 +1132,18 @@ class KUBA_Export(io.ComfyNode):
         wave = audio["waveform"][0].float().cpu().numpy() if audio is not None else None
         writer = exm.Writer(format, out_dir, safe, w - w % 2, h - h % 2, fps, alpha=alpha is not None, audio=wave,
                             sr=int(audio["sample_rate"]) if audio is not None else 44100)
+        notes = [writer.alpha_note] if writer.alpha_note else []
+        if writer.alpha and tuple(alpha.shape[-2:]) != (h, w):
+            notes.append(f"alpha {alpha.shape[-1]}x{alpha.shape[-2]} resized to the frames ({w}x{h})")
 
         def prep(i):
             a = None
-            if alpha is not None:
+            if writer.alpha:
                 m = alpha if alpha.ndim == 2 else alpha[min(i, alpha.shape[0] - 1)]
-                a = m.float().cpu().numpy()[:h - h % 2, :w - w % 2]
+                a = m.float().cpu().numpy()
+                if a.shape != (h, w):                  # e.g. a full-size projection mask on half-size frames
+                    a = cv2.resize(a, (w, h), interpolation=cv2.INTER_AREA if a.shape[1] > w else cv2.INTER_LINEAR)
+                a = a[:h - h % 2, :w - w % 2]
             return writer.prep(i, images[i, :h - h % 2, :w - w % 2, :3].float().cpu().numpy(), a)
 
         from concurrent.futures import ThreadPoolExecutor   # quantise / PNG encode in parallel, written in order
@@ -1077,8 +1155,8 @@ class KUBA_Export(io.ComfyNode):
         finally:
             files = writer.close()
         rep = f"{exm.FORMATS[format]['label']}: {n} frames {w - w % 2}x{h - h % 2} -> {out_dir} ({time.perf_counter() - t0:.0f} s)"
-        log.info("[KUBA export] %s", rep)
-        return io.NodeOutput(rep + "\n" + "\n".join(files))
+        log.info("[KUBA export] %s", "; ".join([rep, *notes]))
+        return io.NodeOutput("\n".join([rep, *notes, *files]), out_dir, "\n".join(files))
 
 
 def _light_layer(doc, layer_id, sources, labels, table, W, H, scene, scale=None, samples=None, out_size=None,
@@ -1299,8 +1377,8 @@ class KUBA_Director(io.ComfyNode):
             inputs=[
                 io.Image.Input("image", tooltip="The base layer: the matrix, a render or a photo of the facade."),
                 io.Image.Input("layers", optional=True,
-                               tooltip="Images to place (a batch = several layers; different sizes: use several "
-                                       "director inputs later or import in the window)."),
+                               tooltip="Images to place (a batch = several layers, all of one size). Pictures of "
+                                       "other sizes: import them in the window."),
                 io.Mask.Input("layer_masks", optional=True,
                               tooltip="Masks for the layer images (1 = keep). Masks without images become "
                                       "white layers you can use as masks for other layers."),
@@ -1316,11 +1394,13 @@ class KUBA_Director(io.ComfyNode):
                 io.String.Input("document", multiline=True, default="", optional=True,
                                 tooltip="The composition, written by the window (JSON). Leave it to the window."),
                 io.Boolean.Input("render_sequence", default=False, optional=True, advanced=True,
-                                 tooltip="Also render every frame of the timeline (frames / fps outputs, e.g. into "
-                                         "Create Video). Light layers render in Cycles per frame where they change. Kept for older workflows: the kubakub director sequence node does this now."),
+                                 tooltip="(old: use kubakub director sequence) Also render every frame of the timeline "
+                                         "(frames / fps outputs, e.g. into Create Video). Light layers render in Cycles "
+                                         "per frame where they change. Kept for older workflows."),
                 io.Boolean.Input("skip_h3_frames", default=False, optional=True, advanced=True,
-                                 tooltip="Do not render the frames that H3 keyframe clips replace anyway (a dissolve "
-                                         "stands in for them). Off for the full sequence without H3. Kept for older workflows: the kubakub director sequence node does this now."),
+                                 tooltip="(old: use kubakub director sequence) Do not render the frames that H3 "
+                                         "keyframe clips replace anyway (a dissolve stands in for them). Off for the "
+                                         "full sequence without H3. Kept for older workflows."),
                 io.Combo.Input("export", options=["none", *exm.FORMATS], default="none", optional=True, advanced=True,
                                tooltip="Write the whole timeline as a file at the delivery size, frame by frame (no RAM limit): "
                                        "PNG sequence 8/16 bit, ProRes 4444 / 422 HQ, H.264 (4:2:0 8 bit or 4:4:4 10 bit), "
@@ -1333,14 +1413,18 @@ class KUBA_Director(io.ComfyNode):
                                          "the projection mask): PNG sequences and ProRes 4444."),
                 io.String.Input("export_name", default="director", optional=True, advanced=True, tooltip="Name of the export folder and files."),
                 io.Float.Input("sequence_scale", default=0.5, min=0.1, max=1.0, step=0.05, optional=True, advanced=True,
-                               tooltip="Size of the sequence frames relative to the matrix (RAM: 250 frames at "
-                                       "1600x1080 = ~5 GB). Kept for older workflows: the kubakub director sequence node does this now."),
+                               tooltip="(old: use kubakub director sequence) Size of the sequence frames relative to "
+                                       "the matrix (RAM: 250 frames at 1600x1080 = ~5 GB). Kept for older workflows."),
                 io.Combo.Input("flow", options=['hold until apply', 'always'], default="hold until apply", optional=True,
                                tooltip="hold until apply: until a composition is applied from the window, the director only "
                                        "shows its preview (open it, compose, apply) and the nodes after it wait - no LTX / "
                                        "H3 / sequence run on an empty composition. always: the base passes on right away. "
                                        "Once a composition is applied the setting changes nothing, but switching it "
                                        "still counts as a change for ComfyUI (the nodes after the director run again)."),
+                io.Audio.Input("audio", optional=True,
+                               tooltip="A sound from the graph (e.g. Load Audio) as the timeline's sound: its waveform, "
+                                       "tempo and beats show in the window after a run, the sound behaviours follow "
+                                       "it and it goes out on 'audio'. It replaces a sound picked in the window."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The composition at full size."),
@@ -1389,8 +1473,10 @@ class KUBA_Director(io.ComfyNode):
     @classmethod
     def execute(cls, image, layers=None, layer_masks=None, invert_masks=False, regions=None, scene=None,
                 layer_names="", seam_px=24, document="", flow="hold until apply", render_sequence=False, sequence_scale=0.5,
-                skip_h3_frames=False, export="none", export_scale=1.0, export_alpha=False, export_name="director") -> io.NodeOutput:
+                skip_h3_frames=False, export="none", export_scale=1.0, export_alpha=False, export_name="director",
+                audio=None) -> io.NodeOutput:
         t0 = time.perf_counter()
+        check_export_alpha(export, export_alpha)
         if scene is not None and '"kind": "light"' in (document or "").replace('"kind":"light"', '"kind": "light"'):
             try:                                  # light layers: Blender starts while the rest is prepared
                 from ..scene3d.nodes_scene3d import prestart_relight
@@ -1436,6 +1522,13 @@ class KUBA_Director(io.ComfyNode):
             except ValueError as e:
                 raise ValueError(f"kubakub director: the saved composition is not valid JSON ({e}). Undo the edit "
                                  "or clear the node's document to start fresh.") from e
+        audio_in, audio_doc = "", None
+        if audio is not None and isinstance(doc_obj, dict):     # the sound on the cable is the timeline's sound
+            if doc_obj:
+                audio_in = use_node_audio(doc_obj, audio)
+            else:                                     # no composition yet: it stays "nothing applied", the sound still goes out
+                audio_doc = {}
+                audio_in = use_node_audio(audio_doc, audio, beats=False)
         for L in doc_obj.get("layers", []) if isinstance(doc_obj, dict) else []:
             src = str(L.get("source") or "")
             if src.startswith("file:") and src not in sources:
@@ -1562,7 +1655,7 @@ class KUBA_Director(io.ComfyNode):
         manifest = {"canvas": [W, H], "proxy_scale": k, "views": views, "inputs": inputs, "regions": region_list,
                     "groups": sorted({g["group"] for g in region_list if g["group"]}), "blend_modes": list(MODES),
                     "upload_subfolder": UPLOAD_SUB, "node": uid, "result": ref(fn), "scene": scene_info,
-                    "lights": views.pop("_lights", {}), "diffusion": diffusion_manifest()}
+                    "lights": views.pop("_lights", {}), "diffusion": diffusion_manifest(), "audio_in": audio_in}
         placed = ", ".join(e[1] for e in r["layer_masks"]) or "none"
         report = "\n".join([f"{W}x{H}, {r['layer_count']} layers, placed: {placed}",
                             f"{len(r['table']['regions'])} regions out, changed {float(r['changed'].mean()) * 100:.1f} % of the image",
@@ -1580,7 +1673,7 @@ class KUBA_Director(io.ComfyNode):
             fps = float(rd.timeline(seq_doc or doc_obj)["fps"])
             report += "\n" + seq_report
             log.info("[KUBA director] %s", seq_report.replace("\n", "\n    "))
-        audio, audio_note = timeline_audio(doc_obj)
+        audio, audio_note = timeline_audio(doc_obj or audio_doc)       # (shadows the input: from here on the timeline's sound)
         if audio_note:
             report += "\n" + audio_note
         if export and export != "none" and doc_obj:
@@ -1598,7 +1691,8 @@ class KUBA_Director(io.ComfyNode):
         pm_out = torch.from_numpy(pmask)[None] if pmask is not None else torch.ones((1, H, W))
         state = DirectorState(doc=seq_doc or doc_obj or None, base=base, sources=dict(sources), labels=labels, table=table,
                               scene=scene, W=W, H=H, pmask=pmask, audio=audio,
-                              fps=float(rd.timeline(doc_obj)["fps"] if doc_obj else 25), still=comp)
+                              fps=float(rd.timeline(doc_obj)["fps"] if doc_obj else 25), still=comp,
+                              document=json.dumps(doc_obj) if doc_obj else "")
         return io.NodeOutput(comp, masks, changed, out_regions, r["rules"],
                              json.dumps(doc_obj) if doc_obj else "", report, frames, fps, audio, pm_out, state, ui=ui_dict)
 
@@ -1619,6 +1713,7 @@ class DirectorState:
     audio: dict | None
     fps: float
     still: torch.Tensor
+    document: str = ""                                # the director's 'document' output (doc has cutout sources)
 
     def _comfy_cache_tensors(self):
         """What ComfyUI's RAM-pressure cache counts for this output: zero-copy tensor views of the arrays (without
@@ -1636,6 +1731,17 @@ class DirectorState:
         if isinstance(self.audio, dict) and isinstance(self.audio.get("waveform"), torch.Tensor):
             out.append(self.audio["waveform"])
         return out
+
+
+def _pmask_out(S, scale=None):
+    """The state's projection mask as a MASK [1, h, w] at the size of the sequence frames at `scale` (None = the
+    still's size), sized and cropped like _render_sequence; all ones when the slot is off."""
+    wt, ht = (S.W, S.H) if scale is None else (max(16, round(S.W * scale)), max(16, round(S.H * scale)))
+    ws, hs = (wt, ht) if scale is None else (wt - wt % 2, ht - ht % 2)
+    if S.pmask is None:
+        return torch.ones((1, hs, ws))
+    m = cv2.resize(S.pmask, (wt, ht), interpolation=cv2.INTER_AREA) if (wt, ht) != (S.W, S.H) else S.pmask
+    return torch.from_numpy(np.ascontiguousarray(m[:hs, :ws], np.float32))[None]
 
 
 class KUBA_DirectorSequence(io.ComfyNode):
@@ -1684,6 +1790,17 @@ class KUBA_DirectorSequence(io.ComfyNode):
                 io.Audio.Output("audio", tooltip="The timeline's sound, trimmed to its length (silence without one)."),
                 io.String.Output("report", tooltip="Frames rendered (or reused from the last run), size and time, and the "
                                                    "export folder."),
+                io.String.Output("folder", tooltip="The export folder (full path); empty when nothing was exported."),
+                io.String.Output("files", tooltip="What the export wrote, one full path per line: the video file, or "
+                                                  "for a PNG sequence the folder of frames and the .wav. Empty when "
+                                                  "nothing was exported."),
+                io.Int.Output("frame_count", tooltip="Frames of the timeline (its length x fps); 1 while there is no "
+                                                     "composition."),
+                io.Mask.Output("projection_mask", tooltip="The building's silhouette at the size of the frames output "
+                                                          "(1 = building; all ones when the director's projection "
+                                                          "mask is off)."),
+                io.String.Output("document", tooltip="The director's composition document (JSON), passed through: "
+                                                     "straight into kubakub keyframe clips (h3)."),
             ],
             hidden=[io.Hidden.unique_id, io.Hidden.prompt],
         )
@@ -1692,9 +1809,11 @@ class KUBA_DirectorSequence(io.ComfyNode):
     def execute(cls, director, frames=True, sequence_scale=0.5, skip_h3_frames=False, export="none", export_scale=1.0,
                 export_alpha=False, export_name="director", light_scale=1.0) -> io.NodeOutput:
         S = director
+        check_export_alpha(export, export_alpha)
         if not S.doc:
-            return io.NodeOutput(S.still, S.fps, S.audio, "no composition yet: the still only")
-        out, lines = S.still, []
+            return io.NodeOutput(S.still, S.fps, S.audio, "no composition yet: the still only", "", "", 1,
+                                 _pmask_out(S), S.document)
+        out, lines, written = S.still, [], []
         if frames:
             hid = getattr(cls, "hidden", None)
             out, rep_ = sequence_frames(S.doc, S.base, S.sources, S.labels, S.table, S.scene, S.W, S.H, float(sequence_scale),
@@ -1704,10 +1823,11 @@ class KUBA_DirectorSequence(io.ComfyNode):
             lines.append(rep_)
         if export and export != "none":
             lines.append(export_cached(export, float(export_scale), bool(export_alpha), str(export_name or "director"), S.doc,
-                                 S.base, dict(S.sources), S.labels, S.table, S.scene, S.W, S.H, S.pmask, S.audio))
+                                 S.base, dict(S.sources), S.labels, S.table, S.scene, S.W, S.H, S.pmask, S.audio, written))
         report = "\n".join(lines) or "nothing to do: frames off and no export"
         log.info("[KUBA director sequence] %s", report.replace("\n", "\n    "))
-        return io.NodeOutput(out, S.fps, S.audio, report)
+        return io.NodeOutput(out, S.fps, S.audio, report, *_paths_out(written), int(rd.timeline(S.doc)["frames"]),
+                             _pmask_out(S, float(sequence_scale) if frames else None), S.document)
 
 
 

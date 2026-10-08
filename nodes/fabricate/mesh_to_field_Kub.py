@@ -25,6 +25,7 @@ import torch
 import folder_paths
 
 from ...kubakub import relief_core as rc
+from ...kubakub import samples
 
 CAT = "kubakub/3d/fabricate/relief"
 FIELD = "RELIEFFORGE_FIELD"
@@ -191,6 +192,25 @@ def rasterize_depth(verts, faces, azimuth_deg=0.0, elevation_deg=0.0,
 # node 1: one view to a field
 # --------------------------------------------------------------------------
 
+def _mesh_file(mesh_path):
+    """The pasted mesh path, or the built-in sample model when the field is empty -> (path, is the sample)."""
+    path = str(mesh_path or "").strip().strip('"')
+    if not path:                                       # nothing pasted yet: the sample facade (an OBJ in metres, Y up)
+        return samples.model(folder_paths.get_temp_directory()), True
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"mesh not found: {path}. Paste the full path of an OBJ file into 'mesh_path', "
+                                "or leave it empty for the built-in sample.")
+    return path, False
+
+
+def _sample_note(mesh_units, up_axis):
+    """What the report says when the sample ran. It is modelled in metres with Y up: other settings give a wrong size."""
+    out = samples.note("mesh file", "mesh_path")
+    if mesh_units != "m" or up_axis != "Y":
+        out += " The sample is modelled in metres with Y up: set mesh_units = m and up_axis = Y for its real size."
+    return out
+
+
 def _mesh_stamp(mesh_path, **_):
     """The mesh file's path + size + mtime: an edited mesh re-runs the node (the widget text alone does not change)."""
     p = str(mesh_path or "").strip().strip('"')
@@ -209,7 +229,7 @@ class MeshOrthoFieldKub:
                 "mesh_path": ("STRING", {"default": "", "multiline": False,
                                          "tooltip": "Full path of the mesh file. OBJ always works; GLB, GLTF, PLY "
                                                     "and STL need trimesh installed. The node re-runs when the file "
-                                                    "changes."}),
+                                                    "changes. Empty = the built-in sample facade (metres, Y up)."}),
                 "mesh_units": (["mm", "cm", "m", "inch"], {"default": "m",
                                                           "tooltip": "The unit the mesh was modelled in, so the "
                                                                      "relief comes out in real millimetres."}),
@@ -243,12 +263,14 @@ class MeshOrthoFieldKub:
     DESCRIPTION = ("Turns a finished 3D mesh (OBJ, or GLB / PLY / STL with trimesh) into a relief field seen from "
                    "one direction, so relief safety check, mould prep and mass estimate can work on it. The "
                    "undercut mask shows what a one-piece mould or a single milling setup cannot reach.")
-    RETURN_TYPES = (FIELD, "IMAGE", "MASK", "STRING")
-    RETURN_NAMES = ("field", "preview", "undercut", "report")
+    RETURN_TYPES = (FIELD, "IMAGE", "MASK", "STRING", "MASK")
+    RETURN_NAMES = ("field", "preview", "undercut", "report", "height")
     OUTPUT_TOOLTIPS = ("The mesh as a relief in mm, for the other relief nodes.",
                        "Grey preview of the relief (white = nearest to the viewer).",
                        "White where geometry hides behind other geometry from this direction (an undercut).",
-                       "Size, depth, height above ground and the share of undercuts (json).")
+                       "Size, depth, height above ground and the share of undercuts (json).",
+                       "The relief as a mask: 0 = the back, 1 = the nearest point. The report gives the range in mm "
+                       "(height_range_mm), to use it as a depth or displacement map.")
     @classmethod
     def IS_CHANGED(cls, mesh_path, **kw):
         return _mesh_stamp(mesh_path)
@@ -258,9 +280,7 @@ class MeshOrthoFieldKub:
 
     def run(self, mesh_path, mesh_units, up_axis, azimuth_deg, elevation_deg,
             resolution, ground_offset_mm, clamp_relief_mm):
-        path = mesh_path.strip().strip('"')
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"mesh not found: {path}")
+        path, sample = _mesh_file(mesh_path)
         verts, faces = load_mesh(path)
         depth, hit, layers, info = rasterize_depth(
             verts, faces, azimuth_deg, elevation_deg, resolution, up_axis)
@@ -299,14 +319,19 @@ class MeshOrthoFieldKub:
             "panel_width_mm": round(info["view_width_units"] * scale, 1),
             "panel_height_mm": round(info["view_height_units"] * scale, 1),
             "depth_range_mm": round(span, 1),
+            "height_range_mm": [round(float(h.min()), 1), round(float(h.max()), 1)],
             "panel_bottom_mm": round(panel_bottom_mm, 1),
             "undercut_pixels": int(undercut.sum()),
             "undercut_pct_of_silhouette": round(
                 100.0 * undercut.sum() / max(int(hit.sum()), 1), 2),
             "single_mould_possible": bool(not undercut.any()),
         })
+        if sample:
+            rep["note"] = _sample_note(mesh_units, up_axis)
+            print(f"[kubakub mesh to relief field] {rep['note']}")
         mask = torch.from_numpy(undercut.astype(np.float32))[None, ...]
-        return (field, prev, mask, json.dumps(rep, indent=2))
+        height = torch.from_numpy(n.astype(np.float32))[None, ...]
+        return (field, prev, mask, json.dumps(rep, indent=2), height)
 
 
 # --------------------------------------------------------------------------
@@ -321,7 +346,7 @@ class MeshTurntableCheckKub:
                 "mesh_path": ("STRING", {"default": "", "multiline": False,
                                          "tooltip": "Full path of the mesh file. OBJ always works; GLB, GLTF, PLY "
                                                     "and STL need trimesh installed. The node re-runs when the file "
-                                                    "changes."}),
+                                                    "changes. Empty = the built-in sample facade (metres, Y up)."}),
                 "mesh_units": (["mm", "cm", "m", "inch"], {"default": "m",
                                                           "tooltip": "The unit the mesh was modelled in, so the "
                                                                      "check works in real millimetres."}),
@@ -353,17 +378,24 @@ class MeshTurntableCheckKub:
                 "min_width_mm": ("FLOAT", {"default": 80.0, "min": 10.0,
                                            "max": 1000.0, "step": 5.0,
                                            "tooltip": "A foothold must run at least this wide, in mm, to count."}),
-            }
+            },
+            "optional": {
+                "clearance_mm": ("FLOAT", {"default": 150.0, "min": 20.0,
+                                           "max": 1000.0, "step": 10.0, "advanced": True,
+                                           "tooltip": "Band above a step, in mm, that it is measured against: the "
+                                                      "step must stick out beyond everything in this band."}),
+            },
         }
 
     DESCRIPTION = ("Walks around a finished 3D mesh and checks every side for places a person could climb, sit or "
                    "lie on (the same rules as relief safety check). One overlay per view: red = foothold, "
                    "orange = seat, yellow = lying surface.")
-    RETURN_TYPES = ("IMAGE", "STRING", "BOOLEAN")
-    RETURN_NAMES = ("overlays", "report", "passes")
+    RETURN_TYPES = ("IMAGE", "STRING", "BOOLEAN", "MASK")
+    RETURN_NAMES = ("overlays", "report", "passes", "flagged")
     OUTPUT_TOOLTIPS = ("One image per view with the flagged areas coloured.",
                        "Failing views, footholds, the largest undercut share and the result per view (json).",
-                       "True when every view passes.")
+                       "True when every view passes.",
+                       "One mask per view, white where a foothold, seat or lying surface was flagged.")
     @classmethod
     def IS_CHANGED(cls, mesh_path, **kw):
         return _mesh_stamp(mesh_path)
@@ -373,14 +405,12 @@ class MeshTurntableCheckKub:
 
     def run(self, mesh_path, mesh_units, up_axis, views, start_azimuth_deg,
             resolution, ground_offset_mm, reach_mm, foothold_depth_mm,
-            min_width_mm):
-        path = mesh_path.strip().strip('"')
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"mesh not found: {path}")
+            min_width_mm, clearance_mm=150.0):
+        path, sample = _mesh_file(mesh_path)
         verts, faces = load_mesh(path)
         scale = _UNIT_MM[mesh_units]
 
-        frames, per_view = [], []
+        frames, flags, per_view = [], [], []
         worst_h, shape = None, None
         for i in range(int(views)):
             az = float(start_azimuth_deg) + 360.0 * i / float(views)
@@ -394,16 +424,19 @@ class MeshTurntableCheckKub:
 
             masks, rep = rc.ledge_analysis(
                 h, px_mm, panel_bottom_mm=bottom, reach_mm=reach_mm,
-                foothold_depth_mm=foothold_depth_mm, min_width_mm=min_width_mm)
+                foothold_depth_mm=foothold_depth_mm, min_width_mm=min_width_mm,
+                clearance_mm=clearance_mm)
 
             span = float(h.max() - h.min())
             n = (h - h.min()) / span if span > 1e-6 else np.zeros_like(h)
             img = np.stack([n] * 3, -1).astype(np.float32)
             img[~hit] = 0.06
+            flag = np.zeros(hit.shape, bool)
             for key, col in (("foothold", (0.90, 0.10, 0.10)),
                              ("sitting", (1.00, 0.55, 0.00)),
                              ("lying", (1.00, 0.95, 0.20))):
                 m = masks[key] & hit
+                flag |= m
                 if m.any():
                     img[m] = img[m] * 0.25 + np.array(col, np.float32) * 0.75
 
@@ -416,21 +449,29 @@ class MeshTurntableCheckKub:
                 shape = img.shape
             if img.shape != shape:  # views can differ by a row, keep the batch square
                 img = img[:shape[0], :shape[1]]
+                flag = flag[:shape[0], :shape[1]]
                 if img.shape != shape:
                     pad = [(0, shape[0] - img.shape[0]), (0, shape[1] - img.shape[1]), (0, 0)]
                     img = np.pad(img, pad, mode="edge")
+                    flag = np.pad(flag, pad[:2], mode="constant")
             frames.append(img)
+            flags.append(flag.astype(np.float32))
 
         overlays = torch.from_numpy(np.stack(frames, 0))
+        flagged = torch.from_numpy(np.stack(flags, 0))
         summary = {
             "views": int(views),
             "views_failing": [v["azimuth_deg"] for v in per_view if not v["passes"]],
             "total_footholds": int(sum(v["footholds_found"] for v in per_view)),
             "max_undercut_pct": max(v["undercut_pct_of_silhouette"] for v in per_view),
             "passes": all(v["passes"] for v in per_view),
+            "clearance_mm": float(clearance_mm),
             "per_view": per_view,
         }
-        return (overlays, json.dumps(summary, indent=2), bool(summary["passes"]))
+        if sample:
+            summary["note"] = _sample_note(mesh_units, up_axis)
+            print(f"[kubakub mesh turntable rule check] {summary['note']}")
+        return (overlays, json.dumps(summary, indent=2), bool(summary["passes"]), flagged)
 
 
 NODE_CLASS_MAPPINGS = {

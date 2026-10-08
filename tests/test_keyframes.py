@@ -222,6 +222,12 @@ r = _h3(_doc(), _NoH3(), models={})
 check("no clip: frames pass through, no model step", torch.equal(r.args[0], SEQ[..., :3]) and "no clip to render" in r.args[3],
       r.args[3])
 check("no clip: silent sound of the sequence length", r.args[2]["waveform"].shape[-1] == 4 * 44100)
+h3_schema = nk.KUBA_KeyframeClips.define_schema()
+check("outputs: fps appended at the end, passed through",
+      [o.id for o in h3_schema.outputs] == ["frames", "prompts", "audio", "report", "fps"] and r.args[4] == 25.0
+      and bool(h3_schema.outputs[-1].tooltip))
+check("frames tooltip points to kubakub director sequence",
+      "kubakub director sequence" in h3_schema.inputs[4].tooltip and "render_sequence" not in h3_schema.inputs[4].tooltip)
 
 nk._CLIP_CACHE.clear()
 nk._PROMPT_CACHE.clear()

@@ -164,6 +164,18 @@ def _composite(still, bg, clips, F, H, W, oh, ow, folder, prefix):
     return out_frames
 
 
+def _audio_out(audio, F, fps):
+    """The sound for the frames: the connected audio cut / padded with silence to F frames, silence without one."""
+    if audio is None:
+        return {"waveform": torch.zeros((1, 2, vd.audio_range(0, F, fps, 44100)[1])), "sample_rate": 44100}
+    sr = int(audio["sample_rate"])
+    n = vd.audio_range(0, F, fps, sr)[1]
+    wave = audio["waveform"][:1, :, :n].float().cpu().clone()
+    if wave.shape[-1] < n:
+        wave = torch.nn.functional.pad(wave, (0, n - wave.shape[-1]))
+    return {"waveform": wave, "sample_rate": sr}
+
+
 class KUBA_RegionVideoSampler(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -186,12 +198,15 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 io.Vae.Input("audio_vae", lazy=True, tooltip="LTX audio VAE (the model is audio-video; without the audio input the audio stays silent)."),
                 PlanType.Input("plan", tooltip="From kubakub region plan: animate = on, video_prompt, t_start, t_end "
                                                "and motion say which regions move and how."),
-                io.Image.Input("image", tooltip="The still (matrix size), e.g. frame in frame + region sampler result."),
+                io.Image.Input("image", optional=True,
+                               tooltip="The still (matrix size), e.g. frame in frame + region sampler result. Not "
+                                       "needed (and not used) when background is connected."),
                 io.LatentUpscaleModel.Input("upscale_model", optional=True, lazy=True,
                                             tooltip="LTX latent spatial upscaler x2: adds a sharper second stage."),
                 io.Int.Input("frames", default=121, min=9, max=1025, step=8,
-                             tooltip="Video length; rounded up to 8k + 1."),
-                io.Float.Input("fps", default=25.0, min=1.0, max=120.0, step=1.0,
+                             tooltip="Video length in frames; rounded up to 8k + 1. Ignored when background is "
+                                     "connected (the video is as long as the background)."),
+                io.Float.Input("fps", default=25.0, min=1.0, max=120.0, step=0.01,
                                tooltip="Frame rate of the video (the plan's t_start / t_end are in seconds)."),
                 io.Int.Input("seed", default=42, min=0, max=0xFFFFFFFFFFFFFFFF,
                              control_after_generate=io.ControlAfterGenerate.fixed,
@@ -206,10 +221,12 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                                 default="camera movement, zoom, pan, shaky, morphing facade, blurry, low quality, text, watermark",
                                 tooltip="What the clips should avoid (one negative prompt for all clips)."),
                 io.String.Input("only", advanced=True, default="", optional=True, placeholder="W_F1_*",
-                                tooltip="Only these animated regions (name wildcards); empty = all."),
+                                tooltip="Only these animated regions, in plan syntax: names with wildcards "
+                                        "('W_F1_*'), 'group:Windows', 'tag:front', comma = or; empty = all."),
                 io.Float.Input("output_scale", default=0.5, min=0.05, max=1.0, step=0.05,
                                tooltip="Size of the IMAGE output (a 4K batch of 121 frames needs 12 GB RAM); use "
-                                       "save_folder for the full-size frames."),
+                                       "save_folder for the full-size frames. Ignored when background is connected "
+                                       "(the frames keep the background's size)."),
                 io.String.Input("save_folder", default="", optional=True,
                                 tooltip="Write every frame at matrix size as PNG (an image sequence for After "
                                         "Effects)."),
@@ -241,6 +258,11 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 io.Image.Output("frames", tooltip="The video at output_scale."),
                 io.String.Output("report", tooltip="Clips, frames, stages and time, one line per clip (size, time range, "
                                                    "cache, prompt)."),
+                io.Float.Output("fps", tooltip="The frame rate (frames per second), passed through for Create Video."),
+                io.Audio.Output("audio", tooltip="The connected audio cut or padded with silence to the length of "
+                                                 "the frames; silence of that length when no audio is connected."),
+                io.Mask.Output("mask", tooltip="The regions that were animated, as one mask at the size of the "
+                                               "frames (white = moves at some time in the video)."),
             ],
         )
 
@@ -259,12 +281,15 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
         return [x for x in want if x in kw and kw[x] is None]
 
     @classmethod
-    def execute(cls, model, clip, vae, audio_vae, plan, image, frames, fps, seed, stage1_mp, context_px,
-                feather_px, output_scale, upscale_model=None, negative="", only="", save_folder="",
+    def execute(cls, model, clip, vae, audio_vae, plan, frames, fps, seed, stage1_mp, context_px,
+                feather_px, output_scale, image=None, upscale_model=None, negative="", only="", save_folder="",
                 filename_prefix="region_video", stage2_max_mp=0.6, background=None, enhance_prompt=False,
                 enhance_clip=None, loop=False, audio=None) -> io.NodeOutput:
         ops = _OPS
         t0 = time.perf_counter()
+        if image is None and background is None:
+            raise ValueError("kubakub region video sampler: connect 'image' (the still to animate) or 'background' "
+                             "(a video to animate into).")
         labels = plan.regions.labels[0].cpu().numpy()
         bg = None
         if background is not None:                     # animate into a video: regions follow its size
@@ -286,7 +311,11 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
         use_enh = enhance_clip if enhance_prompt else None
         objs = (model, clip, vae, audio_vae, upscale_model, use_enh)
         rows, jobs = [], []
-        if not groups:
+        if not groups and (only or "").strip() and vd.clip_groups(plan.plan["regions"]):
+            names = [str(e.get("name", "")) for e in plan.plan["regions"] if e.get("animate")]
+            rows.append(f"only = '{only.strip()}' matches no animated region: frames passed through, no LTX model "
+                        f"loaded (animated regions: {', '.join(names[:8])}{', ...' if len(names) > 8 else ''})")
+        elif not groups:
             rows.append("no animated regions: frames passed through (set 'animate = on' and a video_prompt in the "
                         "region plan to animate), no LTX model loaded")
         # 1. per clip: the crop, the cache lookup and the VAE encode of the clips to render (the video VAE only)
@@ -411,11 +440,13 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
             j["fresh"] = True
             pbar.update(1)
         clips = []
+        moving = np.zeros((H, W), bool)                # the regions of every clip: the mask output
         for j in jobs:
             decoded, enhanced = j.pop("hit")
             g, (x0, y0, x1, y1) = j["g"], j["box"]
             if enhanced:
                 j["rows"].append(f"clip {j['gi'] + 1} prompt (enhanced): {enhanced[:300]}")
+            moving |= j["mask"]
             clips.append(((x0, y0, x1, y1), decoded, vd.feather_mask(j.pop("mask"), feather_px), j["i0"]))
             t_end = "end" if g["t_end"] < 0 else f"{g['t_end']:g}"
             rows_t = f"{j['t']:.0f} s" if j.get("fresh") else "unchanged, from the cache"
@@ -442,7 +473,11 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                             f"{time.perf_counter() - t0:.0f} s", *rows]
                            + ([f"frames written to {folder}"] if folder else []))
         log.info("[KUBA regions] video: %s", report.split("\n")[0])
-        return io.NodeOutput(torch.from_numpy(out_frames), report)
+        moving = moving.astype(np.float32)
+        if (oh, ow) != (H, W):
+            moving = cv2.resize(moving, (ow, oh), interpolation=cv2.INTER_AREA)
+        return io.NodeOutput(torch.from_numpy(out_frames), report, float(fps), _audio_out(audio, F, float(fps)),
+                             torch.from_numpy(moving)[None])
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_RegionVideoSampler": KUBA_RegionVideoSampler}

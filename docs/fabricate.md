@@ -68,7 +68,35 @@ usually caps.
 **Relief Export Panel** writes a binary STL in millimetres.
 **Relief Export Prow** folds one or two panels around a shared vertical edge at
 a given interior angle and writes an OBJ. With a single field it mirrors it
-onto both wings. Read the angle off the site plan.
+onto both wings. Read the angle off the site plan. A `field_b` with another
+pixel size (another image resolution or panel width) is resampled to
+`field_a`'s, so each wing keeps its own size in millimetres.
+
+**kubakub mesh to relief field** reads a finished mesh (OBJ; GLB, GLTF, PLY and
+STL with trimesh) from one direction into the same millimetre field, with a
+mask of the undercuts. **kubakub mesh turntable rule check** walks around the
+mesh and runs the safety check on every side. Leave `mesh_path` empty on
+either and the built-in sample facade runs (an OBJ in metres, Y up); the
+report says so in `note`.
+
+## Getting the relief out as a picture
+
+The relief field only travels between the relief nodes. To use the relief
+elsewhere (a depth or displacement map, a mask for a region), take `height`:
+
+| Node | Output | What it is | Range in mm |
+|---|---|---|---|
+| kubakub relief field (from depth) | `height` (MASK) | the relief, 0 = the back, 1 = the highest point | 0 to `max_relief_mm` |
+| kubakub relief mould prep | `height` (MASK) | the mould-ready relief, 0 = lowest, 1 = highest | `height_range_mm` in the report |
+| kubakub relief anti perch | `height` (MASK) | the relief with sloped sills, 0 = lowest, 1 = highest | printed in the console |
+| kubakub mesh to relief field | `height` (MASK) | the mesh seen from the chosen side, 0 = the back, 1 = nearest | `height_range_mm` in the report |
+
+## Turntable check: what was added
+
+| Name | Kind | Default | What it does |
+|---|---|---|---|
+| `clearance_mm` | input, optional (advanced) | 150 | band above a step, in mm, that it is measured against; the same setting as on relief safety check |
+| `flagged` | output (MASK) | | one mask per view, white where a foothold, seat or lying surface was flagged |
 
 ## Defaults worth knowing
 

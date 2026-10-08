@@ -80,6 +80,14 @@ for bits in (8, 16):
           len(pngs) == N and img.shape == (H, W, 4) and img.dtype == (np.uint16 if bits == 16 else np.uint8)
           and np.abs(c - COL).max() * 255 <= 0.6 and img[10, 300, 3] == 0 and img[10, 20, 3] == maxv and any(f.endswith(".wav") for f in files),
           f"{len(pngs)} files {img.shape} {img.dtype} colour {np.round(c * 255, 1).tolist()}")
+check("the formats that carry alpha: the PNG sequences and ProRes 4444", ex.ALPHA_FORMATS == ["png8", "png16", "prores4444"])
+w = ex.Writer("h264", os.path.join(tmp, "noalpha"), "x", W, H, FPS, alpha=True)
+w.write(*frame(0))
+w.close()
+check("alpha on a format without alpha: left out, with a note that names the formats that can",
+      not w.alpha and "alpha not written" in w.alpha_note and all(f in w.alpha_note for f in ex.ALPHA_FORMATS), w.alpha_note)
+check("no note when the format carries alpha, or when no alpha was asked for",
+      ex.alpha_note("prores4444") == "" and ex.alpha_note("png8") == "" and ex.alpha_note("h264", False) == "")
 try:
     w = ex.Writer("h264", os.path.join(tmp, "bad"), "x", W, H, FPS)
     w.write(np.zeros((10, 10, 3), np.float32))

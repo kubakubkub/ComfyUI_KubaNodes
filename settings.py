@@ -67,6 +67,22 @@ def switch(key, default=True):
     return get(key, "on" if default else "off").strip().lower() not in ("off", "false", "no", "0")
 
 
+def reachable_from_outside():
+    """ComfyUI was started with --listen on more than this computer: its routes answer other machines too."""
+    try:
+        from comfy.cli_args import args
+        hosts = [h.strip().lower() for h in str(getattr(args, "listen", "") or "").split(",")]
+    except Exception:  # noqa: BLE001
+        return False
+    return any(h not in ("", "127.0.0.1", "localhost", "::1") for h in hosts)
+
+
+def route_paths_ok():
+    """May a request to one of the pack's routes name a file by its path? Yes on this computer only; with --listen
+    only when kubakub.ini says remote_paths = on. A workflow that runs is not affected."""
+    return not reachable_from_outside() or switch("remote_paths", False)
+
+
 def save(key, value, path=None):
     """Writes key = value into the [settings] section of kubakub.ini, keeping every other line and comment."""
     path = path or INI

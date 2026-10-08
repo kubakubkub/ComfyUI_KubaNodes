@@ -18,7 +18,7 @@ import torch
 from comfy_api.latest import io
 
 from . import nodes_scene3d as ns
-from ...kubakub.io_types import FalloffType, PiecesType, RegionsType, SceneType
+from ...kubakub.io_types import FalloffType, PiecesType, RegionsType, SceneType, ViewerType
 from ...kubakub.scene3d import pieces as pc
 from ...kubakub.scene3d import scene_ids
 from ...kubakub.scene3d import scene_view as sv
@@ -77,9 +77,14 @@ class KUBA_ScenePieces(io.ComfyNode):
                 io.String.Input("selection", default="", optional=True,
                                 tooltip="Which regions (names, 'group:windows', 'tag:left', 'a, b'). Empty = all."),
             ],
-            outputs=[PiecesType.Output("pieces"), io.Image.Output("preview", tooltip="Every piece in its own colour, "
-                                                                                     "still parts grey."),
-                     io.String.Output("report")],
+            outputs=[PiecesType.Output("pieces", tooltip="The pieces that can move -> kubakub pieces transform "
+                                                         "(or straight to kubakub pieces render)."),
+                     io.Image.Output("preview", tooltip="Every piece in its own colour, "
+                                                        "still parts grey."),
+                     io.String.Output("report", tooltip="How many pieces of how many loose parts, their sizes "
+                                                        "(metres) and the facade's size."),
+                     io.Mask.Output("mask", tooltip="1 on the pieces that can move, 0 on the still parts and the "
+                                                    "background (the projection view, at the scene's size).")],
         )
 
     @classmethod
@@ -128,7 +133,7 @@ class KUBA_ScenePieces(io.ComfyNode):
                   f"{stats['size'].max():.2f} m), facade {fr['width_m']:.1f} x {fr['top_m']:.1f} m")
         pieces = {"scene": scene, "faces": fp, "labels": labels.astype(np.int32), "n": P, "stats": stats, "frame": fr, "ops": [],
                   "facade": [float(fr["width_m"]), float(fr["top_m"])]}
-        return io.NodeOutput(pieces, torch.from_numpy(img)[None], report)
+        return io.NodeOutput(pieces, torch.from_numpy(img)[None], report, torch.from_numpy(m.astype(np.float32))[None])
 
 
 class KUBA_PiecesFalloff(io.ComfyNode):
@@ -149,13 +154,17 @@ class KUBA_PiecesFalloff(io.ComfyNode):
                                        "other; noise: each on its own; all: every piece fully."),
                 io.Combo.Input("direction", options=list(pc.ORDERS[:5]) + ["towards the centre", "random"],
                                default="left to right", tooltip="wave / pulse: where the front runs (random = a ripple in random order); stagger: the order."),
-                io.Float.Input("start", default=0.0, min=-100.0, max=1000.0, step=0.1, tooltip="Seconds."),
+                io.Float.Input("start", default=0.0, min=-100.0, max=1000.0, step=0.1,
+                               tooltip="wave / pulse / stagger: when it begins, in seconds from the first frame "
+                                       "(nothing moves before; negative = already under way at the first frame)."),
                 io.Float.Input("speed", default=6.0, min=0.01, max=1000.0, step=0.5,
-                               tooltip="wave / pulse: metres per second across the facade."),
+                               tooltip="wave / pulse: how fast the front runs across the facade, in metres per second."),
                 io.Float.Input("width", default=3.0, min=0.01, max=1000.0, step=0.5,
-                               tooltip="wave: the soft edge; pulse: the band (metres)."),
+                               tooltip="wave: how wide the soft edge of the front is; pulse: how wide the band is "
+                                       "(metres on the facade)."),
                 io.Float.Input("spread", default=2.0, min=0.0, max=1000.0, step=0.1,
-                               tooltip="stagger: seconds from the first piece to the last."),
+                               tooltip="stagger: seconds between the start of the first piece and the start of the "
+                                       "last one (0 = all at once)."),
                 io.Float.Input("duration", default=1.0, min=0.01, max=100.0, step=0.1,
                                tooltip="stagger: seconds one piece takes."),
                 io.Float.Input("hold", default=-1.0, min=-1.0, max=100.0, step=0.1,
@@ -169,13 +178,14 @@ class KUBA_PiecesFalloff(io.ComfyNode):
                                tooltip="Multiplies the falloff (negative = the other way)."),
                 io.Boolean.Input("invert", default=False, tooltip="Pieces the falloff reached rest, the others move."),
             ],
-            outputs=[FalloffType.Output("falloff")],
+            outputs=[FalloffType.Output("falloff", tooltip="-> kubakub pieces transform, falloff.")],
         )
 
     @classmethod
     def execute(cls, type, direction, start, speed, width, spread, duration, hold, loop, frequency, seed, amount,
                 invert) -> io.NodeOutput:
-        return io.NodeOutput({"type": type, "axis": direction,          # wave / pulse with "random" = a random ripple "order": direction, "start": start, "speed": speed,
+        # wave / pulse read "axis" (with "random" = a random ripple), stagger reads "order"
+        return io.NodeOutput({"type": type, "axis": direction, "order": direction, "start": start, "speed": speed,
                               "width": width, "spread": spread, "duration": duration, "hold": hold, "loop": loop,
                               "freq": frequency, "seed": seed, "amount": amount, "invert": invert})
 
@@ -322,6 +332,12 @@ class KUBA_PiecesRender(io.ComfyNode):
                 io.Color.Input("clay_color", default=sv.RELIGHT_CLAY_COLOR, optional=True,
                                tooltip="Colour of the stone (and of the surroundings); 'clay' sets how bright it is. "
                                        "White = neutral grey clay, as before."),
+                io.Float.Input("exposure", default=0.0, min=-10.0, max=10.0, step=0.1, optional=True, advanced=True,
+                               tooltip="Overall exposure in stops: +1 = twice as bright, -1 = half (0 = as before)."),
+                ViewerType.Input("viewer", optional=True,
+                                 tooltip="The audience spot of kubakub scene measure / audience viewpoint / project "
+                                         "settings. With view = audience it replaces audience_distance_m, "
+                                         "audience_offset_m and eye_height_m of this node."),
             ],
             outputs=[io.Image.Output("frames"), io.Mask.Output("alpha"), io.Float.Output("fps"),
                      io.String.Output("report")],
@@ -330,7 +346,8 @@ class KUBA_PiecesRender(io.ComfyNode):
     @classmethod
     def execute(cls, pieces, duration, fps, look, projector_brightness, environment, env_strength, clay, background,
                 resolution_scale, samples, view="projector", audience_distance_m=15.0, audience_offset_m=0.0,
-                eye_height_m=1.7, lens_mm=24.0, matrix=None, clay_color=sv.RELIGHT_CLAY_COLOR) -> io.NodeOutput:
+                eye_height_m=1.7, lens_mm=24.0, matrix=None, clay_color=sv.RELIGHT_CLAY_COLOR, exposure=0.0,
+                viewer=None) -> io.NodeOutput:
         t0 = time.perf_counter()
         scene = pieces["scene"]
         s, pt, nrm, ground, fr = ns.load_scene_cached(scene)
@@ -347,10 +364,12 @@ class KUBA_PiecesRender(io.ComfyNode):
             raise ValueError("look = projected matrix needs a matrix image (or frames).")
         rig = {"lights": [], "environment": environment, "env_strength": env_strength, "clay": clay,
                "clay_color": clay_color,
-               "roughness": 0.8, "background": background, "exposure": 0.0, "view": "Neutral" if projected else "AgX",
+               "roughness": 0.8, "background": background, "exposure": float(exposure), "view": "Neutral" if projected else "AgX",
                "projector": {"on": projected, "brightness": projector_brightness}}
         look_from = None
         if view == "audience":
+            if viewer is not None:                            # one audience spot for all nodes
+                audience_offset_m, audience_distance_m, eye_height_m = ns.viewer_spot(viewer)
             cam = np.asarray(s["info"]["camera"]["matrix_world"], np.float64)
             look_from = pc.audience_view(fr, cam[:3, 3], audience_distance_m, audience_offset_m, eye_height_m, lens_mm)
         notes, parts = [], []
@@ -393,7 +412,9 @@ class KUBA_PiecesRender(io.ComfyNode):
         report = "\n".join([
             f"{n} frames at {fps:g} fps, {pieces['n']} pieces, {len(pieces['ops'])} transform(s), {rw}x{rh}, "
             f"{samples} samples, look {look}, view {view}"
-            + (f" ({audience_distance_m:g} m in front, {audience_offset_m:+g} m, eyes {eye_height_m:g} m)" if look_from else ""),
+            + (f" ({audience_distance_m:g} m in front, {audience_offset_m:+g} m, eyes {eye_height_m:g} m"
+               f"{', from the connected viewer' if viewer is not None else ''})" if look_from else "")
+            + (f", exposure {exposure:+g}" if exposure else ""),
             f"{len(todo)} different frames: rendered now {rendered} ({(sum(per) / len(per)) if per else 0:.2f} s per "
             f"frame), from the cache {len(todo) - rendered}, total {time.perf_counter() - t0:.1f} s", *notes])
         log.info("[KUBA pieces] %s", report.replace("\n", " | "))

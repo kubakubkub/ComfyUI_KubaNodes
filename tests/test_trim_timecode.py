@@ -51,6 +51,13 @@ check("snap_samples_to rounds up to a multiple", n == 104, str(n))
 out, _, n = node.trim({"waveform": torch.zeros(2, 0), "sample_rate": sr}, 0.0, 1.0, True, "loop")
 check("empty track gives silence of the right length", n == 100 and out["waveform"].shape == (1, 2, 100))
 
+types_in = tr.TrimToExactDuration.INPUT_TYPES()
+widgets = {**types_in["required"], **types_in["optional"]}
+check("every widget has a tooltip", all(widgets[k][1].get("tooltip") for k in widgets if k != "audio"),
+      str([k for k in widgets if k != "audio" and not widgets[k][1].get("tooltip")]))
+check("every output has a tooltip", len(tr.TrimToExactDuration.OUTPUT_TOOLTIPS) == len(tr.TrimToExactDuration.RETURN_TYPES)
+      and all(tr.TrimToExactDuration.OUTPUT_TOOLTIPS))
+
 build = tc.TimecodeFilenamePrefix().build
 check("12 s at 25 fps", build("clip", 12.0, 25.0, "_") == ("clip_00-12-00", "00-12-00", 300))
 check("frames and minutes", build("a", 75.52, 25.0, "-") == ("a-01-15-13", "01-15-13", 1888))

@@ -35,6 +35,14 @@ def _map(fn, n):
     return torch.from_numpy(np.stack(out).astype(np.float32))
 
 
+def _masked(fn, fr, mask):
+    """fn(i) only inside the optional MASK: blended with the frame by it (one mask serves every frame)."""
+    if mask is None:
+        return fn
+    m = mask.reshape((-1,) + tuple(mask.shape[-2:])).cpu().float().numpy()
+    return lambda i: pp.mask_blend(fr[i], fn(i), m[min(i, len(m) - 1)])
+
+
 class KUBA_ColourMatch(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -51,20 +59,24 @@ class KUBA_ColourMatch(io.ComfyNode):
                 io.Image.Input("reference", tooltip="The look to match (any size, any content)."),
                 io.Combo.Input("method", options=["mkl", "mean_std"], default="mkl",
                                tooltip="mkl = colours and their mix (richer); mean_std = per channel brightness and contrast."),
-                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05),
+                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="How much of the reference look: 1 = all of it, 0 = the frames as they are."),
                 io.String.Input("save_lut", default="", placeholder="my_look",
                                 tooltip="Name for a .cube file in output/kubakub_luts/ (empty = no file)."),
+                io.Mask.Input("mask", optional=True,
+                              tooltip="Grades only inside this mask (white = full, grey = partly); outside the frames "
+                                      "stay as they are. One mask serves every frame; another size is resized."),
             ],
             outputs=[io.Image.Output("images"), io.String.Output("lut_file", tooltip="The written .cube (or empty).")],
         )
 
     @classmethod
-    def execute(cls, images, reference, method, strength, save_lut) -> io.NodeOutput:
+    def execute(cls, images, reference, method, strength, save_lut, mask=None) -> io.NodeOutput:
         fr = _frames(images)
         pick = sorted({0, len(fr) // 2, len(fr) - 1})
         src = np.concatenate([fr[i].reshape(-1, 3) for i in pick])[None]
         fit = pp.colour_fit(src, reference[0, ..., :3].cpu().float().numpy(), method)
-        out = _map(lambda i: pp.colour_apply(fr[i], fit, strength), len(fr))
+        out = _map(_masked(lambda i: pp.colour_apply(fr[i], fit, strength), fr, mask), len(fr))
         path = ""
         name = re.sub(r"[^\w\-]+", "_", (save_lut or "").strip())
         if name:
@@ -98,15 +110,19 @@ class KUBA_ApplyLUT(io.ComfyNode):
             inputs=[
                 io.Image.Input("images"),
                 io.Combo.Input("lut", options=list_luts(), tooltip="A .cube from input/luts, models/luts, output/kubakub_luts."),
-                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05),
+                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="How much of the look: 1 = all of it, 0 = the frames as they are."),
                 io.String.Input("lut_path", default="", optional=True, placeholder="looks/film.cube",
                                 tooltip="Any .cube file; wins over the list."),
+                io.Mask.Input("mask", optional=True,
+                              tooltip="The look only inside this mask (white = full, grey = partly); outside the frames "
+                                      "stay as they are. One mask serves every frame; another size is resized."),
             ],
             outputs=[io.Image.Output("images")],
         )
 
     @classmethod
-    def execute(cls, images, lut, strength, lut_path="") -> io.NodeOutput:
+    def execute(cls, images, lut, strength, lut_path="", mask=None) -> io.NodeOutput:
         path = (lut_path or "").strip().strip('"')
         if not path:
             path = next((os.path.join(d, lut) for d in lut_dirs() if os.path.isfile(os.path.join(d, lut))), "")
@@ -115,7 +131,7 @@ class KUBA_ApplyLUT(io.ComfyNode):
         with open(path, encoding="utf-8", errors="replace") as f:
             table = pp.parse_cube(f.read())
         fr = _frames(images)
-        return io.NodeOutput(_map(lambda i: pp.apply_lut(fr[i], table, strength), len(fr)))
+        return io.NodeOutput(_map(_masked(lambda i: pp.apply_lut(fr[i], table, strength), fr, mask), len(fr)))
 
 
 class KUBA_Deflicker(io.ComfyNode):
@@ -132,18 +148,23 @@ class KUBA_Deflicker(io.ComfyNode):
                 io.Image.Input("images", tooltip="The frames (at least 3)."),
                 io.Int.Input("window", default=9, min=3, max=121, tooltip="Frames to average over; more = calmer, slower changes survive."),
                 io.Int.Input("grid", default=8, min=1, max=64, tooltip="1 = the whole frame at once; 8 = local flicker in 8 x 8 zones."),
-                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05),
+                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="How much of the jumps is taken out: 1 = all, 0 = the frames as they are."),
+                io.Mask.Input("mask", optional=True,
+                              tooltip="Calms the flicker only inside this mask (white = full, grey = partly); outside the frames "
+                                      "stay as they are. One mask serves every frame; another size is resized."),
             ],
             outputs=[io.Image.Output("images")],
         )
 
     @classmethod
-    def execute(cls, images, window, grid, strength) -> io.NodeOutput:
+    def execute(cls, images, window, grid, strength, mask=None) -> io.NodeOutput:
         fr = _frames(images)
         if len(fr) < 3:
+            log.info("[KUBA post] deflicker: %d frame(s) given, it needs at least 3; returned unchanged", len(fr))
             return io.NodeOutput(images)
         gains = pp.deflicker_gains(fr, int(window), int(grid), float(strength))
-        return io.NodeOutput(_map(lambda i: pp.apply_gain(fr[i], gains[i]), len(fr)))
+        return io.NodeOutput(_map(_masked(lambda i: pp.apply_gain(fr[i], gains[i]), fr, mask), len(fr)))
 
 
 class KUBA_Retime(io.ComfyNode):
@@ -157,17 +178,25 @@ class KUBA_Retime(io.ComfyNode):
             description=("Changes the speed of frames with in-between frames from optical flow (or a blend): 0.5 = "
                          "half speed, twice the frames; 2 = double speed. Or give the exact number of frames."),
             inputs=[
-                io.Image.Input("images"),
+                io.Image.Input("images", tooltip="The frames to retime (at least 2)."),
                 io.Float.Input("speed", default=0.5, min=0.05, max=16.0, step=0.05, tooltip="Below 1 = slow motion."),
                 io.Int.Input("frames", default=0, min=0, max=100000, tooltip="Exact output length instead of speed (0 = use speed)."),
                 io.Combo.Input("mode", options=["flow", "blend", "nearest"], default="flow",
                                tooltip="flow = moving in-betweens (optical flow); blend = cross-fade; nearest = repeat / drop frames."),
+                io.Float.Input("fps", default=0.0, min=0.0, max=1000.0, step=0.001, optional=True,
+                               tooltip="Frames per second of the frames you give (0 = unknown). Only for the fps "
+                                       "and seconds outputs."),
             ],
-            outputs=[io.Image.Output("images"), io.Int.Output("frame_count")],
+            outputs=[io.Image.Output("images"), io.Int.Output("frame_count"),
+                     io.Float.Output("fps", tooltip="The fps to play the result at (0 = no fps given). By speed: the "
+                                                    "same fps, the slow or fast motion is in the frames. By an exact "
+                                                    "frames count: fps x frames out / frames in, so the clip lasts "
+                                                    "as long as before."),
+                     io.Float.Output("seconds", tooltip="Length of the result in seconds at that fps (0 = no fps given).")],
         )
 
     @classmethod
-    def execute(cls, images, speed, frames, mode) -> io.NodeOutput:
+    def execute(cls, images, speed, frames, mode, fps=0.0) -> io.NodeOutput:
         t0 = time.perf_counter()
         fr = _frames(images)
         ts = pp.retime_times(len(fr), float(speed), int(frames))
@@ -180,7 +209,8 @@ class KUBA_Retime(io.ComfyNode):
             return pp.between(fr[i], fr[i + 1], t - i, mode)
         out = _map(one, len(ts))
         log.info("[KUBA post] retime %d -> %d frames (%s), %.1f s", len(fr), len(ts), mode, time.perf_counter() - t0)
-        return io.NodeOutput(out, len(ts))
+        play, seconds = pp.retime_fps(len(fr), len(ts), float(fps or 0.0), int(frames) > 0)
+        return io.NodeOutput(out, len(ts), play, seconds)
 
 
 class KUBA_BurnIn(io.ComfyNode):
@@ -193,16 +223,19 @@ class KUBA_BurnIn(io.ComfyNode):
             search_aliases=['timecode', 'frame number', 'slate', 'review', 'watermark'],
             description="Frame number, timecode and a name on every frame, for review copies. {name} {frame} {timecode} {total}.",
             inputs=[
-                io.Image.Input("images"),
+                io.Image.Input("images", tooltip="The frames to write on."),
                 io.String.Input("text", default="{name}   {frame}   {timecode}", multiline=True,
                                 tooltip="{name}, {frame} (from start_frame), {timecode} (hh:mm:ss:ff), {total} = frame count."),
                 io.String.Input("name", default="", tooltip="Link it from project settings."),
-                io.Float.Input("fps", default=25.0, min=1.0, max=120.0, step=0.001),
-                io.Int.Input("start_frame", default=0, min=0, max=10_000_000),
+                io.Float.Input("fps", default=25.0, min=1.0, max=120.0, step=0.001,
+                               tooltip="Frames per second, for {timecode} (rounded to whole frames per second)."),
+                io.Int.Input("start_frame", default=0, min=0, max=10_000_000,
+                             tooltip="The frame number of the first frame; {frame} and {timecode} count from it."),
                 io.Combo.Input("position", options=["bottom left", "bottom right", "bottom centre", "top left", "top right", "top centre"],
-                               default="bottom left"),
+                               default="bottom left", tooltip="Where on the frame the text box sits."),
                 io.Float.Input("size", default=0.03, min=0.005, max=0.2, step=0.005, tooltip="Text height as a share of the frame height."),
-                io.Float.Input("opacity", default=0.8, min=0.1, max=1.0, step=0.05),
+                io.Float.Input("opacity", default=0.8, min=0.1, max=1.0, step=0.05,
+                               tooltip="How solid the text and its dark box are: 1 = solid, 0.1 = faint."),
             ],
             outputs=[io.Image.Output("images")],
         )

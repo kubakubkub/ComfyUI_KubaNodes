@@ -387,6 +387,24 @@ def parse_pick(text: str, n: int) -> list[int]:
     return out
 
 
+def only_regions(plan: dict, only: str) -> tuple[dict, int]:
+    """(plan, how many regions are still painted) where every region the selectors of `only` do not match is
+    set to keep ('W_F1_*, group:M_Pilasters': plan selector syntax, space = AND, comma = OR). Empty = the plan
+    as it is. The input is not changed."""
+    from . import plan as rp
+    only = (only or "").strip()
+    if not only:
+        return plan, len(plan["order"])
+    try:
+        section = rp.parse_rules(f"[{only}]\n")[0]
+    except rp.PlanError as e:
+        raise SheetError(f"only: {e}") from None
+    hit = {e["region_id"] for e in plan["regions"] if section.match(e) is not None}
+    entries = [e if e["region_id"] in hit else {**e, "strategy": "keep"} for e in plan["regions"]]
+    order = [i for i in plan["order"] if i in hit]
+    return {**plan, "regions": entries, "order": order}, len(order)
+
+
 def match_lora(name: str, available: list[str]) -> str:
     """The one file of `available` (names relative to the loras folders) that `name` means: the exact name,
     the file name without folder / extension, or a part of it when that is unambiguous."""

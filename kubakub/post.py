@@ -64,6 +64,15 @@ def colour_apply(img, fit, strength=1.0):
     return img + (out - img) * float(strength) if strength < 1 else out
 
 
+def mask_blend(frame, changed, mask):
+    """changed inside the mask, frame outside (mask HxW in 0..1; another size is resized to the frame)."""
+    h, w = frame.shape[:2]
+    m = np.asarray(mask, np.float32)
+    if m.shape[:2] != (h, w):
+        m = cv2.resize(m, (w, h), interpolation=cv2.INTER_LINEAR)
+    return (frame + (changed - frame) * np.clip(m, 0, 1)[..., None]).astype(np.float32)
+
+
 # ---------------------------------------------------------------------------------------------------------- LUTs
 
 
@@ -164,6 +173,16 @@ def retime_times(n, speed=1.0, out_frames=0):
         return np.zeros(max(1, out_frames or 1))
     m = int(out_frames) if out_frames > 0 else max(1, int(round((n - 1) / float(speed))) + 1)
     return np.linspace(0, n - 1, m) if out_frames > 0 else np.minimum(np.arange(m) * float(speed), n - 1)
+
+
+def retime_fps(n, m, fps, exact=False):
+    """(fps to play the m retimed frames at, their length in seconds); fps 0 = unknown -> (0, 0).
+    By speed the fps stays (the speed is in the frames); an exact frame count plays at fps * m / n, so the clip
+    lasts as long as before."""
+    if fps <= 0:
+        return 0.0, 0.0
+    out = float(fps) * m / n if exact and n > 1 else float(fps)
+    return out, m / out
 
 
 _TLS = threading.local()                 # one DIS object per thread: sharing one crashes the process (access violation)

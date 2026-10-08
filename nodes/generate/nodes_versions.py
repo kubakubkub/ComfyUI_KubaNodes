@@ -189,6 +189,15 @@ class KUBA_Versions(io.ComfyNode):
                                        "nothing, with the image only as reference image 1 and the style image as "
                                        "image 2, no masks: forms may grow across the facade and out of it. "
                                        "Per-region rules then only add their words to the one prompt."),
+                io.String.Input("only", default="", optional=True, advanced=True,
+                                placeholder="W_F1_*, group:M_Pilasters",
+                                tooltip="Paint only the regions matching these selectors (plan syntax: space = "
+                                        "AND, comma = OR); the others stay as they are. Empty = all. A whole "
+                                        "picture is still made in one piece; only its full-size detail follows "
+                                        "this."),
+                io.Float.Input("cfg", default=0.0, min=0.0, max=30.0, step=0.1, round=0.01, optional=True,
+                               advanced=True,
+                               tooltip="Used where the plan says cfg = 0. 0 = the model's default (1.0)."),
             ],
             outputs=[
                 io.Image.Output("images", tooltip="One image per rendered version, in number order."),
@@ -196,6 +205,11 @@ class KUBA_Versions(io.ComfyNode):
                                                  "and what it is made of."),
                 io.String.Output("report", tooltip="The lists, every version with its number, and each "
                                                    "rendered version's rules and time."),
+                io.String.Output("save_path", tooltip="The folder the versions of this run were saved to "
+                                                      "(finals: the subfolder 'final'). Empty when nothing "
+                                                      "was saved."),
+                io.String.Output("names", tooltip="One line per version, in the order of 'images': its number "
+                                                  "and label, as on the contact sheet."),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             is_output_node=True,        # the saved versions are the product: runs with its outputs unconnected
@@ -205,7 +219,8 @@ class KUBA_Versions(io.ComfyNode):
     def execute(cls, model, clip, vae, plan, image, versions, mode, quality, pick, max_versions, seed,
                 draft_mp, final_denoise, draft_long_edge, references=None, count=0, sheet_columns=0,
                 steps=0, sampler_name="euler", scheduler="auto", picks_folder="",
-                save_folder="kubakub/versions", unify=0.0, generate="regions") -> io.NodeOutput:
+                save_folder="kubakub/versions", unify=0.0, generate="regions", only="",
+                cfg=0.0) -> io.NodeOutput:
         base_rules = plan.plan.get("rules_text")
         if base_rules is None:
             raise ValueError("kubakub versions: this plan has no rules text; connect kubakub region plan.")
@@ -285,17 +300,23 @@ class KUBA_Versions(io.ComfyNode):
 
         # resolve every version's plan first: a typo in the sheet stops the queue before any sampling
         plans, full_plans = {}, {}
+        only = (only or "").strip()
+        painted = None                      # with 'only': how many regions of a version are painted
         for v in todo:
             rules = base_of[v.number].rstrip("\n") + "\n" + v.rules
             plan_seed = seed_of[v.number]
             start_of(v)                     # an image of another shape stops the queue here, too
             try:
                 if final:
-                    full_plans[v.number] = RegionPlan(rp.resolve(full_regions.table, rules, seed=plan_seed),
-                                                      full_regions)
+                    d, painted = vs.only_regions(rp.resolve(full_regions.table, rules, seed=plan_seed), only)
+                    full_plans[v.number] = RegionPlan(d, full_regions)
                 if v.number in drafts:      # the picture is already there
                     continue
                 d = rp.resolve(regions.table, rules, seed=plan_seed)
+                if v.number not in free:    # a whole picture has no masks: its one prompt keeps every region
+                    d, painted = vs.only_regions(d, only)
+            except vs.SheetError as e:
+                raise ValueError(f"kubakub versions: {e}") from None
             except rp.PlanError as e:
                 raise ValueError(f"kubakub versions: version {v.number} ({v.label}): {e} (line numbers count "
                                  f"from the start of the plan's rules, then this version's rules)") from None
@@ -308,7 +329,7 @@ class KUBA_Versions(io.ComfyNode):
                 m = _with_lora(m, name, strength)
             models[v.number] = m
 
-        settings = dict(steps=steps, cfg=0.0, sampler_name=sampler_name, scheduler="simple",
+        settings = dict(steps=steps, cfg=cfg, sampler_name=sampler_name, scheduler="simple",
                         region_mp=draft_mp, max_upscale=4.0, style_mp=0.5)
 
         # every prompt of every version through the text encoder first, so it loads once
@@ -360,13 +381,19 @@ class KUBA_Versions(io.ComfyNode):
                 canvas, _ = seams.refine_tiles(
                     ad, canvas, plans[v.number], denoise=unify, whole=True,
                     seed=int(plans[v.number].plan["seed"]), steps=steps, sampler_name=sampler_name,
-                    scheduler="simple", cache=rc.run_cache(ad),
+                    scheduler="simple", cfg=cfg, cache=rc.run_cache(ad),
                     style=st.StyleReference(ad, style_of(v), 1.0) if style_of(v) is not None else None,
                     check_interrupt=comfy.model_management.throw_exception_if_processing_interrupted)
                 note += f", unify {unify:g}"
             if final:
                 up = ops.resize(canvas, W, H, "bicubic")
                 keep = (full_regions.labels[:1] < 0)[..., None]          # outside the regions: the input image
+                if v.number not in drafts and v.number not in free:
+                    # 'keep' regions (the plan's, and those left out by 'only') were not painted: the input image,
+                    # not its scaled-up draft
+                    lab = full_regions.labels[:1]
+                    out = torch.tensor([e["strategy"] == "keep" for e in full_plans[v.number].plan["regions"]])
+                    keep = keep | ((lab >= 0) & out[lab.clamp_min(0).long()])[..., None]
                 if v.number not in free:                                # a whole picture keeps its own background
                     up = torch.where(keep, start_of(v)[0], up)
                 style = st.StyleReference(ad, style_of(v), 1.0) if style_of(v) is not None else None
@@ -374,7 +401,7 @@ class KUBA_Versions(io.ComfyNode):
                 canvas, tile_lines = seams.refine_tiles(
                     ad, up, full_plans[v.number], denoise=final_denoise, tile_px=1024,
                     seed=int(full_plans[v.number].plan["seed"]), steps=steps, sampler_name=sampler_name,
-                    scheduler="simple",
+                    scheduler="simple", cfg=cfg,
                     style=style, cache=rc.run_cache(ad),
                     progress=lambda i, n: tiles.update_absolute(i, n),
                     check_interrupt=comfy.model_management.throw_exception_if_processing_interrupted)
@@ -404,10 +431,14 @@ class KUBA_Versions(io.ComfyNode):
             report = [vs.report(all_versions, axes, mode, left_out, picked if pick.strip() else None)]
         report += ["", f"{quality}: {len(numbers)} version(s) at {ow}x{oh} in {time.perf_counter() - t_all:.1f}s; "
                        f"cache {rc.RESULTS.stats()}"]
+        if only and painted is not None:
+            report += [f"only = {only}: {painted} region(s) painted, the others stay as they are"
+                       + ("; no region matches, nothing was painted" if painted == 0 else "")]
         report += [text for _, text in sorted(lines)]
         saved = cls._save({k: outs[k] for k in numbers}, by_number, recipes, save_folder, final, bool(picks))
+        save_path = os.path.dirname(saved[0]) if saved else ""
         if saved:
-            report += ["", f"saved {len(saved)} file(s) to {os.path.dirname(saved[0])}"]
+            report += ["", f"saved {len(saved)} file(s) to {save_path}"]
         report.append("")
         for k in numbers:
             report.append(f"--- version {k:02d} adds to the plan"
@@ -418,7 +449,8 @@ class KUBA_Versions(io.ComfyNode):
                           + (f" (image {os.path.basename(by_number[k].image)})"
                              if by_number[k].image not in ("", "input:0") else "") + ":")
             report.append(by_number[k].rules.rstrip() or "(nothing)")
-        return io.NodeOutput(images, sheet, "\n".join(report), ui=ui.PreviewImage(sheet, cls=cls))
+        return io.NodeOutput(images, sheet, "\n".join(report), save_path, "\n".join(labels),
+                             ui=ui.PreviewImage(sheet, cls=cls))
 
     @staticmethod
     def _whole(ad, rplan, start, style, mp: float, settings, dw: int, dh: int) -> torch.Tensor:

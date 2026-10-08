@@ -19,6 +19,7 @@ _MODULES = [                        # nodes/<menu group>/<module>
     "nodes.regions.nodes_vector",
     "nodes.regions.nodes_canvas",
     "nodes.regions.facade_mask_atlas_Kub",
+    "nodes.masks.nodes_masks",
     "nodes.sketch.nodes_sketch",
     "nodes.generate.nodes_plan",
     "nodes.generate.nodes_sampler",

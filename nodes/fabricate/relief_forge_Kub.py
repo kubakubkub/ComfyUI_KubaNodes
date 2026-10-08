@@ -41,11 +41,40 @@ def _np_to_img(a):
     return torch.from_numpy(a)[None, ...]
 
 
-def _preview(field):
+def _norm(field):
     h = field["height_mm"]
     span = float(h.max() - h.min())
-    n = (h - h.min()) / span if span > 1e-6 else np.zeros_like(h)
-    return _np_to_img(n)
+    return (h - h.min()) / span if span > 1e-6 else np.zeros_like(h)
+
+
+def _preview(field):
+    return _np_to_img(_norm(field))
+
+
+def _height(field):
+    """The field as a MASK (0 = lowest, 1 = highest point): the way out of the relief chain without a file."""
+    return torch.from_numpy(np.asarray(_norm(field), dtype=np.float32))[None, ...]
+
+
+def _range_mm(field):
+    h = field["height_mm"]
+    return [round(float(h.min()), 1), round(float(h.max()), 1)]
+
+
+HEIGHT_TIP = ("The relief as a mask: 0 = the lowest, 1 = the highest point (the same picture as preview), to use "
+              "as a depth or displacement map.")
+
+
+def _to_px_mm(field, px_mm):
+    """The field's heights resampled to another pixel size (mm per pixel), so its real size in mm stays."""
+    h = np.asarray(field["height_mm"], dtype=np.float32)
+    k = float(field["px_mm"]) / float(px_mm)
+    if abs(k - 1.0) < 1e-3:
+        return h
+    size = (max(int(round(h.shape[0] * k)), 2), max(int(round(h.shape[1] * k)), 2))
+    t = torch.nn.functional.interpolate(torch.from_numpy(h)[None, None], size=size, mode="bilinear",
+                                        align_corners=False)
+    return t[0, 0].numpy()
 
 
 def _make_field(height_mm, px_mm, panel_bottom_mm=0.0, meta=None):
@@ -103,10 +132,11 @@ class ReliefFieldKub:
     DESCRIPTION = ("Turns a depth map into a physical relief panel in millimetres, the start of every relief chain. "
                    "Set the real panel width and the deepest relief; the other relief nodes then shape, check, "
                    "weigh and export it.")
-    RETURN_TYPES = (FIELD, "IMAGE")
-    RETURN_NAMES = ("field", "preview")
+    RETURN_TYPES = (FIELD, "IMAGE", "MASK")
+    RETURN_NAMES = ("field", "preview", "height")
     OUTPUT_TOOLTIPS = ("The relief as heights in mm with its real size, for the other relief nodes.",
-                       "Grey preview of the relief (white = sticks out furthest).")
+                       "Grey preview of the relief (white = sticks out furthest).",
+                       HEIGHT_TIP + " Here 0 = the back and 1 = max_relief_mm.")
     FUNCTION = "run"
     CATEGORY = CAT
 
@@ -120,7 +150,7 @@ class ReliefFieldKub:
             "panel_height_mm": round(d.shape[0] * px_mm, 1),
             "stage": "raw",
         })
-        return (field, _preview(field))
+        return (field, _preview(field), _height(field))
 
 
 # --------------------------------------------------------------------------
@@ -152,11 +182,12 @@ class ReliefMouldKub:
 
     DESCRIPTION = ("Makes a relief castable: rounds every sharp edge and limits steep walls so the panel comes out "
                    "of a one-piece mould. Some depth is lost; the report says how much.")
-    RETURN_TYPES = (FIELD, "IMAGE", "STRING")
-    RETURN_NAMES = ("field", "preview", "report")
+    RETURN_TYPES = (FIELD, "IMAGE", "STRING", "MASK")
+    RETURN_NAMES = ("field", "preview", "report", "height")
     OUTPUT_TOOLTIPS = ("The mould-ready relief.",
                        "Grey preview of the mould-ready relief.",
-                       "Relief depth before and after, the share of detail lost and the settings used (json).")
+                       "Relief depth before and after, the share of detail lost and the settings used (json).",
+                       HEIGHT_TIP + " The report gives the range in mm (height_range_mm).")
     FUNCTION = "run"
     CATEGORY = CAT
 
@@ -176,8 +207,9 @@ class ReliefMouldKub:
             "detail_lost_pct": round(100.0 * (1.0 - after / before), 1) if before else 0.0,
             "min_edge_radius_mm": float(min_edge_radius_mm),
             "draft_angle_deg": float(draft_angle_deg),
+            "height_range_mm": _range_mm(out),
         }, indent=2)
-        return (out, _preview(out), rep)
+        return (out, _preview(out), rep, _height(out))
 
 
 # --------------------------------------------------------------------------
@@ -204,10 +236,11 @@ class ReliefAntiPerchKub:
 
     DESCRIPTION = ("Shaves every flat ledge of a relief into a sloped sill so birds and people cannot perch, stand "
                    "or sit on it. Vertical faces and undersides stay as they are.")
-    RETURN_TYPES = (FIELD, "IMAGE")
-    RETURN_NAMES = ("field", "preview")
+    RETURN_TYPES = (FIELD, "IMAGE", "MASK")
+    RETURN_NAMES = ("field", "preview", "height")
     OUTPUT_TOOLTIPS = ("The relief with sloped sills.",
-                       "Grey preview of the treated relief.")
+                       "Grey preview of the treated relief.",
+                       HEIGHT_TIP + " The range in mm is logged in the console.")
     FUNCTION = "run"
     CATEGORY = CAT
 
@@ -217,7 +250,9 @@ class ReliefAntiPerchKub:
         out = _stamp(_make_field(h2, field["px_mm"], field["panel_bottom_mm"],
                                  field["meta"]),
                      sill_angle_deg=float(sill_angle_deg))
-        return (out, _preview(out))
+        lo, hi = _range_mm(out)                      # this node has no report: the mm range of 'height' goes to the log
+        print(f"[kubakub relief anti perch] height 0..1 = {lo} .. {hi} mm")
+        return (out, _preview(out), _height(out))
 
 
 # --------------------------------------------------------------------------
@@ -417,7 +452,8 @@ class ReliefExportProwKub:
                                                 "smaller, lighter file."}),
             },
             "optional": {"field_b": (FIELD, {"tooltip": "Optional relief for the second wing. Without it, field_a "
-                                                         "is mirrored onto both wings."})},
+                                                         "is mirrored onto both wings. It keeps its own size in mm, "
+                                                         "also when its pixel size differs from field_a."})},
         }
 
     DESCRIPTION = ("Folds one or two reliefs into a prow (two wings meeting at an edge) and saves it as one OBJ "
@@ -437,7 +473,17 @@ class ReliefExportProwKub:
         path = os.path.join(full, f"{name}_{counter:05}.obj")
         panels = [field_a["height_mm"]]
         if field_b is not None:
-            panels.append(field_b["height_mm"])
+            # the prow is written with field_a's pixel size: field_b is brought to it, so it keeps its size in mm
+            hb = _to_px_mm(field_b, field_a["px_mm"])
+            ha_mm = panels[0].shape[0] * field_a["px_mm"]
+            hb_mm = field_b["height_mm"].shape[0] * field_b["px_mm"]
+            if hb.shape != field_b["height_mm"].shape:
+                print(f"[kubakub relief export prow] field_b resampled from {field_b['px_mm']:.3f} to "
+                      f"{field_a['px_mm']:.3f} mm per pixel (its size in mm is kept)")
+            if abs(ha_mm - hb_mm) > max(2.0 * field_a["px_mm"], 0.01 * ha_mm):   # both stand on the same base line
+                print(f"[kubakub relief export prow] the wings differ in height: field_a {ha_mm:.0f} mm, "
+                      f"field_b {hb_mm:.0f} mm; the taller one stands above the other at the edge")
+            panels.append(hb)
         rc.write_prow_obj(path, panels, field_a["px_mm"], interior_angle_deg,
                           base_mm, decimate)
         return (path,)

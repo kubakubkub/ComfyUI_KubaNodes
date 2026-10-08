@@ -62,7 +62,7 @@ function keyValue(keys, t) {                          // keys sorted by t: [{t, 
   return typeof a.v === "number" ? a.v + (b.v - a.v) * u : mixHex(a.v, b.v, u);
 }
 // ---- behaviours (= kubakub/director/motion.py, checked by tests/test_motion.py): procedural motion on top of the keyframes
-const M_TYPES = ["wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio", "stagger", "swap", "repeat"];
+const M_TYPES = ["wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio", "stagger", "field", "swap", "repeat"];
 const M_BANDS = ["low", "mid", "high"];               // the sound in three bands (kubakub/sound.py)
 const LEVEL_RATE = 100;                               // loudness curve samples per second
 function levelCurve(mono, sr) {                       // RMS per 1/100 s, / its 98th percentile (= motion.level_curve)
@@ -114,7 +114,8 @@ function mWave(kind, u) {
   return Math.sin(2 * Math.PI * u);
 }
 const M_DEF = { freq: 1, seed: 1, period: 2, every: 0.5, attack: 0.02, decay: 0.25, smooth: 0.15, nth: 1, step: 0.1, hold: 0.3,
-  density: 0.5, count: 1, dx: 100, cols: 4, radius: 200, threshold: 0.3, gap: 0.1 };                           // = the defaults the engine reads with
+  density: 0.5, count: 1, dx: 100, cols: 4, radius: 200, threshold: 0.3, gap: 0.1,
+  cycle: 2, to: 1, soft: 0.05, width: 0.2, rings: 3, noise_px: 64, cx: 0.5, cy: 0.5, steps: 1, duty: 0.5 };                           // = the defaults the engine reads with
 const mDefault = (b, k) => k === "fade" ? (b.type === "stagger" ? 0.2 : 0) : k === "dy" ? ((b.layout || "line") === "grid" ? 100 : 0) : (M_DEF[k] ?? 0);
 const mNum = (b, k, d) => { const v = b[k]; return typeof v === "number" && Number.isFinite(v) ? v : d; };
 function mSpan(b, dur) { const s = Math.max(0, mNum(b, "t_start", 0)), e = mNum(b, "t_end", -1); return [s, e < 0 ? dur : Math.max(s, e)]; }
@@ -220,6 +221,160 @@ function staggerWeights(motion, t, dur, regs, W, H) {  // {id: 0-1} of the activ
     out = w;
   }
   return out;
+}
+// field (= motion.field_* and kubakub/maskfields.py field / along): the clip of a layer appears along a grey ramp over
+// its regions, per pixel: a wipe, an iris, outlines closing in, a dissolve, a band or rings running through
+const FIELD_KINDS = ["edge distance", "direction", "radial", "region order", "noise"], FIELD_PER = ["each region", "all together"];
+const FIELD_EFFECTS = ["reveal", "hide", "band", "rings"], FIELD_SHAPES = ["ramp", "saw", "triangle", "sine", "square", "random", "noise"];
+const FIELD_TRIGGERS = ["beats", "bars", "markers", "low", "mid", "high"], FIELD_CURVES = [...FIELD_SHAPES, "level", ...FIELD_TRIGGERS];
+const EASES = ["linear", "ease in", "ease out", "ease in out"], TRAIL_STEPS = 16, NOISE_BINS = 2048;
+const fieldOf = motion => (motion || []).find(b => b && b.type === "field" && b.on !== false) || null;
+function mEase(u, kind) {
+  u = Math.min(1, Math.max(0, u));
+  return kind === "ease in" ? u * u : kind === "ease out" ? 1 - (1 - u) ** 2 : kind === "ease in out" ? u * u * (3 - 2 * u) : u;
+}
+function curveShape(kind, u, easing, duty, seed) {    // a time curve at u cycles -> 0..1
+  const whole = Math.floor(u), part = u - whole;
+  if (kind === "ramp") return mEase(u, easing);
+  if (kind === "saw") return mEase(part, easing);
+  if (kind === "triangle") return mEase(1 - Math.abs(2 * part - 1), easing);
+  if (kind === "sine") return 0.5 - 0.5 * Math.cos(2 * Math.PI * u);
+  if (kind === "square") return part < duty ? 1 : 0;
+  if (kind === "random") return hash01(whole, seed);
+  if (kind === "noise") return Math.min(1, Math.max(0, 0.5 + 0.65 * mNoise(u, seed)));
+  return 0;
+}
+function fieldTriggers(b, curve, ctx, dur) {            // the times a field's ramp starts at: one on the start of its range counts
+  const [s, e] = mSpan(b, dur), nth = Math.max(1, Math.trunc(mNum(b, "nth", 1))), thr = mNum(b, "threshold", 0.3), gap = Math.max(0, mNum(b, "gap", 0.1));
+  const memo = (ctx._fieldTriggers ||= {}), key = JSON.stringify([s, e, curve, nth, thr, gap]);
+  if (memo[key]) return memo[key];
+  let ts = [];
+  if (curve === "beats" || curve === "bars") { const st = curve === "bars" ? 4 : 1; ts = (ctx.beats || []).filter((_, i) => i % st === 0); }
+  else if (curve === "markers") ts = ctx.markers || [];
+  else { const off = ctx.offset || 0; let last = null;
+    for (const h of ctx.hits?.[curve] || []) { const x = h[0] - off; if (h[1] >= thr && x >= s - 1e-9 && (last === null || x - last >= gap - 1e-9)) { ts.push(x); last = x; } } }
+  return memo[key] = ts.filter(x => x >= s - 1e-9 && x <= e + 1e-9).filter((_, i) => i % nth === 0);
+}
+function fieldProgress(b, t, dur, ctx) {              // where the move is at t: the curve's value between from and to
+  const [s, e] = mSpan(b, dur), curve = FIELD_CURVES.includes(b.curve) ? b.curve : "ramp", lo = mNum(b, "from", 0), hi = mNum(b, "to", 1);
+  const cyc = Math.max(0.01, mNum(b, "cycle", 2)), easing = EASES.includes(b.easing) ? b.easing : "linear", tt = Math.min(Math.max(t, s), e);
+  let v;
+  if (curve === "level") v = Math.min(1, Math.max(0, mNum(b, "amount", 1) * mLevel(ctx, tt, Math.max(0, mNum(b, "smooth", 0.15)), b.band || "all")));
+  else if (FIELD_TRIGGERS.includes(curve)) {
+    const ts = fieldTriggers(b, curve, ctx || {}, dur); let k = 0, hi2 = ts.length;
+    while (k < hi2) { const m = (k + hi2) >> 1; if (ts[m] <= tt + 1e-9) k = m + 1; else hi2 = m; }
+    if (!k) v = 0;
+    else {
+      const run = mEase((tt - ts[k - 1]) / cyc, easing), steps = Math.max(1, Math.trunc(mNum(b, "steps", 1)));
+      if (steps <= 1) v = run; else { const pos = (k - 1 + run) / steps, fr = pos - Math.floor(pos); v = fr < 1e-9 ? 1 : fr; }
+    }
+  } else v = curveShape(curve, (tt - s) / cyc + Math.max(0, mNum(b, "phase", 0)), easing, mNum(b, "duty", 0.5), Math.trunc(mNum(b, "seed", 1)));
+  return lo + v * (hi - lo);
+}
+function fieldValues(b, t, dur, ctx) {                // [[progress, weight]]: now and, with a trail, earlier moments fading out
+  const out = [[fieldProgress(b, t, dur, ctx), 1]], trail = Math.max(0, mNum(b, "trail", 0));
+  if (trail > 0) {
+    const s = mSpan(b, dur)[0], dt = Math.max(0.02, 2.5 * trail / TRAIL_STEPS);
+    for (let i = 1; i <= TRAIL_STEPS; i++) { if (t - i * dt < s - 1e-9) break; out.push([fieldProgress(b, t - i * dt, dur, ctx), Math.exp(-i * dt / trail)]); }
+  }
+  return out;
+}
+function fieldPruned(values, effect) {                // (= maskfields.pruned) without the entries that cannot win the per-pixel maximum
+  const best = new Map();
+  for (const [p, w] of values) best.set(p, Math.max(w, best.get(p) ?? 0));
+  let vals = [...best.entries()].sort((a, b) => a[0] - b[0]);
+  if (effect === "reveal" || effect === "hide") {
+    const out = []; let top = -1;
+    for (const [p, w] of effect === "reveal" ? vals.reverse() : vals) if (w > top) { out.push([p, w]); top = w; }
+    vals = out;
+  }
+  return vals;
+}
+function fieldAlong(f, p, effect, s, w, n) {          // the mask value at progress p for a pixel of the ramp (= maskfields.along)
+  let m;
+  if (effect === "reveal" || effect === "hide") {
+    m = p <= 0 ? 0 : p >= 1 ? 1 : Math.min(1, Math.max(0, (p * (1 + s) - f) / s));
+    if (effect === "hide") m = 1 - m;
+  } else {
+    let d;
+    if (effect === "band") d = Math.abs(f - (p * (1 + w + 2 * s) - w / 2 - s));
+    else { let u = f * n - p; u -= Math.floor(u); d = Math.min(u, 1 - u) / n; }
+    m = Math.min(1, Math.max(0, (w / 2 - d) / s + 0.5));
+  }
+  return m * m * (3 - 2 * m);
+}
+function edt1(f, n, d, v, z) {                        // squared distance transform of one line (Felzenszwalb)
+  let k = 0; v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
+}
+// The ramp of a field behaviour over the clipped pixels: Float32Array [LW * LH], 0..1 inside the regions, 0 outside.
+// rp [{ id, pos (pixel indices), box [x0, y0, x1, y1) }], pxScale = picture pixels per pixel of this map (noise)
+function fieldRamp(rp, LW, LH, b, pxScale) {
+  const F = new Float32Array(LW * LH), kind = FIELD_KINDS.includes(b.field) ? b.field : "edge distance", together = b.per === "all together";
+  const ang = mNum(b, "angle", 0) * Math.PI / 180, ca = Math.round(Math.cos(ang) * 1e9) / 1e9, sa = Math.round(Math.sin(ang) * 1e9) / 1e9;
+  const live = rp.filter(r => r.pos.length), seed = Math.trunc(mNum(b, "seed", 1));
+  if (!live.length) return F;
+  if (kind === "region order") {
+    const ids = staggerOrder(live.map(r => [r.id, [r.box[0], r.box[1], r.box[2] - r.box[0], r.box[3] - r.box[1]]]), b.order || "left", LW, LH, seed);
+    const val = new Map(ids.map((id, rank) => [id, (rank + 0.5) / ids.length]));
+    for (const r of live) { const v = val.get(r.id); for (const q of r.pos) F[q] = v; }
+  } else if (kind === "noise") {
+    const cell = Math.max(2, mNum(b, "noise_px", 64)), hist = new Float64Array(NOISE_BINS), raw = new Float64Array(LW * LH);
+    const h = (ix, iy) => hash01(ix + 7919 * iy, seed);
+    let total = 0;
+    for (const r of live) for (const q of r.pos) {
+      const x = q % LW, y = (q - x) / LW, u = x * pxScale / cell, v = y * pxScale / cell, ix = Math.floor(u), iy = Math.floor(v);
+      let fx = u - ix, fy = v - iy; fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+      const big = (h(ix, iy) * (1 - fx) + h(ix + 1, iy) * fx) * (1 - fy) + (h(ix, iy + 1) * (1 - fx) + h(ix + 1, iy + 1) * fx) * fy;
+      raw[q] = big; hist[Math.min(NOISE_BINS - 1, Math.floor(big * NOISE_BINS))]++; total++;
+    }
+    let acc = 0; for (let i = 0; i < NOISE_BINS; i++) { acc += hist[i]; hist[i] = acc / Math.max(1, total); }
+    for (const r of live) for (const q of r.pos) F[q] = hist[Math.min(NOISE_BINS - 1, Math.floor(raw[q] * NOISE_BINS))];
+  } else if (together && kind !== "edge distance") {
+    const cx = mNum(b, "cx", 0.5) * (LW - 1), cy = mNum(b, "cy", 0.5) * (LH - 1);
+    const at = q => { const x = q % LW, y = (q - x) / LW; return kind === "direction" ? Math.fround(Math.fround(x * ca) + Math.fround(y * sa)) : Math.hypot(x - cx, y - cy); };
+    let lo = Infinity, hi = -Infinity;
+    for (const r of live) for (const q of r.pos) { const v = at(q); if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (kind === "radial") lo = 0;
+    if (hi - lo > 1e-9) for (const r of live) for (const q of r.pos) F[q] = (at(q) - lo) / (hi - lo);
+  } else {
+    let top = 0;
+    for (const r of live) {
+      const [x0, y0, x1, y1] = r.box, w = x1 - x0, h = y1 - y0;
+      if (kind === "edge distance") {                 // distance to the nearest pixel outside the region, minus 1
+        const pw = w + 2, ph = h + 2, g = new Float64Array(pw * ph), INF = 1e20;
+        for (const q of r.pos) { const x = q % LW, y = (q - x) / LW; g[(y - y0 + 1) * pw + (x - x0 + 1)] = INF; }
+        const n = Math.max(pw, ph), f = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+        for (let x = 0; x < pw; x++) { for (let y = 0; y < ph; y++) f[y] = g[y * pw + x]; edt1(f, ph, d, v, z); for (let y = 0; y < ph; y++) g[y * pw + x] = d[y]; }
+        for (let y = 0; y < ph; y++) { for (let x = 0; x < pw; x++) f[x] = g[y * pw + x]; edt1(f, pw, d, v, z); for (let x = 0; x < pw; x++) g[y * pw + x] = d[x]; }
+        let mx = 0;
+        for (const q of r.pos) { const x = q % LW, y = (q - x) / LW, dd = Math.sqrt(g[(y - y0 + 1) * pw + (x - x0 + 1)]) - 1; F[q] = dd; if (dd > mx) mx = dd; }
+        if (mx > top) top = mx;
+        if (!together) for (const q of r.pos) F[q] = mx > 1e-9 ? F[q] / mx : 0;
+      } else if (kind === "direction") {
+        let lo = Infinity, hi = -Infinity;
+        const at = q => { const x = q % LW, y = (q - x) / LW; return Math.fround(Math.fround((x - x0) * ca) + Math.fround((y - y0) * sa)); };
+        for (const q of r.pos) { const v = at(q); if (v < lo) lo = v; if (v > hi) hi = v; }
+        for (const q of r.pos) F[q] = hi - lo > 1e-9 ? (at(q) - lo) / (hi - lo) : 0;
+      } else {                                        // radial: from the region's own centre of weight
+        let sx = 0, sy = 0, mx = 0;
+        for (const q of r.pos) { const x = q % LW; sx += x - x0; sy += (q - x) / LW - y0; }
+        const mxc = Math.fround(sx / r.pos.length), myc = Math.fround(sy / r.pos.length);
+        const at = q => { const x = q % LW, y = (q - x) / LW; return Math.hypot(x - x0 - mxc, y - y0 - myc); };
+        for (const q of r.pos) { const v = at(q); if (v > mx) mx = v; }
+        for (const q of r.pos) F[q] = mx > 1e-9 ? at(q) / mx : 0;
+      }
+    }
+    if (kind === "edge distance" && together && top > 1e-9) for (const r of live) for (const q of r.pos) F[q] /= top;
+  }
+  for (const r of live) for (const q of r.pos) { const v = Math.min(1, Math.max(0, F[q])); F[q] = b.invert ? 1 - v : v; }
+  return F;
 }
 // swap (= motion.swap_*): the layers of a group trade their masks (clips), one step per trigger; the owner carries the
 // behaviour, "with" = the ids of the other layers. The pictures stay where they are, only the masks move on.
@@ -355,6 +510,15 @@ const M_PRESETS = [                                   // [label, needs a box, be
   ["stagger: chase (running light)", false, { type: "stagger", path: "regions", mode: "chase", order: "left", step: 0.1, fade: 0.08, hold: 0.3 }],
   ["stagger: wave across", false, { type: "stagger", path: "regions", mode: "wave", order: "centre", step: 0.05, period: 2 }],
   ["stagger: random flicker", false, { type: "stagger", path: "regions", mode: "random", order: "left", step: 0.12, density: 0.5, seed: 1 }],
+  ["field: wipe across", false, { type: "field", path: "regions", field: "direction", per: "all together", angle: 0, effect: "reveal", curve: "ramp", cycle: 2, from: 0, to: 1, easing: "linear", soft: 0.05, trail: 0 }],
+  ["field: iris from the middle", false, { type: "field", path: "regions", field: "radial", per: "all together", cx: 0.5, cy: 0.5, effect: "reveal", curve: "ramp", cycle: 2, from: 0, to: 1, easing: "ease in out", soft: 0.05, trail: 0 }],
+  ["field: outlines close in", false, { type: "field", path: "regions", field: "edge distance", per: "each region", effect: "reveal", curve: "ramp", cycle: 1.5, from: 0, to: 1, easing: "ease out", soft: 0.05, trail: 0 }],
+  ["field: region by region", false, { type: "field", path: "regions", field: "region order", order: "left", seed: 1, effect: "reveal", curve: "ramp", cycle: 3, from: 0, to: 1, easing: "linear", soft: 0.02, trail: 0 }],
+  ["field: dissolve", false, { type: "field", path: "regions", field: "noise", noise_px: 48, seed: 1, effect: "reveal", curve: "ramp", cycle: 2, from: 0, to: 1, easing: "linear", soft: 0.1, trail: 0 }],
+  ["field: running band", false, { type: "field", path: "regions", field: "direction", per: "all together", angle: 0, effect: "band", width: 0.2, curve: "saw", cycle: 2, from: 0, to: 1, easing: "linear", soft: 0.08, trail: 0.3 }],
+  ["field: rings", false, { type: "field", path: "regions", field: "radial", per: "all together", cx: 0.5, cy: 0.5, effect: "rings", rings: 4, width: 0.08, curve: "saw", cycle: 1.5, from: 0, to: 1, easing: "linear", soft: 0.03, trail: 0 }],
+  ["field: band on beats", false, { type: "field", path: "regions", field: "edge distance", per: "each region", effect: "band", width: 0.3, curve: "beats", nth: 1, steps: 1, cycle: 0.4, from: 0, to: 1, easing: "linear", soft: 0.1, trail: 0.2 }],
+  ["field: opens with the sound", false, { type: "field", path: "regions", field: "edge distance", per: "each region", invert: true, effect: "reveal", curve: "level", band: "all", amount: 1, smooth: 0.15, cycle: 2, from: 0, to: 1, soft: 0.1, trail: 0 }],
   ["swap masks: on beats", false, { type: "swap", path: "masks", with: [], order: "loop", trigger: "beats", nth: 1 }],
   ["swap masks: on low hits (kick, bass)", false, { type: "swap", path: "masks", with: [], order: "loop", trigger: "low", nth: 1, threshold: 0.3, gap: 0.1 }],
   ["swap masks: on high hits (hats, clicks)", false, { type: "swap", path: "masks", with: [], order: "random", trigger: "high", nth: 1, threshold: 0.3, gap: 0.1, seed: 1 }],
@@ -362,7 +526,7 @@ const M_PRESETS = [                                   // [label, needs a box, be
 const M_PARAMS = { wiggle: [["amount", "amount"], ["freq", "per second"], ["seed", "seed"]], oscillate: [["amount", "amount"], ["period", "period s"], ["phase", "phase 0-1"]],
   drift: [["rate", "per second"]], random: [["amount", "amount"], ["every", "every s"], ["seed", "seed"]], loop: [],
   pulse: [["amount", "amount"], ["attack", "attack s"], ["decay", "decay s"]], audio: [["amount", "amount"], ["smooth", "release s"]],
-  stagger: [["step", "step s"], ["fade", "fade s"]], swap: [],
+  stagger: [["step", "step s"], ["fade", "fade s"]], field: [], swap: [],
   repeat: [["count", "copies"], ["rotate", "rotate °/copy"], ["scale", "scale %/copy"], ["opacity", "opacity/copy"], ["delay", "delay s/copy"]] };
 // ---- audio: beats from a mono signal (onset envelope at 100 Hz, tempo by autocorrelation, phase by the best fit)
 function analyzeBeats(x, sr) {
@@ -740,7 +904,7 @@ class Director {
     const off = this.tl.audio?.offset || 0, key = [this.tl.beat?.bpm, this.tl.beat?.phase, off, this.tl.duration, (this.tl.markers || []).map(m => m.t).join(",")].join("|");
     if (this._mctx?.key !== key) this._mctx = { key, beats: beatTimes(this.tl.beat, off, this.tl.duration), markers: (this.tl.markers || []).map(m => m.t).filter(Number.isFinite).sort((a, b) => a - b), offset: off };
     const file = this.tl.audio?.file || "";
-    const wantLevel = file && this.layers?.some(L => L.motion?.some(b => b.type === "audio" && b.on !== false));
+    const wantLevel = file && this.layers?.some(L => L.motion?.some(b => b.on !== false && (b.type === "audio" || b.type === "field" && b.curve === "level")));
     if (wantLevel && this._levelFile !== file) {       // the node's own curve (motion.level_curve), so preview = render
       this._levelFile = file; this._level = null;
       api.fetchApi("/kubakub/director/level", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file }) })
@@ -749,7 +913,7 @@ class Director {
         .catch(e => console.warn("[kubakub director] level", e));
     }
     this._mctx.level = this._levelFile === file ? this._level : null;
-    const wantBands = file && this.layers?.some(L => L.motion?.some(b => b.on !== false && (b.type === "audio" && M_BANDS.includes(b.band) || b.type === "swap" && M_BANDS.includes(b.trigger))));
+    const wantBands = file && this.layers?.some(L => L.motion?.some(b => b.on !== false && (b.type === "audio" && M_BANDS.includes(b.band) || b.type === "swap" && M_BANDS.includes(b.trigger) || b.type === "field" && (M_BANDS.includes(b.curve) || b.curve === "level" && M_BANDS.includes(b.band)))));
     if (wantBands && this._soundFile !== file) {       // loudness and hits per band (kubakub/sound.py), so preview = render
       this._soundFile = file; this._sound = null;
       api.fetchApi("/kubakub/director/level", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file, bands: true }) })
@@ -758,7 +922,7 @@ class Director {
         .catch(e => console.warn("[kubakub director] bands", e));
     }
     const snd = this._soundFile === file ? this._sound : null;
-    if (this._mctx.hits !== (snd?.hits || null)) { this._mctx.hits = snd?.hits || null; this._mctx.bands = snd?.bands || null; delete this._mctx._swapTimes; }
+    if (this._mctx.hits !== (snd?.hits || null)) { this._mctx.hits = snd?.hits || null; this._mctx.bands = snd?.bands || null; delete this._mctx._swapTimes; delete this._mctx._fieldTriggers; }
     return this._mctx;
   }
   swapNow() {                                        // {layer id: [[clip, weight] ...]} of the swap groups at the playhead (kept per frame)
@@ -812,10 +976,10 @@ class Director {
     const num = (b, i, k, label) => `<label class="kkd-mf"><span>${label}</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="${k}" value="${+(b[k] ?? mDefault(b, k))}"></label>`;
     el.kkdHTML = `<div class="kkd-sub" data-tip="Procedural motion on top of the keyframes: wiggle, oscillate, drift, random steps, looped keyframes. Several add up; the node renders them per frame">behaviours <span class="kkd-grow"></span>
       <select data-id="m-add" style="font-size:12px;max-width:150px"><option value="">+ behaviour</option>${M_PRESETS.map(([l, needBox, pr], i) => needBox && !box ? ""
-        : (pr.type === "stagger" || pr.type === "swap") && !L.clip ? `<option value="${i}" disabled>${l} (clip to regions first)</option>` : `<option value="${i}">${l}</option>`).join("")}</select></div>` +
+        : (pr.type === "stagger" || pr.type === "swap" || pr.type === "field") && !L.clip ? `<option value="${i}" disabled>${l} (clip to regions first)</option>` : `<option value="${i}">${l}</option>`).join("")}</select></div>` +
       mv.map((b, i) => `<div class="kkd-mcard ${b.on === false ? "off" : ""}">
         <div class="kkd-mhead"><select data-mi="${i}" data-mk="type">${M_TYPES.map(t => opt(t, b.type)).join("")}</select>
-          ${b.type === "repeat" ? `<select disabled><option>copies of this layer</option></select>` : b.type === "stagger" ? `<select disabled><option>regions (${esc(L.clip || "no clip")})</option></select>` : b.type === "swap" ? `<select disabled><option>masks (${esc(L.clip || "no clip")})</option></select>` : `<select data-mi="${i}" data-mk="path">${(pl => (pl.includes(b.path) ? "" : `<option value="" selected>— pick a value —</option>`) + pl.map(p => opt(p, b.path, lbl(p))).join(""))(b.type === "loop" ? this.loopPaths(L) : paths)}</select>`}
+          ${b.type === "repeat" ? `<select disabled><option>copies of this layer</option></select>` : (b.type === "stagger" || b.type === "field") ? `<select disabled><option>regions (${esc(L.clip || "no clip")})</option></select>` : b.type === "swap" ? `<select disabled><option>masks (${esc(L.clip || "no clip")})</option></select>` : `<select data-mi="${i}" data-mk="path">${(pl => (pl.includes(b.path) ? "" : `<option value="" selected>— pick a value —</option>`) + pl.map(p => opt(p, b.path, lbl(p))).join(""))(b.type === "loop" ? this.loopPaths(L) : paths)}</select>`}
           <input type="checkbox" data-mi="${i}" data-mk="on" ${b.on === false ? "" : "checked"} data-tip="On / off"><button class="kkd-x" data-mdel="${i}" data-tip="Remove">×</button></div>
         <div class="kkd-mgrid">${(M_PARAMS[b.type] || []).map(([k, l]) => num(b, i, k, l)).join("")}
           ${b.type === "oscillate" ? `<label class="kkd-mf"><span>wave</span><select data-mi="${i}" data-mk="wave">${["sine", "triangle", "square", "saw", ...(b.path === "position" ? ["circle"] : [])].map(w => opt(w, b.wave || "sine")).join("")}</select></label>` : ""}
@@ -827,6 +991,26 @@ class Director {
             + ((b.mode || "sequence") === "sequence" ? `<label class="kkd-mf"><span>direction</span><select data-mi="${i}" data-mk="direction">${[["in", "turn on"], ["out", "turn off"]].map(([v, l]) => opt(v, b.direction || "in", l)).join("")}</select></label>` : "")
             + (b.mode === "chase" ? num(b, i, "hold", "hold s") : b.mode === "wave" ? num(b, i, "period", "period s") : b.mode === "random" ? num(b, i, "density", "on 0-1") + num(b, i, "seed", "seed") : "")
             + (b.order === "random" && b.mode !== "random" ? num(b, i, "seed", "seed") : "") : ""}
+          ${b.type === "field" ? (() => { const kind = FIELD_KINDS.includes(b.field) ? b.field : "edge distance", eff = FIELD_EFFECTS.includes(b.effect) ? b.effect : "reveal", cv = FIELD_CURVES.includes(b.curve) ? b.curve : "ramp", trig = FIELD_TRIGGERS.includes(cv);
+            const chk = (k, label, tip) => `<label class="kkd-mf" data-tip="${tip}"><span>${label}</span><input type="checkbox" data-mi="${i}" data-mk="${k}" ${b[k] ? "checked" : ""}></label>`;
+            return `<label class="kkd-mf" data-tip="The grey ramp the move runs along. edge → middle: from each region's edge inward. direction: a wipe. from a point: an iris. region by region: one region after another. noise: a dissolve"><span>along</span><select data-mi="${i}" data-mk="field">${[["edge distance", "edge → middle"], ["direction", "direction"], ["radial", "from a point"], ["region order", "region by region"], ["noise", "noise"]].map(([v, l]) => opt(v, kind, l)).join("")}</select></label>`
+            + (kind === "region order" || kind === "noise" ? "" : `<label class="kkd-mf" data-tip="each region: every region runs on its own (all windows open at once). all together: one move over all of them (a wipe across the facade)"><span>per</span><select data-mi="${i}" data-mk="per">${[["each region", "each region"], ["all together", "all together"]].map(([v, l]) => opt(v, b.per || "each region", l)).join("")}</select></label>`)
+            + (kind === "direction" ? num(b, i, "angle", "angle °") : "")
+            + (kind === "radial" && b.per === "all together" ? num(b, i, "cx", "centre x 0-1") + num(b, i, "cy", "centre y 0-1") : "")
+            + (kind === "region order" ? `<label class="kkd-mf"><span>order</span><select data-mi="${i}" data-mk="order">${[["left", "left → right"], ["right", "right → left"], ["top", "top → bottom"], ["bottom", "bottom → top"], ["centre", "centre → out"], ["outside", "outside → in"], ["size", "biggest first"], ["random", "random"]].map(([v, l]) => opt(v, b.order || "left", l)).join("")}</select></label>` + (b.order === "random" ? num(b, i, "seed", "seed") : "") : "")
+            + (kind === "noise" ? num(b, i, "noise_px", "blob px") + num(b, i, "seed", "seed") : "")
+            + chk("invert", "the other way", "The move runs from white to black: from the middle out, right to left, the last region first")
+            + `<label class="kkd-mf" data-tip="reveal: the clip appears along the ramp. hide: it goes. band: a stripe travels through. rings: stripes that keep running"><span>effect</span><select data-mi="${i}" data-mk="effect">${FIELD_EFFECTS.map(v => opt(v, eff)).join("")}</select></label>`
+            + num(b, i, "soft", "soft edge 0-1") + (eff === "band" || eff === "rings" ? num(b, i, "width", "stripe 0-1") : "") + (eff === "rings" ? num(b, i, "rings", "rings") : "")
+            + `<label class="kkd-mf" data-tip="Seconds a place keeps glowing after the move has passed. 0 = no trail">${"<span>trail s</span>"}<input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="trail" value="${+(b.trail ?? 0)}"></label>`
+            + `<label class="kkd-mf" data-tip="How the move runs over time. ramp: once. saw: again and again. triangle / sine: there and back. square: on / off. random: a new place every cycle. noise: wanders. sound level: follows the loudness. beats, bars, markers, hits: each one starts a ramp"><span>curve</span><select data-mi="${i}" data-mk="curve">${[["ramp", "ramp (once)"], ["saw", "saw (repeat)"], ["triangle", "triangle"], ["sine", "sine"], ["square", "square"], ["random", "random"], ["noise", "noise"], ["level", "sound level"], ["beats", "on beats"], ["bars", "on bars"], ["markers", "on markers"], ["low", "on low hits"], ["mid", "on mid hits"], ["high", "on high hits"]].map(([v, l]) => opt(v, cv, l)).join("")}</select></label>`
+            + (cv === "level" ? "" : num(b, i, "cycle", trig ? "ramp s" : "cycle s"))
+            + `<label class="kkd-mf" data-tip="Where the curve starts: 0 = nothing yet, 1 = all of it"><span>from</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="from" value="${+(b.from ?? 0)}"></label>` + num(b, i, "to", "to")
+            + (cv === "ramp" || cv === "saw" || cv === "triangle" || trig ? `<label class="kkd-mf"><span>easing</span><select data-mi="${i}" data-mk="easing">${EASES.map(v => opt(v, b.easing || "linear")).join("")}</select></label>` : "")
+            + (cv === "square" ? num(b, i, "duty", "on 0-1") : "") + ((cv === "random" || cv === "noise") && kind !== "noise" && !(kind === "region order" && b.order === "random") ? num(b, i, "seed", "seed") : "")
+            + (cv === "level" ? `<label class="kkd-mf" data-tip="The whole sound, or only its low (kick, bass), mid or high (hats, clicks) frequencies"><span>listen to</span><select data-mi="${i}" data-mk="band">${[["all", "everything"], ["low", "low"], ["mid", "mid"], ["high", "high"]].map(([v, l]) => opt(v, b.band || "all", l)).join("")}</select></label><label class="kkd-mf"><span>gain</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="amount" value="${+(b.amount ?? 1)}"></label><label class="kkd-mf"><span>release s</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="smooth" value="${+(b.smooth ?? 0.15)}"></label>` : "")
+            + (trig ? (cv === "markers" ? "" : num(b, i, "nth", "every nth")) + `<label class="kkd-mf" data-tip="1 = each beat or hit runs the whole move again. More = each one moves on by one step of that many (e.g. the number of regions with 'region by region')"><span>steps</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="steps" value="${+(b.steps ?? 1)}"></label>` + (M_BANDS.includes(cv) ? num(b, i, "threshold", "hit strength 0-1") + num(b, i, "gap", "min gap s") : "") : "");
+          })() : ""}
           ${b.type === "swap" ? `<label class="kkd-mf" data-tip="loop: every layer moves on to the next mask. there and back: forwards, then backwards. random: a new shuffle every step"><span>order</span><select data-mi="${i}" data-mk="order">${[["loop", "loop"], ["pingpong", "there and back"], ["random", "random"]].map(([v, l]) => opt(v, b.order || "loop", l)).join("")}</select></label>
             <label class="kkd-mf" data-tip="What makes a step: the tempo of the sound, your markers, a fixed time, or a hit in the low (kick, bass), mid or high (hats, clicks) frequencies"><span>step on</span><select data-mi="${i}" data-mk="trigger">${[["beats", "beats"], ["bars", "bars"], ["markers", "markers"], ["every", "every … s"], ["low", "low hits"], ["mid", "mid hits"], ["high", "high hits"]].map(([v, l]) => opt(v, b.trigger || "beats", l)).join("")}</select></label>`
             + (b.trigger === "every" ? num(b, i, "every", "every s") : num(b, i, "nth", "every nth"))
@@ -838,7 +1022,7 @@ class Director {
             + (b.trigger === "every" ? num(b, i, "every", "every s") : b.trigger === "markers" ? "" : num(b, i, "nth", "every nth")) : ""}
           ${b.path === "position" && (b.type === "drift" || b.type === "pulse" || b.type === "audio" || b.type === "oscillate" && b.wave !== "circle") ? num(b, i, "angle", "angle °") : ""}
           ${b.type === "repeat" ? "" : b.type === "loop" ? `<label class="kkd-mf"><span>mode</span><select data-mi="${i}" data-mk="mode">${["cycle", "pingpong", "continue"].map(m => opt(m, b.mode)).join("")}</select></label>`
-            : `${num(b, i, "t_start", "from s")}<label class="kkd-mf"><span>to s</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="t_end" value="${mNum(b, "t_end", -1) < 0 ? "" : b.t_end}" placeholder="end"></label>${b.type === "drift" || b.type === "stagger" ? "" : num(b, i, "fade", "fade s")}`}</div>
+            : `${num(b, i, "t_start", "from s")}<label class="kkd-mf"><span>to s</span><input type="text" inputmode="decimal" data-num data-mi="${i}" data-mk="t_end" value="${mNum(b, "t_end", -1) < 0 ? "" : b.t_end}" placeholder="end"></label>${b.type === "drift" || b.type === "stagger" || b.type === "field" ? "" : num(b, i, "fade", "fade s")}`}</div>
         ${b.type === "swap" ? `<div class="kkd-mwith" data-tip="The layers that trade masks with this one. Each needs its own 'clip to'. The pictures stay where they are: each layer shows through the mask of the next one, from the top of the layer list down">` +
           (this.layers.filter(q => q !== L && q.kind !== "base").map(q => `<label><input type="checkbox" data-mi="${i}" data-mwith="${esc(q.id)}" ${(b.with || []).includes(q.id) ? "checked" : ""} ${q.clip ? "" : "disabled"}><span>${esc(q.name || q.id)}</span><em>${q.clip ? esc(q.clip) : "no clip"}</em></label>`).join("") || "no other layers yet") + `</div>` +
           (() => { const n = (b.with || []).filter(id => this.layers.some(q => q.id === id && q.clip)).length, tr = b.trigger || "beats";
@@ -1151,6 +1335,9 @@ class Director {
           const k = Math.min(n, 60), e2 = Math.min(e, this.tX(t0 + n * st)); ctx.moveTo(a, y + amp);
           for (let j = 0; j < k; j++) { const x0 = a + (e2 - a) * j / k, x1 = a + (e2 - a) * (j + 1) / k, yy = y + amp - 2 * amp * (j + 1) / k; ctx.lineTo(x0, yy); ctx.lineTo(x1, yy); }
           if ((b.mode || "sequence") !== "sequence") ctx.lineTo(e, y + amp); }
+        else if (b.type === "field") { const mc = this.motionCtx(), lo = Math.min(mNum(b, "from", 0), mNum(b, "to", 1)), hi = Math.max(mNum(b, "from", 0), mNum(b, "to", 1));   // its curve over its range
+          const n = Math.max(8, Math.min(240, Math.round((e - a) / (2 * g.dpr))));
+          for (let j = 0; j <= n; j++) { const v = (fieldProgress(b, t0 + (t1 - t0) * j / n, D, mc) - lo) / Math.max(1e-9, hi - lo), x = a + (e - a) * j / n, yy = y + amp - 3 * amp * Math.min(1, Math.max(0, v)); if (j) ctx.lineTo(x, yy); else ctx.moveTo(x, yy); } }
         else if (b.type === "swap") { for (const q of swapTimes(b, this.motionCtx(), D)) { const x = this.tX(q); ctx.moveTo(x, y + amp); ctx.lineTo(x, y - 2 * amp); } }
         else if (b.type === "pulse") { const mc = this.motionCtx(), ts = mTriggers(b, mc) || (() => { const st = Math.max(0.02, mNum(b, "every", 0.5)), o = []; for (let q = t0; q <= t1 + 1e-9 && o.length < 5000; q += st) o.push(q); return o; })();
           for (const q of ts) if (q >= t0 - 1e-9 && q <= t1) { const x = this.tX(q); ctx.moveTo(x, y + amp); ctx.lineTo(x, y - 2 * amp); } }
@@ -1253,6 +1440,8 @@ class Director {
       for (const inp of this.m.inputs || []) { this.inputImgs[inp.key] = await loadImage(viewURL(inp.image)); if (this.closed) return; }
       const start = await this.pickStart(); if (this.closed) return;
       await this.loadDocument(start); if (this.closed) return;
+      if (this.m.audio_in && this.tl.audio?.file !== this.m.audio_in) {   // the sound on the node's audio input is the timeline's sound
+        this.tl.audio = { file: this.m.audio_in, offset: 0, gain: this.tl.audio?.gain ?? 1 }; this.tl.beat = null; }
     } catch (e) { if (this.closed) return; console.error("[kubakub director]", e); note("the director could not load its images: run the workflow once more"); this.close(); return; }
     this.busy(false); this.ready = true;
     if (this.labels) this.views.regions = this.regionsView();
@@ -1485,7 +1674,7 @@ class Director {
     return idx.map(i => { const q = this.layers[i];
       return [q.id, q.kind, q.source, q.visible, q.opacity, q.blend, q.x, q.y, q.w, q.h, q.rotation, q.flip_h, q.flip_v, q.clip, q.clip_feather || 0, q.holes,
         stable(q.mask), stable(q.adjust), q.ver || 0, q.kind === "light" ? q.imgKey || "" : "", !!q.remove_bg, q.img ? 1 : 0,
-        q.motion ? stable(q.motion) : "", q.motion?.some(b => b.on !== false && (b.type === "stagger" || b.type === "repeat" && mNum(b, "delay", 0))) ? this.tl.time : "", stable(this.swapNow()?.[q.id] || "")]; });
+        q.motion ? stable(q.motion) : "", q.motion?.some(b => b.on !== false && (b.type === "stagger" || b.type === "field" || b.type === "repeat" && mNum(b, "delay", 0))) ? this.tl.time : "", stable(this.swapNow()?.[q.id] || "")]; });
   }
   castImage(L) {                                     // the window's own composite of what is cast, as a PNG data URL
     const idx = this.castLayers(L), P = L.light.projector;
@@ -1695,8 +1884,9 @@ class Director {
   }
   clipMask(L) {                                      // the clip regions; with stagger behaviours each region weighted
     const mix = this.swapMixOf(L), stgOn = L.motion?.some(b => b.type === "stagger" && b.on !== false);   // swap: the masks it holds now
-    if ((!stgOn && !mix) || !this.labels) return this.regionMask(L.clip);
-    if (!stgOn && mix.length === 1) return this.regionMask(mix[0][0]);
+    const fb = fieldOf(L.motion);                    // field: the clip only as far as its move has come, per pixel
+    if ((!stgOn && !mix && !fb) || !this.labels) return this.regionMask(L.clip);
+    if (!stgOn && !fb && mix.length === 1) return this.regionMask(mix[0][0]);
     const lab = this.labels, owner = L._copyOf || L;  // the cache lives on the layer, its copies share it
     const sel = mix ? mix.map(m => m[0]).join("\u0001") : L.clip;
     let c = owner._stg;
@@ -1717,16 +1907,28 @@ class Director {
       const regs = (this.m.regions || []).filter(r => ids.has(r.id)).map(r => [r.id, r.bbox]);
       c = owner._stg = { sel, lab, PW: this.PW, rp, t, g, im, regs, out: mkCanvas(this.PW, this.PH) };
     }
-    const stg = (L.motion || []).filter(b => b.type === "stagger" && b.on !== false), key = `${this.tl.time}|${this.tl.duration}|${this.W}x${this.H}|${stable(stg)}|${mix ? stable(mix) : ""}`;
+    const fval = fb ? fieldValues(fb, this.tl.time, this.tl.duration, this.motionCtx()) : null;   // where its field move is now (and its trail)
+    const stg = (L.motion || []).filter(b => b.type === "stagger" && b.on !== false), key = `${this.tl.time}|${this.tl.duration}|${this.W}x${this.H}|${stable(stg)}|${mix ? stable(mix) : ""}|${fb ? stable(fb) + stable(fval) : ""}`;
     if (c.key === key) return c.out;                 // the same weights: this frame's mask is ready
     c.key = key;
     const w = (stg.length && staggerWeights(stg, this.tl.time, this.tl.duration, c.regs, this.W, this.H)) || {}, A = c.im.data;
     let mw = null;                                   // swap: every region at the weight of the masks it is in
     if (mix) { mw = {}; for (const [q, wt] of mix) for (const id of this.selectIds(q)) mw[id] = Math.min(1, (mw[id] || 0) + wt); }
     let X0 = Infinity, Y0 = Infinity, X1 = -1, Y1 = -1;
+    let F = null, fp = null, fwt = null, fe, fs, fw, fn;
+    if (fb) {                                        // the ramp once per selection and field, then this frame's values
+      const fk = stable([fb.field, fb.per, fb.angle, fb.cx, fb.cy, fb.order, fb.seed, fb.noise_px, !!fb.invert]);
+      if (c.fkey !== fk) { c.fkey = fk; c.F = fieldRamp(c.rp, lab.w, lab.h, fb, this.W / lab.w); }
+      F = c.F; fe = FIELD_EFFECTS.includes(fb.effect) ? fb.effect : "reveal";
+      const fv = fieldPruned(fval, fe); fp = fv.map(v => v[0]); fwt = fv.map(v => v[1]);
+      fs = Math.max(1e-6, mNum(fb, "soft", 0.05)); fw = Math.max(1e-6, mNum(fb, "width", 0.2)); fn = Math.max(1, Math.trunc(mNum(fb, "rings", 3)));
+    }
     for (const r of c.rp) {                          // only regions whose weight changed are rewritten
-      const v = (w[r.id] ?? 1) * (mw ? mw[r.id] ?? 0 : 1), a = Math.round(255 * v); if (a === r.a) continue;
-      r.a = a; for (const q of r.pos) A[q * 4 + 3] = a;
+      const v = (w[r.id] ?? 1) * (mw ? mw[r.id] ?? 0 : 1);
+      if (F) { r.a = -1;
+        if (v <= 0) for (const q of r.pos) A[q * 4 + 3] = 0;
+        else for (const q of r.pos) { let m = 0; for (let k = 0; k < fp.length; k++) { const x = fieldAlong(F[q], fp[k], fe, fs, fw, fn) * fwt[k]; if (x > m) m = x; } A[q * 4 + 3] = Math.round(255 * v * m); } }
+      else { const a = Math.round(255 * v); if (a === r.a) continue; r.a = a; for (const q of r.pos) A[q * 4 + 3] = a; }
       if (r.box[0] < X0) X0 = r.box[0]; if (r.box[1] < Y0) Y0 = r.box[1]; if (r.box[2] > X1) X1 = r.box[2]; if (r.box[3] > Y1) Y1 = r.box[3];
     }
     if (X1 >= 0) {                                   // upload the changed rectangle, rescale the mask
@@ -3087,7 +3289,7 @@ class Director {
     $("g-motion").addEventListener("change", e => { const q = L();
       if (e.target.dataset.id === "m-add") { const pr = M_PRESETS[+e.target.value]; if (!pr) return; this.snap();
         const b = { id: this.newId("m", q.motion || []), on: true, t_start: 0, t_end: -1, fade: 0, ...JSON.parse(JSON.stringify(pr[2])) };
-        if (b.path && b.type !== "loop" && b.type !== "stagger" && b.type !== "swap" && b.type !== "repeat" && !this.motionPaths(q).includes(b.path)) b.path = "";
+        if (b.path && b.type !== "loop" && b.type !== "stagger" && b.type !== "field" && b.type !== "swap" && b.type !== "repeat" && !this.motionPaths(q).includes(b.path)) b.path = "";
         if (!b.path) b.path = b.type === "loop" ? (this.loopPaths(q)[0] || "") : this.motionPaths(q).find(p => p !== "position" && p !== "scale") || this.motionPaths(q)[0];
         if (String(b.path).startsWith("fx.") && !q.fx) q.fx = { ...fxOf(q) };
         (q.motion = q.motion || []).push(b); this.renderInspector(); motionChanged(); return; }
@@ -3095,11 +3297,12 @@ class Director {
       if (e.target.dataset.mwith !== undefined) {    // swap masks: the layers that take part
         const id = e.target.dataset.mwith, w = (Array.isArray(b.with) ? b.with : []).filter(x => x !== id && this.layers.some(z => z.id === x));
         if (e.target.checked) w.push(id); b.with = w; this.renderInspector(); motionChanged(); return; }
-      if (k === "on" || k === "orient") b[k] = e.target.checked; else b[k] = e.target.value;
+      if (k === "on" || k === "orient" || k === "invert") b[k] = e.target.checked; else b[k] = e.target.value;
       if (k === "type") {                            // a valid path, mode and the type's defaults
         const T = b.type, pr = (M_PRESETS.find(x => x[2].type === T && !x[2].path) || M_PRESETS.find(x => x[2].type === T))[2];
         for (const [dk, dv] of Object.entries(pr)) if (b[dk] === undefined && dk !== "path") b[dk] = dv;
         if (T === "repeat") b.path = "copies";
+        else if (T === "field") { b.path = "regions"; delete b.mode; }
         else if (T === "stagger") { b.path = "regions"; if (!["sequence", "chase", "wave", "random"].includes(b.mode)) b.mode = "sequence"; }
         else if (T === "swap") { b.path = "masks"; delete b.mode; if (!SWAP_ORDERS.includes(b.order)) b.order = "loop"; if (!SWAP_TRIGGERS.includes(b.trigger)) b.trigger = "beats"; if (!Array.isArray(b.with)) b.with = []; }
         else if (T === "loop") { b.mode = ["cycle", "pingpong", "continue"].includes(b.mode) ? b.mode : "cycle"; b.path = this.loopPaths(q).includes(b.path) ? b.path : this.loopPaths(q)[0] || ""; }
@@ -3107,7 +3310,7 @@ class Director {
         if (String(b.path).startsWith("fx.") && !q.fx) q.fx = { ...fxOf(q) };
       }
       if (k === "path" && String(b.path).startsWith("fx.") && !q.fx) q.fx = { ...fxOf(q) };
-      if (k === "type" || k === "path" || k === "wave" || k === "trigger" || k === "mode" || k === "order" || k === "layout" || k === "band") this.renderInspector();
+      if (k === "type" || k === "path" || k === "wave" || k === "trigger" || k === "mode" || k === "order" || k === "layout" || k === "band" || k === "field" || k === "per" || k === "effect" || k === "curve") this.renderInspector();
       motionChanged(); });
     $("g-motion").addEventListener("click", e => { const d = e.target.closest("[data-mdel]"); if (!d) return; this.snap();
       const q = L(); q.motion.splice(+d.dataset.mdel, 1); if (!q.motion.length) delete q.motion; this.renderInspector(); motionChanged(); });

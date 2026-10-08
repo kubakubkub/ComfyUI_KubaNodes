@@ -6,6 +6,79 @@ may have changed since.
 
 ## Not released yet
 
+- **Masks that move.** New menu group **2d / masks** with two nodes. **kubakub mask field** turns regions (or any
+  mask) into a grey ramp: the distance from each region's edge, a direction, the distance from a point, one step per
+  region in an order, or noise; per region or over all of them together. **kubakub mask animate** makes one mask per
+  frame from it: a reveal, a band or rings along the field, or the mask itself moving, rotating, scaling or
+  flashing, with a fading trail if you like. How it runs is a curve: ramp, saw, triangle, sine, square, random,
+  noise, the level of a sound, or a ramp on every beat, bar or low / mid / high hit. The curve is drawn on the node
+  (buttons for the type, drag on it for the speed) and the node plays the result after a run. Chain two for two
+  moves at once. Nothing connected runs a sample. Example `mask_animate.json`, page [docs/masks.md](docs/masks.md).
+  No new packages.
+- **The same in the kubakub director.** New behaviour **field** for a layer clipped to regions: the clip appears
+  along a grey ramp, per pixel. Presets: wipe across, iris from the middle, outlines close in, region by region,
+  dissolve, running band, rings, band on beats, opens with the sound. The timeline draws its curve. Same engine as
+  the two nodes, so the preview is what renders.
+
+- **A sound from the graph in the kubakub director.** New `audio` input on the director: connect Load Audio and
+  it is the timeline's sound. After a run the window shows its waveform, tempo and beats; the sound behaviours
+  follow it and it goes out on `audio`. It replaces a sound picked in the window.
+- **render passes reads one multilayer EXR.** Paste the .exr (or its folder) into `folder` and the node shows a
+  button for every layer inside, with a guess of what it is (picture, depth, normal, mask). Click the layers you
+  want as masks. They land as lines in the new field `exr_layers`, which can also be typed, with wildcards
+  (`wall*`); where a guess is wrong write `picture = C`, `depth = Z_render`, `normal = N_world`, `mask = diffuse`
+  or `skip = name`. The report lists every layer of the file and what it was used as.
+- **export alpha is refused for a format without alpha** (director and director sequence), before anything
+  renders, with the formats that work: PNG sequences and ProRes 4444. It used to write the layers without the base.
+- **versions**: `keep` regions of the plan are the input image in a final, as the docs say, not the scaled-up
+  draft.
+
+Inputs and outputs, after a review of every node. Nothing was renamed or removed; new outputs are at the end and
+new inputs are optional, so saved workflows keep their links.
+
+Fixed:
+- **pieces falloff**: `start` and `speed` did nothing and stagger ignored `direction`. They work now, so a saved
+  workflow that had other values than start 0 / speed 5 / left to right moves differently.
+- **export video / frames**: an alpha of another size than the frames (the full-size projection mask on half-size
+  frames) was cut to the top-left corner; it is resized now, and a smaller one no longer crashes. The report says
+  when the chosen format cannot carry alpha (only PNG sequences and ProRes 4444 can).
+- **region video sampler (ltx)**: `only` understands the selectors of the region plan (`group:Windows`,
+  `tag:front`, `!x`), and the report says when it matches nothing. Before, `group:` silently rendered no clip.
+- **Empty field = sample** now also holds for mesh to relief field, mesh turntable rule check and load images
+  from dir.
+- **load images from dir** loads numbered files in number order (`frame_2` before `frame_10`). Folders with
+  names that are not zero padded load in another order than before.
+- **relief export prow**: a second wing made at another pixel size keeps its real size in mm.
+
+New outputs:
+- **regions to mask**: `region_masks`, one mask per selected region (switch on `per_region_masks`).
+- **region video sampler**: `fps`, `audio`, `mask`. **keyframe clips (h3)**: `fps`. **scene walkthrough**: `fps`,
+  `shadow`.
+- **export video / frames** and **director sequence**: `folder` and `files`. Director sequence also gives
+  `frame_count`, `projection_mask` and `document`, so keyframe clips can be fed from it alone.
+- **versions**: `save_path` and `names`. **frame in frame**: `regions`. **canvas plan**: `k`, `target_width`,
+  `target_height`. **project settings**: `facade_width_m`, `mm_per_px`. **retime**: `fps`, `seconds`.
+  **load images from dir**: `loaded_count`.
+- **Raw data instead of only a coloured picture**: scene measure `raw`, brightness compensation `gain`, scene
+  pieces `mask`, line overlay `mask`, and `height` on the relief nodes; mesh turntable rule check `flagged`.
+- **Reports**: regions from masks, regions from matrix / masks, regions from sketch (also `closed_lines`: where
+  gaps were bridged), scan to line (one line per photo). Regions from masks also gives its `scope`.
+
+New inputs:
+- **One audience spot**: connect `viewer` (from scene measure, audience viewpoint or project settings) to scene
+  preview, scene relight and pieces render instead of typing the spot again.
+- **mask** on colour match, apply lut and deflicker: the change happens only inside it.
+- **style** image on the region sampler, so `reference = style` in the plan works there too. **versions**: `only`
+  and `cfg`.
+- **scope** on regions from cryptomatte and regions from sketch; **matrix** on regions from sketch and on render
+  passes (a render of another size is fitted). Render passes reads **EXR** passes.
+- **boxes** on regions from sam3 takes the boxes of core SAM3 Detect directly.
+- **regions to svg / pdf / dxf**: `select` is the same selector as in regions to mask.
+- Scene preview and scene walkthrough run without a matrix (clay views); the region video sampler runs without a
+  still when a background video is connected; scene relight without an HDRI file uses the night environment;
+  pieces render has `exposure`; retime takes `fps`; mesh turntable rule check has `clearance_mm`.
+- Moved to the advanced inputs: steps, cfg, sampler and scheduler on seam pass; corner, spur and kerf on regions
+  to svg / pdf / dxf. Projector blend gives white instead of a small black mask for projectors that are not used.
 - **Layers trade their masks with the sound.** New behaviour **swap masks** in the kubakub director: several layers,
   each clipped to its own regions, swap places at every step, so each picture shows through the next layer's mask.
   The pictures stay where they are on the facade. A step on beats, bars, markers, a fixed time, or on a hit in the

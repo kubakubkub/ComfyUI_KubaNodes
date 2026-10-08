@@ -13,15 +13,23 @@ class TimecodeFilenamePrefix:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "base_prefix": ("STRING", {"default": "clip", "multiline": False}),
-                "seconds": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 86400.0, "step": 0.001}),
-                "fps": ("FLOAT", {"default": 25.0, "min": 1.0, "max": 240.0, "step": 0.001}),
-                "separator": ("STRING", {"default": "_", "multiline": False}),
+                "base_prefix": ("STRING", {"default": "clip", "multiline": False,
+                                           "tooltip": "The start of the file name; the timecode is added after it."}),
+                "seconds": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 86400.0, "step": 0.001,
+                                      "tooltip": "Where the clip starts in the song or show, in seconds."}),
+                "fps": ("FLOAT", {"default": 25.0, "min": 1.0, "max": 240.0, "step": 0.001,
+                                  "tooltip": "Frames per second of the clip; the last part of the timecode counts "
+                                             "frames at this rate."}),
+                "separator": ("STRING", {"default": "_", "multiline": False,
+                                         "tooltip": "The text between the name and the timecode."}),
             }
         }
 
     RETURN_TYPES = ("STRING", "STRING", "INT")
     RETURN_NAMES = ("filename_prefix", "timecode", "frame")
+    OUTPUT_TOOLTIPS = ("The name with the timecode, e.g. clip_00-12-00; link it into a save node's filename_prefix.",
+                       "The start as minutes-seconds-frames, e.g. 00-12-00 (sorts by time in a folder).",
+                       "The start as a frame number: seconds x fps, rounded.")
     FUNCTION = "build"
     CATEGORY = "kubakub/utils"
 

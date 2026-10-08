@@ -48,6 +48,9 @@ class KUBA_Project(io.ComfyNode):
                 io.String.Output("name", tooltip="The project name, safe for folders and files."),
                 ViewerType.Output("viewer", tooltip="The audience viewpoint (same as kubakub audience viewpoint)."),
                 io.String.Output("report", tooltip="Size, fps, millimetres per pixel and the audience position."),
+                io.Float.Output("facade_width_m", tooltip="Real width of the whole matrix on the building, in metres."),
+                io.Float.Output("mm_per_px", tooltip="Millimetres of facade one matrix pixel covers: the facade "
+                                                     "width in mm / the matrix width in px."),
             ],
         )
 
@@ -56,7 +59,8 @@ class KUBA_Project(io.ComfyNode):
                 distance_m, matrix=None) -> io.NodeOutput:
         p = pj.build(name, preset, width, height, fps, facade_width_m, bottom_m, viewer_x_m, eye_height_m, distance_m,
                      None if matrix is None else tuple(matrix.shape))
-        return io.NodeOutput(p["width"], p["height"], p["fps"], p["name"], p["viewer"], p["report"])
+        return io.NodeOutput(p["width"], p["height"], p["fps"], p["name"], p["viewer"], p["report"],
+                             float(facade_width_m), float(facade_width_m) * 1000.0 / p["width"])
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_Project": KUBA_Project}

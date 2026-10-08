@@ -61,16 +61,30 @@ class TrimToExactDuration:
                 "duration_seconds": ("FLOAT", {
                     "default": 9.96, "min": 0.001, "max": 1.0e9, "step": 0.001,
                     "tooltip": "Constant clip length. Output sample count is fixed by this."}),
-                "wrap_start": ("BOOLEAN", {"default": True}),
-                "overrun_mode": (["loop", "silence_pad", "clamp"], {"default": "loop"}),
+                "wrap_start": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "On: a start past the end of the track wraps around to its beginning "
+                               "(start modulo the track length). Off: the start is used as it is."}),
+                "overrun_mode": (["loop", "silence_pad", "clamp"], {
+                    "default": "loop",
+                    "tooltip": "When the clip runs past the end of the track: loop = continue from the "
+                               "track start (no silence), silence_pad = fill the rest with silence, "
+                               "clamp = move the clip back so it ends at the end of the track."}),
             },
             "optional": {
-                "snap_samples_to": ("INT", {"default": 0, "min": 0, "max": 1 << 20, "step": 1}),
+                "snap_samples_to": ("INT", {
+                    "default": 0, "min": 0, "max": 1 << 20, "step": 1,
+                    "tooltip": "0 = off. Rounds the length up to a multiple of this many samples (the "
+                               "audio VAE's sample stride); only for a one-frame drift between sound and "
+                               "picture."}),
             },
         }
 
     RETURN_TYPES = ("AUDIO", "FLOAT", "INT")
     RETURN_NAMES = ("audio", "actual_start_seconds", "num_samples")
+    OUTPUT_TOOLTIPS = ("The clip, always the same number of samples for the same duration.",
+                       "Where the clip really starts in the track, in seconds (after wrap / clamp).",
+                       "Length of the clip in samples.")
     FUNCTION = "trim"
     CATEGORY = "kubakub/2d/motion"
 

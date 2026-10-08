@@ -152,9 +152,10 @@ class KUBA_SceneRender(io.ComfyNode):
                 io.Int.Input("frame", default=-1, min=-1, max=100000,
                              tooltip="Scene frame (animated cameras, Alembic); -1 = the file's current frame."),
                 io.String.Input("passes", default=DEFAULT_PASSES,
-                                tooltip="ID passes to write: shelves layers facing planes parts objects "
-                                        "materials collections (objects / materials / collections only when "
-                                        "the file has more than one)."),
+                                tooltip="ID passes to write, separated by spaces: " + " ".join(scene_ids.PASSES)
+                                        + " (objects / materials / collections only when the file has more than "
+                                          "one). elements = windows, columns, cornices; sections = left / centre / "
+                                          "right; floors = the storeys."),
                 io.Combo.Input("preview_pass", options=list(scene_ids.PASSES), default="shelves",
                                tooltip="Which ID pass to show on ids_preview (it is also written when 'passes' "
                                        "does not list it)."),
@@ -399,7 +400,11 @@ class KUBA_ProjectorBlend(io.ComfyNode):
             ],
             outputs=[
                 io.Mask.Output("mask_1", tooltip="Blend mask of projector 1 (its picture size): 1 = full, less in overlaps."),
-                io.Mask.Output("mask_2"), io.Mask.Output("mask_3"), io.Mask.Output("mask_4"),
+                io.Mask.Output("mask_2", tooltip="Blend mask of projector 2 (its picture size)."),
+                io.Mask.Output("mask_3", tooltip="Blend mask of projector 3. Nothing connected to scene_3: all "
+                                                 "white (1) at the size of projector 1, so multiplying changes nothing."),
+                io.Mask.Output("mask_4", tooltip="Blend mask of projector 4. Nothing connected to scene_4: all "
+                                                 "white (1) at the size of projector 1."),
                 io.Image.Output("preview", tooltip="One picture per projector, at the size of the first: the clay with "
                                                    "what it lights alone and what it shares (orange)."),
                 io.String.Output("report", tooltip="Per projector: how much of the model it lights alone and shares."),
@@ -437,7 +442,7 @@ class KUBA_ProjectorBlend(io.ComfyNode):
                          f"{c['shared'] * 100 // max(c['model'], 1)} % shared" + (f" ({with_whom})" if with_whom else ""))
         if not any(r["counts"]["shared"] for r in res):
             lines.append("NOTE: the pictures do not overlap on the model: nothing to blend (every mask is 1).")
-        empty = torch.zeros((1, 64, 64), dtype=torch.float32)
+        empty = torch.ones((1, H0, W0), dtype=torch.float32)       # no projector there: a mask that changes nothing
         masks += [empty] * (4 - len(masks))
         lines.append(f"ramp {ramp:g} of the short side, gamma {gamma:g}, {time.perf_counter() - t0:.1f} s")
         report = "\n".join(lines)
@@ -459,6 +464,18 @@ def _load_scene(scene):
     s = scene_ids.load(scene["folder"])
     pt, nrm, ground = sv.main_plane_and_ground(s)
     return s, pt, nrm, ground
+
+
+def viewer_spot(viewer):
+    """A KUBA_VIEWER as an audience spot of the scene nodes: (x along the wall from the frame centre, distance from
+    the wall, eye height above the ground), metres. The viewer counts x from the left edge of its facade."""
+    x = 0.0 if viewer.x_m is None else float(viewer.x_m) - float(viewer.facade_width_m) / 2.0
+    return x, float(viewer.distance_m), float(viewer.eye_m)
+
+
+DEFAULT_SPOTS = "0, 20, 1.7\n-15, 12, 1.7\n12, 8, 1.7"
+DEFAULT_PATH = "-15, 25, 1.7\n0, 15, 1.7\n15, 10, 1.7"
+VIEWER_TIP = "The audience spot of kubakub scene measure / audience viewpoint / project settings, one spot for all nodes. "
 
 
 class KUBA_SceneMeasure(io.ComfyNode):
@@ -495,13 +512,18 @@ class KUBA_SceneMeasure(io.ComfyNode):
                                        "(stretched, dim projection)."),
             ],
             outputs=[
-                RegionsType.Output("regions", tooltip="The regions with a 'scene' entry each (+ grazing tag)."),
+                RegionsType.Output("regions", tooltip="The regions with a 'scene' entry each (+ grazing tag). "
+                                                      "Without regions connected to this node the output is empty: "
+                                                      "leave it unconnected then."),
                 ViewerType.Output("viewer", tooltip="Facade width / bottom from the projector frame on the wall, "
                                                     "viewer at the audience spot."),
                 io.Image.Output("map", tooltip="The chosen measurement as a colour map of the projection view."),
                 io.String.Output("table", tooltip="Per region: distance, offset, incidence, mm per px, "
                                                   "brightness, area, viewer distance (tab separated)."),
                 io.String.Output("report", tooltip="Projector frame on the wall, median measurements, the viewer and the map's colour range."),
+                io.Mask.Output("raw", tooltip="The chosen measurement as a grey mask, not colourised: 0 = the lowest "
+                                              "value of the colour range, 1 = the highest, 0 outside the building. "
+                                              "The report says which values (metres, degrees, mm ...) 0 and 1 stand for."),
             ],
         )
 
@@ -520,6 +542,7 @@ class KUBA_SceneMeasure(io.ComfyNode):
                            viewer_distance_m)
         key, inv, label = MAPS[map]
         rgb, lo, hi = sv.colorize(maps[key], fg, invert=inv)
+        raw = (np.clip((maps[key] - lo) / max(hi - lo, 1e-9), 0, 1) * fg).astype(np.float32)   # not inverted: 1 = the highest
 
         out_regions, table = regions, ""
         if regions is not None:
@@ -551,7 +574,7 @@ class KUBA_SceneMeasure(io.ComfyNode):
             table = "\n".join(rows)
             region_line = f"{len(stats)} regions measured, {n_graz} tagged grazing (> {grazing_deg:g} deg)"
         else:
-            region_line = "no regions connected"
+            region_line = "no regions connected: the regions output is empty"
         med = {k: float(np.median(v[fg])) for k, v in maps.items()} if fg.any() else {}
         report = "\n".join([
             f"projector frame on the wall: {fr['width_m']:.2f} x {fr['height_m']:.2f} m, bottom edge "
@@ -560,11 +583,12 @@ class KUBA_SceneMeasure(io.ComfyNode):
             f"{med.get('pixel_mm', 0):.1f} mm per matrix pixel, brightness {med.get('brightness', 0):.2f}",
             f"viewer: {viewer_distance_m:g} m from the wall, {viewer_x_m:+g} m from the frame centre, eye "
             f"{eye_height_m:g} m -> viewer: facade {fr['width_m']:.2f} m wide, bottom {fr['bottom_m']:.2f} m",
-            f"map '{map}': {label}, colours {lo:.3g} .. {hi:.3g}",
+            f"map '{map}': {label}, colours {lo:.3g} .. {hi:.3g}; raw mask: 0 = {lo:.3g}, 1 = {hi:.3g}",
             region_line, f"{time.perf_counter() - t0:.1f} s"])
         log.info("[KUBA scene3d] measure: %s", report.replace("\n", "\n    "))
         img = _img(rgb)
-        return io.NodeOutput(out_regions, viewer, img, table, report, ui=ui.PreviewImage(img, cls=cls))
+        return io.NodeOutput(out_regions, viewer, img, table, report, torch.from_numpy(raw)[None],
+                             ui=ui.PreviewImage(img, cls=cls))
 
 
 class KUBA_ScenePreview(io.ComfyNode):
@@ -582,8 +606,10 @@ class KUBA_ScenePreview(io.ComfyNode):
                 "video frames are cheap. One Blender render per spot (cached)."),
             inputs=[
                 SceneType.Input("scene", tooltip="From kubakub scene render."),
-                io.Image.Input("matrix", tooltip="Matrix image or frames (resized to the projection view if needed)."),
-                io.String.Input("spots", multiline=True, default="0, 20, 1.7\n-15, 12, 1.7\n12, 8, 1.7",
+                io.Image.Input("matrix", optional=True,
+                               tooltip="Matrix image or frames (resized to the projection view if needed). Nothing "
+                                       "connected: the clay views alone, without a picture."),
+                io.String.Input("spots", multiline=True, default=DEFAULT_SPOTS,
                                 tooltip="One audience spot per line: x along the wall from the frame centre, "
                                         "distance from the wall, eye height (m)."),
                 io.Float.Input("lens_mm", default=20.0, min=6.0, max=300.0, step=1.0,
@@ -607,6 +633,8 @@ class KUBA_ScenePreview(io.ComfyNode):
                 io.Combo.Input("shader", options=list(sv.SHADERS), default="clay", optional=True,
                                tooltip="How the model is drawn where no picture lands: clay, wireframe (its edges as "
                                        "lines in the clay colour, not dimmed by ambient) or clay with the edges on it."),
+                ViewerType.Input("viewer", optional=True,
+                                 tooltip=VIEWER_TIP + "Connected: it replaces the typed 'spots' (one view from there)."),
             ],
             outputs=[
                 io.Image.Output("preview", tooltip="Per spot all frames (spot-major batch)."),
@@ -619,25 +647,23 @@ class KUBA_ScenePreview(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, scene, matrix, spots, lens_mm, width, height, ambient, gain, physical,
-                background=None, clay_color=sv.CLAY_COLOR, shader="clay") -> io.NodeOutput:
+    def execute(cls, scene, matrix=None, spots=DEFAULT_SPOTS, lens_mm=20.0, width=1280, height=720, ambient=0.15,
+                gain=1.0, physical=1.0, background=None, clay_color=sv.CLAY_COLOR, shader="clay",
+                viewer=None) -> io.NodeOutput:
         t0 = time.perf_counter()
         s, pt, nrm, ground = _load_scene(scene)
         info = s["info"]
         fr = sv.wall_frame(info, pt, nrm, ground)
         H, W = int(info["height"]), int(info["width"])
-        frames = matrix[..., :3].cpu().float().numpy()
-        if frames.shape[1:3] != (H, W):
-            frames = np.stack([cv2.resize(f, (W, H), interpolation=cv2.INTER_AREA) for f in frames])
-            resized = f"matrix {matrix.shape[2]}x{matrix.shape[1]} resized to the projection view {W}x{H}"
-        else:
-            resized = ""
+        frames, resized = _frames_at(matrix, W, H)
+        if matrix is None:                                 # no picture: the clay as it is, not dimmed to 'ambient'
+            ambient = 1.0
         bgs = None
         if background is not None:
             bgs = [sv.fit_background(b, width, height) for b in background[..., :3].cpu().float().numpy()]
         root = cache_root()
         previews, shadows, views, lines, viewpoints = [], [], [], [], []
-        for i, (x, d, eye) in enumerate(sv.parse_spots(spots)):
+        for i, (x, d, eye) in enumerate([viewer_spot(viewer)] if viewer is not None else sv.parse_spots(spots)):
             loc = sv.spot_position(fr, x, d, eye)
             view = {"location": [round(float(v), 4) for v in loc], "look_at": [round(float(v), 4) for v in fr["centre"]],
                     "lens": float(lens_mm), "name": f"spot_{i + 1}"}
@@ -660,6 +686,7 @@ class KUBA_ScenePreview(io.ComfyNode):
         _after_render()
         report = "\n".join([f"{len(lines)} spot(s) x {len(frames)} frame(s), {time.perf_counter() - t0:.1f} s",
                             *lines, *([resized] if resized else []),
+                            *(["spot from the connected viewer ('spots' not used)"] if viewer is not None else []),
                             *(["with surroundings"] if scene.get("surroundings") else [])])
         log.info("[KUBA scene3d] preview: %s", report.replace("\n", "\n    "))
         out = torch.from_numpy(np.stack(previews))
@@ -668,7 +695,10 @@ class KUBA_ScenePreview(io.ComfyNode):
 
 
 def _frames_at(matrix, W, H):
-    """Matrix batch as numpy frames at the projection view size (+ a note if resized)."""
+    """Matrix batch as numpy frames at the projection view size (+ a note if resized). No matrix: one black frame
+    (nothing is projected) and a note saying so."""
+    if matrix is None:
+        return np.zeros((1, H, W, 3), np.float32), "no matrix connected: the clay views without a picture"
     frames = matrix[..., :3].cpu().float().numpy()
     if frames.shape[1:3] != (H, W):
         frames = np.stack([cv2.resize(f, (W, H), interpolation=cv2.INTER_AREA) for f in frames])
@@ -692,15 +722,19 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
                 "views (25 per Blender job)."),
             inputs=[
                 SceneType.Input("scene", tooltip="From kubakub scene render."),
-                io.Image.Input("matrix", tooltip="Matrix image or frames."),
-                io.String.Input("path", multiline=True, default="-15, 25, 1.7\n0, 15, 1.7\n15, 10, 1.7",
+                io.Image.Input("matrix", optional=True,
+                               tooltip="Matrix image or frames. Nothing connected: the walk past the clay model, "
+                                       "without a picture."),
+                io.String.Input("path", multiline=True, default=DEFAULT_PATH,
                                 tooltip="Keyframes, one per line: x along the wall from the frame centre, distance "
                                         "from the wall, eye height[, look x, look height] (m). Spread evenly over "
                                         "the walk, smooth spline between them. No look = the frame centre."),
                 io.Float.Input("seconds", default=8.0, min=0.1, max=600.0, step=0.5,
                                tooltip="Length of the walk in seconds (frames = seconds x fps)."),
                 io.Int.Input("fps", default=25, min=1, max=120,
-                             tooltip="Frames per second of the video."),
+                             tooltip="Frames per second of the video. A whole number typed here: the decimal fps "
+                                     "output of other nodes does not connect to it. The 'fps' output of this node "
+                                     "passes it on (-> Create Video)."),
                 io.Float.Input("lens_mm", default=24.0, min=6.0, max=300.0, step=1.0,
                                tooltip="Walking camera lens (36 mm sensor); 20 = wide, 35 = natural."),
                 io.Int.Input("width", default=960, min=64, max=8192, step=16,
@@ -727,18 +761,24 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
             outputs=[
                 io.Image.Output("frames", tooltip="The walk as video frames (-> Create Video / Save Video)."),
                 io.String.Output("report", tooltip="Frame count, time, views rendered new or from the cache, and the projection shadow share."),
+                io.Float.Output("fps", tooltip="The frames per second of this walk (-> Create Video, fps)."),
+                io.Mask.Output("shadow", tooltip="Per frame: 1 where the audience sees the building but the "
+                                                 "projector does not reach it (as on kubakub scene preview)."),
             ],
         )
 
     @classmethod
-    def execute(cls, scene, matrix, path, seconds, fps, lens_mm, width, height, ambient, gain, physical,
-                background=None, clay_color=sv.CLAY_COLOR, shader="clay") -> io.NodeOutput:
+    def execute(cls, scene, matrix=None, path=DEFAULT_PATH, seconds=8.0, fps=25, lens_mm=24.0, width=960, height=540,
+                ambient=0.15, gain=1.0, physical=1.0, background=None, clay_color=sv.CLAY_COLOR,
+                shader="clay") -> io.NodeOutput:
         import comfy.utils
         t0 = time.perf_counter()
         s, pt, nrm, ground = _load_scene(scene)
         info = s["info"]
         fr = sv.wall_frame(info, pt, nrm, ground)
         frames, resized = _frames_at(matrix, int(info["width"]), int(info["height"]))
+        if matrix is None:                                 # no picture: the clay as it is, not dimmed to 'ambient'
+            ambient = 1.0
         n = max(1, int(round(seconds * fps)))
         cams = sv.camera_path(fr, sv.parse_path(path), n)
         bgs = None
@@ -748,7 +788,7 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
         walk = os.path.join(root, "walk")                   # one folder per camera: a changed path renders only new views
         opts = dict(bridge.scene_opts(scene), width=width, height=height)
         pbar = comfy.utils.ProgressBar(n)
-        out, shadow_share, chunk, rendered = [], [], 25, 0
+        out, shadows, shadow_share, chunk, rendered = [], [], [], 25, 0
         for c0 in range(0, n, chunk):
             views = [{"location": [round(float(v), 4) for v in loc], "look_at": [round(float(v), 4) for v in look],
                       "lens": float(lens_mm)} for loc, look in cams[c0:c0 + chunk]]
@@ -779,6 +819,7 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
                 i = c0 + k
                 out.append(sv.render_preview(frames[i % len(frames)], rp, clay, ambient=1.0 if full else ambient, gain=gain,
                                              physical=physical, background=None if bgs is None else bgs[i % len(bgs)]))
+                shadows.append(np.asarray(rp["shadow"], bool))
                 shadow_share.append(rp["shadow"].sum() / max(int(rp["building"].sum()), 1))
                 pbar.update(1)
         if rendered:
@@ -789,10 +830,11 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
             f"{n - rendered} from the cache",
             f"path: {len(sv.parse_path(path))} keys; projection shadow {min(shadow_share) * 100:.1f} - "
             f"{max(shadow_share) * 100:.1f} % of the visible building",
-            f"matrix: {len(frames)} frame(s){' (looping)' if len(frames) < n else ''}; background: "
-            + ("none" if bgs is None else f"{len(bgs)} frame(s)"), *([resized] if resized else [])])
+            ("matrix: none" if matrix is None else f"matrix: {len(frames)} frame(s){' (looping)' if len(frames) < n else ''}")
+            + "; background: " + ("none" if bgs is None else f"{len(bgs)} frame(s)"), *([resized] if resized else [])])
         log.info("[KUBA scene3d] walkthrough: %s", report.replace("\n", "\n    "))
-        return io.NodeOutput(torch.from_numpy(np.stack(out)), report)
+        return io.NodeOutput(torch.from_numpy(np.stack(out)), report, float(fps),
+                             torch.from_numpy(np.array(shadows, np.float32)))
 
 
 DEFAULT_LIGHTS = """// type  x  height  distance  watts  #colour  size / angle   (metres from the frame centre, the ground, the wall)
@@ -845,9 +887,12 @@ class KUBA_SceneRelight(io.ComfyNode):
                                 tooltip="One colour per mask, comma separated (the last one repeats)."),
                 io.Float.Input("emission_strength", advanced=True, default=20.0, min=0.0, max=10000.0, step=1.0, optional=True,
                                tooltip="Emission strength of the glowing faces."),
-                io.String.Input("hdri_file", advanced=True, default="", optional=True, tooltip="An .hdr / .exr for environment = file."),
+                io.String.Input("hdri_file", advanced=True, default="", optional=True,
+                                tooltip="An .hdr / .exr for environment = file. Empty: the built-in night environment "
+                                        "is used instead and the report says so."),
                 io.Image.Input("projector", display_name="matrix", optional=True,
-                               tooltip="Your projection picture (the matrix, as on scene preview): it is cast from the "
+                               tooltip="Only the first frame of a batch is used. "
+                                       "Your projection picture (the matrix, as on scene preview): it is cast from the "
                                        "projection camera like a real projector, with falloff, surface angle and the "
                                        "shadows other lamps would not show. With camera = audience you see the "
                                        "building with your picture on it, in its street, under your lamps."),
@@ -891,6 +936,10 @@ class KUBA_SceneRelight(io.ComfyNode):
                                tooltip="camera = audience: turns the camera away from the middle of the facade, in "
                                        "degrees (+ = to the right). On the plan: drag the small dot in front of the "
                                        "ring."),
+                ViewerType.Input("viewer", optional=True,
+                                 tooltip=VIEWER_TIP + "With camera = audience it replaces audience_distance_m, "
+                                         "audience_offset_m and eye_height_m of this node (dragging the ring on the "
+                                         "plan then does not move the camera)."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The relit clay from the projection camera, or from the audience."),
@@ -913,7 +962,17 @@ class KUBA_SceneRelight(io.ComfyNode):
                 background, resolution_scale, emission_masks=None, emission_colors="#ffb060", emission_strength=20.0,
                 hdri_file="", projector=None, projector_brightness=1.0, projector_mode="light", view="Neutral",
                 clay_color=sv.RELIGHT_CLAY_COLOR, camera="projector", audience_distance_m=30.0, audience_offset_m=0.0,
-                eye_height_m=1.7, lens_mm=24.0, plan_width_m=0.0, previz_spot=1, audience_turn_deg=0.0) -> io.NodeOutput:
+                eye_height_m=1.7, lens_mm=24.0, plan_width_m=0.0, previz_spot=1, audience_turn_deg=0.0,
+                viewer=None) -> io.NodeOutput:
+        notes = []
+        if environment == "file" and not bridge.clean_path(hdri_file):     # nothing pasted yet: the node still runs
+            environment = "night"
+            notes.append("environment = file, but hdri_file is empty: the built-in night environment is used instead "
+                         "(paste the path of an .hdr / .exr into hdri_file).")
+        if viewer is not None and camera == "audience":       # one audience spot for all nodes
+            audience_offset_m, audience_distance_m, eye_height_m = viewer_spot(viewer)
+            notes.append(f"audience camera from the connected viewer: {audience_distance_m:g} m from the wall, "
+                         f"{audience_offset_m:+g} m along it, eyes {eye_height_m:g} m")
         rig = {"view": view, "clay_color": clay_color, "projector": {"on": projector is not None, "brightness": projector_brightness,
                                            "mode": projector_mode},"environment": environment, "env_strength": env_strength, "env_rotation": env_rotation_deg,
                "exposure": exposure, "clay": clay, "roughness": roughness, "samples": samples, "background": background,
@@ -942,6 +1001,7 @@ class KUBA_SceneRelight(io.ComfyNode):
                                  "output to this node's scene")
             look_from = dict(spots[min(int(previz_spot), len(spots)) - 1])
         rgb, alpha, report = relight_scene(scene, rig, emission=emission, projector=pimg, look_from=look_from)
+        report = "\n".join([report, *notes])
         top = rgb.max(-1)
         white = (top > 0.98) & (alpha > 0.5)
         burnt = float(white.mean())                           # share of the whole picture that is clipped

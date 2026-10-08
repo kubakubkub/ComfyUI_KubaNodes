@@ -77,6 +77,9 @@ class KUBA_RegionsFromCryptomatte(io.ComfyNode):
                                  tooltip="On: small objects join the neighbour with the longest border. Off: dropped."),
                 io.Image.Input("matrix", optional=True,
                                tooltip="Your matrix: its size is used (the render is resized) and it is the preview background."),
+                io.Mask.Input("scope", optional=True,
+                              tooltip="Pixels outside this mask are never part of a region (the size of the "
+                                      "matrix, or of the render without one)."),
             ],
             outputs=[
                 RegionsType.Output("regions", tooltip="Label map + region table for the kubakub region nodes."),
@@ -90,7 +93,7 @@ class KUBA_RegionsFromCryptomatte(io.ComfyNode):
 
     @classmethod
     def fingerprint_inputs(cls, file, **kw):
-        p = (file or "").strip().strip('"')
+        p = fc.clean_folder_path(file)
         try:
             return f"{p}|{os.path.getmtime(p)}"
         except OSError:
@@ -98,9 +101,9 @@ class KUBA_RegionsFromCryptomatte(io.ComfyNode):
 
     @classmethod
     def execute(cls, file, layer, tag_layers, exclude, min_region_area, merge_small_regions,
-                matrix=None) -> io.NodeOutput:
+                matrix=None, scope=None) -> io.NodeOutput:
         t0 = time.perf_counter()
-        path = (file or "").strip().strip('"')
+        path = fc.clean_folder_path(file)                 # quotes of Explorer's 'Copy as path', ~ and %VARS%
         sample = not path
         if sample:
             path = samples.cryptomatte(folder_paths.get_temp_directory())
@@ -133,12 +136,19 @@ class KUBA_RegionsFromCryptomatte(io.ComfyNode):
                 render = cv2.resize(render, (mw, mh), interpolation=cv2.INTER_LINEAR)
                 notes.append(f"render {W}x{H} resized to the matrix {mw}x{mh}")
                 H, W = mh, mw
+        sc = None
+        if scope is not None:
+            sc = (scope[0] if scope.ndim == 3 else scope).cpu().numpy() > 0.5
+            if sc.shape != (H, W):
+                raise ValueError(f"scope mask is {sc.shape[1]}x{sc.shape[0]}, the regions {W}x{H}; they must match "
+                                 "exactly (connect the same matrix to this node and to the node that made the scope).")
+            notes.append(f"scope: regions only on {sc.mean() * 100:.0f} % of the picture")
         meta = [{"name": n, "group": fc.group_name_from_stem(n), "source": f"cryptomatte {main}",
                  **({"tags": t} if t else {})} for n, t in zip(names, tags)]
-        labels, atlas, _sc = fc._finish_atlas(labels, meta, notes, [], None, "mask_folder", int(min_region_area),
-                                              bool(merge_small_regions), with_scope=True)
+        labels, atlas, sc = fc._finish_atlas(labels, meta, notes, [], sc, "mask_folder", int(min_region_area),
+                                             bool(merge_small_regions), with_scope=True)
         atlas["mode"] = "cryptomatte"
-        regions = Regions.from_numpy(labels, atlas, None)
+        regions = Regions.from_numpy(labels, atlas, sc)
         bg = matrix[0, ..., :3].cpu().float().numpy() if matrix is not None else render
         preview = torch.from_numpy(fc.render_preview(bg, labels, atlas))[None]
         report = (f"{os.path.basename(path)} ({data['compression']}): layers {', '.join(lays)}; regions from {main}: "

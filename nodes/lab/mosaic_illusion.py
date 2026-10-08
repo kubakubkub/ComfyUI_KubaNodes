@@ -267,7 +267,10 @@ class MosaicIllusion:
                     "tooltip": "adaptive only. Smallest tile in pixels; a tile "
                                "is not split below this."}),
                 "detail": ("FLOAT", {"default": 0.06, "min": 0.005, "max": 0.5,
-                    "step": 0.005, "tooltip": "Lower splits more."}),
+                    "step": 0.005,
+                    "tooltip": "adaptive only. How much the motif must change "
+                               "inside a tile before it is split. Lower splits "
+                               "more."}),
                 "max_depth": ("INT", {"default": 3, "min": 0, "max": 6,
                     "tooltip": "adaptive only. How many times a tile may be "
                                "halved (3 = down to 1/8 of tile_px)."}),

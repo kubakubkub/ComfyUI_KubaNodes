@@ -97,7 +97,9 @@ the border of its own picture over `ramp` (a share of the picture's short side),
 light; `gamma` (2.2) turns that into pixel values. A surface only one projector reaches (the side of a window
 reveal) keeps that projector's full picture. Outputs: one mask per projector in its own picture size (multiply
 your frames with it, or load it as the blend mask in the media server), a preview per projector (orange = shared)
-and a report with the shares. The regions, plan and sampler run once per projector, on its own scene render.
+and a report with the shares. With only 2 or 3 projectors the masks of the missing ones (`mask_3`, `mask_4`) are
+all white at the size of projector 1, so multiplying with them changes nothing. The regions, plan and sampler run
+once per projector, on its own scene render.
 Example: `example_workflows/projector_blend.json`.
 
 ## kubakub sample model
@@ -128,6 +130,15 @@ spot (`viewer_x_m` from the frame centre, `viewer_distance_m`, `eye_height_m`) f
 Compose. The uniform-scale viewer model is exact for a projector aimed square at the facade (lens shift,
 no tilt), as in a festival template.
 
+| output | |
+|---|---|
+| regions | the regions with their measurements. Empty when no regions are connected to the node: leave it unconnected then |
+| viewer | the audience spot; connect it to `viewer` of scene preview, scene relight and pieces render to use the same spot everywhere |
+| map | the chosen measurement in colours |
+| table | the measurements per region, tab separated |
+| report | frame on the wall, medians, the viewer, the colour range and what 0 and 1 of `raw` stand for |
+| raw | the chosen measurement as a grey mask, not colourised: 0 = the lowest value of the colour range, 1 = the highest (distance: white = far), 0 outside the building |
+
 The test facade (file camera at ground level, 33 m from the wall): frame 33.35 x 22.51 m, ~11 mm per matrix pixel,
 incidence 3-83 deg; sills and ledge tops get ~40 % of the wall's brightness; 1048 regions in 6 s.
 
@@ -142,6 +153,11 @@ surfaces like a real projector. The lookup is computed once per spot, so frames 
 Output batch: per spot all frames. 3200x2160 test facade: ~3 s per new spot; from 12-15 m to the side about 10-16 % of
 the visible building is in projection shadow. Optional `background` (image or frames, looping) fills
 everything behind the building, scaled to cover the view.
+
+| input | |
+|---|---|
+| matrix (optional) | the picture or frames to project. Nothing connected: the clay views alone, at full brightness, without a picture |
+| viewer (optional) | the audience spot of scene measure / audience viewpoint / project settings. Connected: it replaces the typed `spots` (one view from there) |
 
 `clay_color` (a colour picker, almost white by default) is the colour of the model and its surroundings where no
 picture lands. `shader` draws them as `clay`, as `wireframe` (the edges as lines in the clay colour on black, not
@@ -160,6 +176,17 @@ Video -> Save Video. Blender renders 25 camera positions per session (then the c
 temp). The 3200x2160 test facade at 960x540: 0.64 s per frame (150 frames in 96 s). Note: a loader that outputs a *list*
 (Load Images From Dir With Names) needs core Rebatch Images before the matrix input, otherwise ComfyUI
 runs the walkthrough once per image.
+
+| input / output | |
+|---|---|
+| matrix (input, optional) | the picture or frames to project. Nothing connected: the walk past the clay model, without a picture |
+| fps (input) | frames per second, a whole number typed on the node; the decimal fps output of other nodes does not connect to it |
+| frames | the walk as video frames |
+| report | frame count, time, views rendered or from the cache, the projection shadow share |
+| fps (output) | the frames per second of the walk as a decimal number, for Create Video |
+| shadow | per frame a mask: 1 where the audience sees the building but the projector does not reach it |
+
+A walk has many spots, so this node has no `viewer` input.
 
 ## kubakub scene relight: lamps, HDRI, the lit place
 
@@ -198,6 +225,12 @@ from the middle, height above the ground, distance from the wall towards the aud
 - **Too bright?** `projector_brightness` 1 lands the picture at about its own brightness, as in the previz;
   lamps add to it. Lower `exposure`, the lamps' watts or `env_strength`; the report says when a large part is
   burnt out to white. A projection only shows where the lamps leave the wall dark.
+- **`matrix`** takes one picture: of a batch only the first frame is used (for moving pictures use the director
+  or pieces render).
+- **`environment = file`** with an empty `hdri_file`: the built-in night environment is used and the report says so.
+- **`viewer`** (optional): the audience spot of scene measure / audience viewpoint / project settings. With
+  `camera = audience` it replaces `audience_distance_m`, `audience_offset_m` and `eye_height_m` of this node;
+  dragging the ring on the plan then does not move the camera.
 - **`plan`** (output): the light plan from above, the audience at the bottom. Every lamp in its colour with its
   number (its line in `lights`) and height, a spot with its aim, a sun as an arrow from where it shines; the model
   in orange, the projector as a dot, the audience camera as a ring, the surroundings in grey. Change a lamp's x or
@@ -261,7 +294,9 @@ reads equally bright everywhere. Works in linear light, 3200x2160 x 25 frames in
 - Side faces of mouldings hit at a grazing angle (`grazing_deg`, 60) are dim by nature and don't set the level;
   otherwise they would darken the whole building.
 
-The `gain_map` output shows what changes. Example: the last group in `example_workflows/scene3d_to_regions.json`.
+The `gain_map` output shows what changes, in colours. The `gain` output (last) is the real gain as a mask at the
+size of your frames, in linear light: white = a gain of 1.0 (unchanged), darker = darkened more; with
+`lift_dim_up_to` above 1, white is the highest gain. The report says the range. Example: the last group in `example_workflows/scene3d_to_regions.json`.
 
 ### Minimum piece size
 
@@ -277,15 +312,17 @@ The facade model's own parts move: every loose part of the model (a stone, a win
 dormer) is a piece. Build a chain like in MOPS for Houdini:
 
 - **kubakub scene pieces**: the pieces of a scene render. `min_size_m` keeps small parts still, `max_size_m` big ones
-  (whole wall panels), `keep_largest` the wall they sit on. The preview shows every piece in its own colour.
+  (whole wall panels), `keep_largest` the wall they sit on. The preview shows every piece in its own colour; the
+  `mask` output (last) is 1 on the pieces that can move, at the scene's size.
   With **regions** connected (regions from id maps, masks, cryptomatte ...) every part belongs to the region most
   of it is in: `regions: one piece each` moves every region as one block (a floor, a bay, all windows),
   `regions: parts inside` moves only the parts in the regions of `selection` (names, `group:windows`, `tag:left`).
 - **kubakub pieces falloff**: how strongly a transform acts on each piece over time.
   *wave*: a front runs across the facade (`direction`, `speed` in m/s, a soft edge of `width` m) and the pieces it
   passed stay moved. *pulse*: a band of `width` m runs across; pieces move and come back. *stagger*: one piece after
-  the other in an order (left to right, bottom to top, from the centre, random) over `spread` seconds, each taking
+  the other in an order (`direction`: left to right, bottom to top, from the centre, random) over `spread` seconds, each taking
   `duration`; `hold` sends them back. *noise*: every piece drifts on its own. `loop` repeats a wave or pulse.
+  `start` is when a wave, pulse or stagger begins, in seconds from the first frame.
 - **kubakub pieces beat falloff**: a kick on the beats, bars or markers of the director's timeline (connect the
   director's `document`): every piece jumps (`attack`) and settles (`decay`); `spread` lets the kick run across the
   facade in an order, like a ripple.
@@ -298,6 +335,8 @@ dormer) is a piece. Build a chain like in MOPS for Houdini:
   itself the picture stays in place and the movement shows as shadows and gaps; that is what the building does to it.
   `view = audience` renders from a spot in front of the building instead (`audience_distance_m`, `audience_offset_m`,
   `eye_height_m`, `lens_mm`, advanced): the depth of the moving pieces shows, the projector stays where it is.
+  A connected `viewer` (scene measure / audience viewpoint / project settings) replaces these three numbers of the
+  spot. `exposure` (advanced, in stops, 0 = as before) makes the frames brighter or darker.
 
 The motion is computed in numpy (`kubakub/scene3d/pieces.py`, one matrix per piece and frame); Blender only
 moves the vertices. On the 12 GB laptop: 451 pieces of a festival facade, 24 frames at 960x648 and 16 samples in

@@ -19,6 +19,11 @@ projector brightness and every lamp's position, power, colour, size, cone and on
   the selected one; , / . = frame back / forward, < / > = previous / next keyframe, Home = start.
 - Light layers re-render their preview when you stop (not while playing).
 
+**Sound from the graph**: connect a sound (e.g. Load Audio) to the node's `audio` input and it is the timeline's
+sound: after a run the window shows its waveform, tempo and beats, the sound behaviours follow it and it goes out on
+`audio`. It replaces a sound picked in the window (the cable wins); a tempo you corrected in the window stays as long
+as the sound is the same. The node keeps a copy as a wav in input/kuba_director.
+
 **Sound**: ♪ audio (or drop an mp3 / wav / ogg onto the window) loads a sound into input/kuba_director. Its waveform
 shows under the ruler and it plays with P in sync (the sound is the clock). The tempo and beat grid are found
 automatically (bars every 4 beats on the ruler, the time readout shows bar.beat); correct it with the bpm field,
@@ -38,6 +43,15 @@ workflow runs on. *always* passes the plain base on right away (the old behaviou
 e.g. into core Create Video / Save Video) at its **sequence_scale** of the matrix size, and can write the delivery file
 (**export**: PNG 8/16, ProRes 4444 / 422 HQ, H.264, H.265; **frames** off when you only export). It only runs when it is
 in the graph (bypass it for still-only work), and changing its settings does not re-render the director's still.
+
+| more outputs of the sequence node | what it is |
+|---|---|
+| folder | the export folder (full path); empty when nothing was exported |
+| files | what the export wrote, one path per line: the video file, or for a PNG sequence the folder of frames and the .wav |
+| frame_count | frames of the timeline (length x fps) |
+| projection_mask | the building's silhouette at the size of **frames** (all ones when the projection mask is off) |
+| document | the director's document, passed through (into kubakub keyframe clips (h3)) |
+
 The director's old render_sequence / export inputs still work for older workflows (advanced section); the window's
 export button uses them.
 Light layers render all their frames in one Blender session and frames with the same rig only once: on a 12 GB laptop GPU
@@ -78,7 +92,7 @@ show as bars on the ruler (orange = keyframes, lavender = reference); click one 
 - **reference** (ref2va model): references instead of anchors - the sequence stretch itself (reference video with
   its sound: keeps the layout, e.g. light lines that follow the real cornices), the timeline music, director layers.
 The node **kubakub keyframe clips (h3)** after **kubakub director sequence** renders them: frames / fps / audio from the
-sequence, document from the director, H3 models (fl2va + LoRA; ref2va + LoRA optional), the qwen3vl 32b H3 encoder,
+sequence (its **document** output too, or the director's), H3 models (fl2va + LoRA; ref2va + LoRA optional), the qwen3vl 32b H3 encoder,
 video + audio VAE. It builds H3's prompt format for you (look, anchors / tags in connection order, a timeline with
 the named markers inside the clip as beats, locked-off camera, Audio line, avoid) - the output **prompts** shows
 them; 'raw' sends your text as it is. H3's sound is mixed into the timeline sound (h3_audio).
@@ -156,8 +170,12 @@ clip it to regions or mask it. It does not count as a placed object (no region, 
 - **Export** (director inputs `export`, `export_scale`, `export_alpha`, `export_name`): the whole timeline at the
   delivery size, streamed frame by frame (no RAM limit), into `output/kubakub_director/<name>_<time>/`: PNG sequence
   8/16 bit (+ .wav), ProRes 4444 (alpha) / 422 HQ, H.264 4:2:0 or 4:4:4 10 bit, H.265 10 bit, preview. With
-  `export_alpha` the base is left out and the layers (x the projection mask) become the alpha. **kubakub export**
-  writes any frames (e.g. after the H3 clip node) the same way.
+  `export_alpha` the base is left out and the layers (x the projection mask) become the alpha. Only PNG sequences
+  and ProRes 4444 carry alpha; with another format the report says that the alpha was not written.
+  **kubakub export video / frames** writes any frames (e.g. after the H3 clip node) the same way. Connect its
+  `fps` to the sequence's **fps**. Its `alpha` mask may have another size than the frames (e.g. the full-size
+  projection mask on half-size frames): it is resized, and the report says so. Outputs: `report`, `folder` (the
+  export folder) and `files` (one path per line: the video file, or the folder of frames and the .wav).
 
 ## Behaviours: motion graphics in the director
 
@@ -175,6 +193,7 @@ each has a time range (from / to), a fade and an on / off switch. The timeline s
 | pulse | a kick on beats, bars, markers or every n s (attack, decay, every nth) | the same numbers |
 | sound level | the loudness of the timeline sound (release); `listen to`: everything, or only its low (kick, bass), mid or high (hats, clicks) frequencies | the same numbers |
 | stagger | the regions a layer is clipped to light up one after another: sequence in / out, chase, wave, random; order left / right / top / bottom / centre / outside / size / random | a layer clipped to regions |
+| field | the clip appears along a grey ramp over its regions, per pixel: a wipe, an iris, outlines closing in, region by region, a dissolve, a running band, rings; on a ramp, saw, sine, square, random, noise, the sound level, or on beats, bars, markers and low / mid / high hits; with a trail (see [masks](masks.md)) | a layer clipped to regions |
 | swap | layers trade their masks in time with the sound (see below) | layers clipped to regions |
 | repeat | copies in a line / grid / ring, rotation / scale / opacity per copy, a delay per copy replays the animation later (echo trails) | image and shape layers |
 

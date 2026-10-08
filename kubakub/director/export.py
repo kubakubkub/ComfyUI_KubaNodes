@@ -47,6 +47,15 @@ FORMATS = {
                 "v": ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-movflags", "+faststart"], "pix": "yuv420p", "a": ["-c:a", "aac", "-b:a", "192k"]},
 }
 TAGS = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]
+ALPHA_FORMATS = [k for k, f in FORMATS.items() if f.get("png") or f.get("alpha")]     # the formats that carry alpha
+
+
+def alpha_note(fmt, wanted=True):
+    """A report line when alpha was asked for and the format cannot carry it (it names the ones that can), else ''."""
+    if not wanted or fmt in ALPHA_FORMATS:
+        return ""
+    return (f"alpha not written: {FORMATS[fmt]['label']} cannot carry alpha (formats with alpha: "
+            f"{', '.join(ALPHA_FORMATS)})")
 
 
 def write_wav(path, wave_2xs, sr):
@@ -80,7 +89,8 @@ def ordered(pool, fn, items, ahead):
 class Writer:
     """
     Streams frames into a file (or a PNG sequence). write(rgb, alpha=None) takes float (h, w, 3) straight colour and
-    an optional (h, w) alpha; frames must arrive in order. close() -> the written files.
+    an optional (h, w) alpha; frames must arrive in order. close() -> the written files. alpha_note: a report line
+    when alpha was asked for and the format cannot carry it (the alpha is then left out), else ''.
     The same in two steps for a render pool: prep(i, rgb, alpha) quantises (and for PNGs encodes and writes frame i)
     in any thread, put(item) hands the results over in order; video frames go to ffmpeg from a writer thread.
     """
@@ -93,6 +103,7 @@ class Writer:
         self.f = FORMATS[fmt]
         self.fmt, self.name, self.dir = fmt, name, out_dir
         self.alpha = bool(alpha) and (self.f.get("png") or self.f.get("alpha"))
+        self.alpha_note = alpha_note(fmt, alpha)         # alpha asked for, but this format has none: for the report
         self.w, self.h = int(w), int(h)
         self.fps = fps
         self.n = 0

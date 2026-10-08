@@ -66,6 +66,8 @@ class KUBA_ScanToLine(io.ComfyNode):
                 io.Image.Output("projection", tooltip="White lines on black: ready to project as they are."),
                 io.Image.Output("found", tooltip="The photo with the paper outline that was used."),
                 io.String.Output("corners", tooltip="The corners used (copy them into 'corners' to fix them)."),
+                io.String.Output("report", tooltip="One line per photo: how the paper was found, its size in the photo "
+                                                   "(pixels), the size it was straightened to and the corners used."),
             ],
         )
 
@@ -77,23 +79,28 @@ class KUBA_ScanToLine(io.ComfyNode):
             rgb = photo[i, ..., :3].cpu().float().numpy()
             r = sk.scan(rgb, int(width), int(height), corners or "", line, float(clean), float(boost),
                         bool(dots_in_line))
+            note = r["note"]
             if drawings and r["drawing"].shape != drawings[0].shape:        # batch frames must share one size
                 import cv2
                 h0, w0 = drawings[0].shape[:2]
                 r["drawing"] = cv2.resize(r["drawing"], (w0, h0), interpolation=cv2.INTER_AREA)
                 r["strength"] = cv2.resize(r["strength"], (w0, h0), interpolation=cv2.INTER_AREA)
+                note += f", resized to the first photo's {w0}x{h0}"
             drawings.append(r["drawing"])
             lines.append(r["strength"])
+            notes.append(note)
+            used.append(sk.corners_text(r["corners"]))
             if i == 0:
                 founds.append(sk.draw_quad(rgb, r["corners"]))
-                notes.append(r["note"])
-                used.append(sk.corners_text(r["corners"]))
         d = torch.from_numpy(np.stack(drawings))
         m = torch.from_numpy(np.stack(lines))
         proj = m[..., None].expand(-1, -1, -1, 3).contiguous()
         found = _img(founds[0])
+        report = "\n".join(f"photo {i}: {n}; corners {c}" for i, (n, c) in enumerate(zip(notes, used)))
         log.info("[KUBA sketch] scan: %d photo(s), %s, %.1f s", photo.shape[0], notes[0], time.perf_counter() - t0)
-        return io.NodeOutput(d, m, proj, found, used[0], ui=ui.PreviewImage(d[:1], cls=cls))
+        for row in report.split("\n")[1:]:
+            log.info("[KUBA sketch]   %s", row)
+        return io.NodeOutput(d, m, proj, found, used[0], report, ui=ui.PreviewImage(d[:1], cls=cls))
 
 
 class KUBA_RegionsFromSketch(io.ComfyNode):
@@ -124,18 +131,30 @@ class KUBA_RegionsFromSketch(io.ComfyNode):
                              tooltip="Shapes smaller than this (pixels) - hatching, little marks - are merged or dropped."),
                 io.Boolean.Input("merge_small_regions", default=True,
                                  tooltip="On: small shapes join the neighbour with the longest border. Off: dropped."),
+                io.Image.Input("matrix", optional=True,
+                               tooltip="Your matrix: the preview background, and the size of the regions (a drawing "
+                                       "of another size is fitted to it; same proportions only)."),
+                io.Mask.Input("scope", optional=True,
+                              tooltip="Pixels outside this mask are never part of a region (the size of the "
+                                      "matrix, or of the drawing without one)."),
             ],
             outputs=[
                 RegionsType.Output("regions", tooltip="Label map + region table for the kubakub region nodes."),
                 io.Mask.Output("region_masks", tooltip="One mask per region; batch index = region_id."),
                 io.String.Output("regions_json", tooltip="The region table as text."),
-                io.Image.Output("preview", tooltip="Regions over the drawing, one colour per group."),
+                io.Image.Output("preview", tooltip="Regions over the drawing (or the matrix), one colour per group."),
+                io.String.Output("report", tooltip="Regions and groups found, gaps bridged, shapes named by colour, "
+                                                   "small shapes merged or dropped."),
+                io.Mask.Output("closed_lines", tooltip="The lines the shapes were cut with: your strokes plus the "
+                                                       "bridges over the gaps (white = wall). Shows where gap_px closed "
+                                                       "a shape, or still leaves one open."),
             ],
         )
 
     @classmethod
     def execute(cls, drawing, gap_px, line_threshold, colour_names, outside, min_region_area, merge_small_regions,
-                line=None) -> io.NodeOutput:
+                line=None, matrix=None, scope=None) -> io.NodeOutput:
+        import cv2
         t0 = time.perf_counter()
         d = drawing[0, ..., :3].cpu().float().numpy()
         if line is not None:
@@ -144,18 +163,38 @@ class KUBA_RegionsFromSketch(io.ComfyNode):
             s = np.clip((1.0 - d.min(axis=2) - 0.1) / 0.6, 0, 1).astype(np.float32)
         H, W = d.shape[:2]
         if s.shape != (H, W):
-            import cv2
             s = cv2.resize(s, (W, H), interpolation=cv2.INTER_LINEAR)
-        cells, tags, n_br, _lines = sk.sketch_cells(s, d, int(gap_px), float(line_threshold),
-                                                    use_colour=bool(colour_names))
+        notes = []
+        gap = float(gap_px)
+        if matrix is not None and (int(matrix.shape[1]), int(matrix.shape[2])) != (H, W):
+            mh, mw = int(matrix.shape[1]), int(matrix.shape[2])
+            if abs(W / H - mw / mh) > 0.005 * (mw / mh):
+                raise ValueError(f"the drawing is {W}x{H}, the matrix {mw}x{mh}: another aspect, one uniform scale "
+                                 "cannot fit it. Set width and height of kubakub scan to line to the matrix.")
+            interp = cv2.INTER_AREA if mw < W else cv2.INTER_LINEAR
+            d = np.clip(cv2.resize(d, (mw, mh), interpolation=interp), 0, 1)
+            s = np.clip(cv2.resize(s, (mw, mh), interpolation=interp), 0, 1)
+            gap *= mw / W                                  # gap_px stays in pixels of the drawing
+            notes.append(f"drawing {W}x{H} fitted to the matrix {mw}x{mh}")
+            H, W = mh, mw
+        given = None
+        if scope is not None:
+            given = (scope[0] if scope.ndim == 3 else scope).cpu().numpy() > 0.5
+            if given.shape != (H, W):
+                raise ValueError(f"scope mask is {given.shape[1]}x{given.shape[0]}, the regions {W}x{H}; they must "
+                                 "match exactly.")
+        cells, tags, n_br, closed = sk.sketch_cells(s, d, gap, float(line_threshold), use_colour=bool(colour_names))
         n = int(cells.max()) + 1
-        scope = None
-        notes = [f"{n_br} gap(s) between strokes bridged (gap_px {gap_px})"]
+        scope = given
+        notes.append(f"{n_br} gap(s) between strokes bridged (gap_px {gap_px})")
+        if given is not None:
+            notes.append(f"scope: regions only on {given.mean() * 100:.0f} % of the drawing")
         if outside == "drop":
             edge = np.unique(np.r_[cells[0], cells[-1], cells[:, 0], cells[:, -1]])
             edge = edge[edge >= 0]
             if len(edge):
-                scope = ~np.isin(cells, edge)
+                inner = ~np.isin(cells, edge)
+                scope = inner if scope is None else (scope & inner)
                 notes.append(f"{len(edge)} shape(s) touching the edge dropped")
         labels = fc.fill_unassigned(cells)
         count = {}
@@ -171,11 +210,15 @@ class KUBA_RegionsFromSketch(io.ComfyNode):
                                                      int(min_region_area), bool(merge_small_regions),
                                                      with_scope=True)
         regions = Regions.from_numpy(labels, atlas, scope_used)
-        preview = _img(fc.render_preview(d, labels, atlas))
-        log.info("[KUBA sketch] regions: %d regions in %d groups, %d named by colour, %.1f s",
-                 len(atlas["regions"]), len(atlas["groups"]), sum(count.values()), time.perf_counter() - t0)
-        return io.NodeOutput(regions, regions.masks(), json.dumps(atlas, indent=1), preview,
-                             ui=ui.PreviewImage(preview, cls=cls))
+        bg = matrix[0, ..., :3].cpu().float().numpy() if matrix is not None else d
+        preview = _img(fc.render_preview(bg, labels, atlas))
+        report = "\n".join([
+            f"{len(atlas['regions'])} regions in {len(atlas['groups'])} groups, {W}x{H}, {time.perf_counter() - t0:.1f} s",
+            "named by colour: " + (", ".join(f"{k} {v}" for k, v in count.items()) or "none"),
+            *atlas["notes"]])
+        log.info("[KUBA sketch] regions: %s", report.replace("\n", " | "))
+        return io.NodeOutput(regions, regions.masks(), json.dumps(atlas, indent=1), preview, report,
+                             torch.from_numpy(closed.astype(np.float32))[None], ui=ui.PreviewImage(preview, cls=cls))
 
 
 class KUBA_LineOverlay(io.ComfyNode):
@@ -199,18 +242,22 @@ class KUBA_LineOverlay(io.ComfyNode):
                 io.Int.Input("grow_px", default=0, min=0, max=64, tooltip="Makes the line bolder."),
                 io.Float.Input("soften_px", default=0.0, min=0.0, max=64.0, step=0.5, tooltip="Softens the line (a glow with screen)."),
             ],
-            outputs=[io.Image.Output("image", tooltip="The render with your line.")],
+            outputs=[io.Image.Output("image", tooltip="The render with your line."),
+                     io.Mask.Output("mask", tooltip="The line as it was laid on the render: after grow_px and "
+                                                    "soften_px, before amount (0..1, one per frame).")],
         )
 
     @classmethod
     def execute(cls, image, line, amount, mode, colour, grow_px, soften_px) -> io.NodeOutput:
         lm = line if line.ndim == 3 else line[None]
-        out = []
+        out, masks, s = [], [], None
         for i in range(int(image.shape[0])):
-            s = lm[min(i, lm.shape[0] - 1)].cpu().float().numpy()
-            out.append(sk.overlay(image[i].cpu().float().numpy(), s, float(amount), mode, colour, int(grow_px),
-                                  float(soften_px)))
-        return io.NodeOutput(torch.from_numpy(np.stack(out)))
+            if i < lm.shape[0]:                         # one line for every frame is shaped once
+                s = lm[i].cpu().float().numpy()
+                s = sk.line_shape(s, int(image.shape[1]), int(image.shape[2]), int(grow_px), float(soften_px))
+            out.append(sk.overlay(image[i].cpu().float().numpy(), s, float(amount), mode, colour))
+            masks.append(s)
+        return io.NodeOutput(torch.from_numpy(np.stack(out)), torch.from_numpy(np.stack(masks)))
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_ScanToLine": KUBA_ScanToLine, "KUBA_RegionsFromSketch": KUBA_RegionsFromSketch,

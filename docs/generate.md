@@ -23,7 +23,10 @@ regions, set `only` on one sampler (e.g. `W_F2_*`) and mute the other.
 Gives every region its prompt and settings with a small rule text. Input:
 `regions` from any of the regions nodes. Output: `plan` (for the samplers),
 `plan_json`, a readable `report`, and a `preview` where regions of the same
-strategy and prompt share a colour (`p1`, `fif2`, `keep`).
+strategy and prompt share a colour (`p1`, `fif2`, `keep`). The optional `image`
+is the background of the preview; an image of another size than the regions is
+scaled to fit for the preview only, and the report says so (the samplers need the
+exact size).
 
 ```ini
 // comments start with //
@@ -70,7 +73,7 @@ region's own, `{a|b|c}` one option chosen per region from `seed` (repeatable).
 | dilate_px, feather_px | 4, 8 | inpaint mask growth, paste-back softness |
 | color_match | mean_std | none, mean_std, mkl |
 | blend | on | include the region's borders in the seam pass |
-| reference | self | none, self, style (the crop plus the style image of kubakub versions) |
+| reference | self | none, self, style (the crop plus the style image of kubakub versions, or of the region sampler's `style` input) |
 | lora | empty | `name:strength; ...` (per-region hook LoRA) |
 | region_mp | 0 | work MP for the region crop, 0 = backend default |
 | z | 0 | stacking for frame in frame |
@@ -120,6 +123,12 @@ details like vines), `none` lets the region be freely repainted inside its mask
 | only | empty | process only regions matching these selectors (plan syntax), to iterate on a few |
 | seed_offset (advanced) | 0 | added to every region seed |
 | adapter (advanced) | auto | flux2 / generic |
+| style | optional | a style image for the regions whose plan says `reference = style`: a second reference next to the region's own crop, at about 1 megapixel. Of a batch the first image is used |
+
+Without a `style` image, regions with `reference = style` use their own crop
+(`reference = self`); the report names how many. The report also says when a
+style image is connected but no region asks for it, and when `image` is a batch
+(only its first image is used).
 
 **frame_in_frame** regions get their own scene instead: it is generated
 from scratch with the region's prompt at about `region_mp` in the region box's
@@ -302,6 +311,16 @@ of every rendered version, so one version can be continued by hand in a region p
 | generate | regions | **regions**: every region is repainted inside its own mask. **whole picture**: one free sample of the whole picture, see below |
 | unify | 0 | one more pass over the whole picture after the regions, at this denoise; 0 = off |
 | save_folder | kubakub/versions | where the versions are saved, inside ComfyUI's output folder (a full path needs `save_anywhere = on` in kubakub.ini); empty = nothing is saved |
+| only (advanced) | empty | paint only the regions matching these selectors (plan syntax, as in the region sampler); the others stay as they are. A whole picture is still made in one piece, only its full-size detail follows this |
+| cfg (advanced) | 0 | used where the plan says cfg = 0; 0 = the model's default (1) |
+
+| output | |
+|---|---|
+| images | one image per rendered version, in number order |
+| sheet | the contact sheet |
+| report | the lists, every version with its number, the rules and time of each rendered version |
+| save_path | the folder the versions of this run were saved to (finals: its subfolder `final`); empty when nothing was saved |
+| names | one line per version in the order of `images`: number and label, as on the contact sheet |
 
 **Picking by folder.** The node saves every draft as `r<run>_v<number>_<what it is made of>.png` (for example
 `r07_v03_isometric_soft-pair_ref12.png`). Each file holds its own version: the rules, the LoRAs, the style image
@@ -346,6 +365,9 @@ sampled, with the band as a soft inpaint mask, the crop as reference and a low
 into the pack), the band edge is denoised less than its centre, step by step.
 Each tile uses the prompt of the region most present in its seams, unless
 `prompt` is set.
+
+`steps`, `cfg`, `sampler_name` and `scheduler` are advanced inputs, as in the
+region sampler (0 = the model's default).
 
 Outputs: `image`, `seam_mask` (the band, to inspect or to feed core nodes) and a
 `report` (tiles, prompts, seconds). Klein 9B: about 14 s per 1024 px tile. The
@@ -403,7 +425,9 @@ onto each back wall), `media_names`, `world` (it maps 1:1 onto the facade
 through the viewer projection, so every window shows its own part of one
 continuous scene). Side walls of media / world frames are the guide's shading
 tinted with the content's colour. Outputs: the composite (feed it to the Region
-Sampler as `image`), masks `area`, `generate`, `back`, `walls`, frames JSON.
+Sampler as `image`), masks `area`, `generate`, `back`, `walls`, frames JSON,
+and `regions`: the regions of the `plan` output (with the `<name>_out` regions of
+the parasites, see below), for masks, previews and other nodes that take regions.
 
 A courtyard (facade ~40 m, audience ~15 m, from the site photos): the
 viewer looks steeply up, so on the upper floors a deep room shows mostly

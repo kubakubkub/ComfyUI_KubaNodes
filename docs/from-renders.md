@@ -5,7 +5,8 @@ All three nodes run on a built-in sample when their folder / file field is empty
 
 ## kubakub render passes
 
-A folder of passes written by any 3D tool as PNG (also JPG, TIFF, WebP; 16 bit keeps its range):
+A folder of passes written by any 3D tool as PNG (also JPG, TIFF, WebP; 16 bit keeps its range) or as EXR, one
+pass per file:
 
 - `<render>_beauty.png`: the picture (also `_rgb`, `_combined`, `_color`, `_clay`, `_render`).
 - `<render>_depth.png`, `<render>_normal.png`: come out as pictures (black when missing).
@@ -15,7 +16,35 @@ A folder of passes written by any 3D tool as PNG (also JPG, TIFF, WebP; 16 bit k
   mask for every render of the folder. Plain names (`beauty.png`, `windows.png`) work for a folder with one render.
 - several renders in one folder: `render` picks one (empty = the first; the report lists them).
 - colour pictures among the passes (an ID map) are left out with a note: **regions from id renders** reads those.
-  EXR files and files starting with `_` are not read.
+  Files starting with `_` are not read.
+- **EXR passes** (`<render>_beauty.exr`, `<render>_depth.exr` ...): the picture goes from linear to sRGB; depth in
+  scene units is stretched to 0..1 (near is black, the empty background is far); normals in -1..1 are packed to
+  0..1; a mask is its R G B, Y, Z or A channel. Where a PNG / TIFF copy of the same pass lies next to the EXR, the
+  copy is read, as before. An EXR mask that cannot be read is left out with a note. Which EXR files are read: see
+  *EXR support* under regions from cryptomatte.
+- **One multilayer EXR** (all passes in one file, every renderer names them differently): paste the path of the
+  `.exr` file itself into `folder`, or the folder it lies in. The node then shows a button for every layer inside,
+  with a guess of what it is. Violet = the picture, depth and normal, found by their names (`C`, `Combined`,
+  `beauty`, `rgba`; `depth`, `Z`; `N`, `normal`). Orange = read as a mask. Grey = not read: colour passes
+  (`diffuse`, `specular`, `emission` ...), position / motion data, ID passes, cryptomatte. Click a button to make
+  that layer a mask or take it out again; `list layers` reads the file again.
+  - The buttons only write the `exr_layers` text, one layer per line, and you can type it yourself; wildcards work
+    (`wall*`). Empty = every layer that looks like a mask. A plain name is a mask, unless that layer is the
+    picture, depth or normal.
+  - Where the guess is wrong, say it: `picture = C`, `depth = Z_render`, `normal = N_world`, `mask = diffuse`
+    (a colour layer by its brightness), `skip = name`.
+  - A layer that turns out to be a colour picture is left out as a mask, unless you name it yourself.
+  - The `report` lists every layer of the file with its channels and what it was used as, so you see what is
+    inside even without the buttons.
+  - Each layer is read like a single-pass EXR of that kind (linear picture to sRGB, depth stretched, normals
+    packed); `invert`, `exclude` and `matrix` work on layers as on files. Mask files in the same folder are added.
+  - In a folder that has both `<render>_beauty.png` ... and `<render>.exr`, the separate files are read, as before;
+    the report says how many layers the EXR holds. Paste the EXR's own path to read its layers instead.
+  - Listing the layers reads only the start of the file, so it is quick for every EXR. Reading PIZ / DWA files
+    goes through Blender (see *EXR support*). Of a multipart EXR only the first part is read; the layers of the
+    other parts are shown as not read.
+- `matrix` (optional): a render of another size is fitted to your matrix: picture, depth, normal and masks, with
+  one uniform scale. A render with other proportions is refused; render in the matrix's aspect.
 
 Outputs: `beauty`, `depth`, `normal`, `masks` (a batch) and `names` (one per line), which go straight into
 **kubakub regions from masks** (`masks`, `names`, `matrix` = beauty). With `split_masks = cut` every separate
@@ -91,6 +120,9 @@ every object becomes a region under its real name from the scene. Objects named 
 share a group (`window_left`), so `[group:window_left]` in the plan picks them all. `tag_layers = material` adds
 each object's material as a tag (`[tag:glass]`). `exclude` leaves helper objects out (wildcards). The `render`
 output is the picture of the same EXR (Combined pass, sRGB). Connect your `matrix` to get its size.
+`scope` (optional mask, the size of the matrix, or of the render without one): pixels outside it are never part
+of a region; an object wholly outside it is no region. The `file` path can be pasted as Explorer copies it (with
+quotes; `~` and `%VARIABLES%` work).
 
 EXR support: built in (no extra packages) for scanline and tiled files with no, RLE, ZIPS or ZIP compression,
 which is what Blender and most renderers write by default. PIZ, DWA, B44, PXR24 and multipart files are read

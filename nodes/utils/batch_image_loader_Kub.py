@@ -6,13 +6,21 @@ import torch.nn.functional as F
 import numpy as np
 from PIL import Image, ImageOps
 
+
+def _natural(name):
+    # numbers in a name sort by value: frame_2 before frame_10
+    return [int(t) if i % 2 else t for i, t in enumerate(re.split(r"([0-9]+)", name))]
+
+
 class LoadImagesFromDirWithNames:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
                 "directory": ("STRING", {"default": "", "tooltip": "The folder to load .jpg, .png, .webp and .bmp "
-                                                                   "images from (sorted by name)."}),
+                                                                   "images from, sorted by name (frame_2 before "
+                                                                   "frame_10). Empty = a built-in sample folder: "
+                                                                   "12 frames of the sample facade."}),
             },
             "optional": {
                 "image_load_cap": ("INT", {"default": 1, "min": 0, "step": 1,
@@ -43,19 +51,20 @@ class LoadImagesFromDirWithNames:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "STRING", "STRING", "INT", "INT", "IMAGE", "MASK")
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "STRING", "STRING", "INT", "INT", "IMAGE", "MASK", "INT")
     RETURN_NAMES = ("IMAGE", "MASK", "filename", "subfolder", "source_path", "total_count", "current_index",
-                    "image_batch", "mask_batch")
+                    "image_batch", "mask_batch", "loaded_count")
     # the first outputs are lists (downstream nodes run once per image); image_batch / mask_batch are one
     # batch, for nodes that take several frames at once (walkthrough matrix, director layers ...)
-    OUTPUT_IS_LIST = (True, True, True, True, True, False, False, False, False)
+    OUTPUT_IS_LIST = (True, True, True, True, True, False, False, False, False, False)
     OUTPUT_TOOLTIPS = ("one image per list item", "one mask per list item (1 = transparent)",
                        "each image's name without extension (with the subfolder in front when subfolder_prefix is on)",
                        "each image's subfolder inside the folder (empty for the folder itself)",
                        "each image's full file path",
                        "how many images the folder has after the filter and skipping",
                        "the index the loading started at",
-                       "all loaded images as one batch", "all masks as one batch")
+                       "all loaded images as one batch", "all masks as one batch",
+                       "how many images this run loaded (the frames in image_batch)")
     DESCRIPTION = ("Loads the images of a folder, with their names, for batch jobs: each image runs through the "
                    "graph on its own (list outputs), or all together as one batch. Can filter by name and skip "
                    "images that already have a finished .glb.")
@@ -101,14 +110,14 @@ class LoadImagesFromDirWithNames:
         files = []
         if include_subfolders:
             for root, dirs, filenames in os.walk(directory):
-                dirs.sort()
-                for f in sorted(filenames):
+                dirs.sort(key=_natural)
+                for f in sorted(filenames, key=_natural):
                     if f.lower().endswith(valid_extensions):
                         rel = os.path.relpath(root, directory)
                         subfolder = rel if rel != '.' else ''
                         files.append((os.path.join(root, f), f, subfolder))
         else:
-            for f in sorted(os.listdir(directory)):
+            for f in sorted(os.listdir(directory), key=_natural):
                 if f.lower().endswith(valid_extensions):
                     files.append((os.path.join(directory, f), f, ''))
         return files
@@ -124,6 +133,12 @@ class LoadImagesFromDirWithNames:
     def load_images(self, directory, image_load_cap=1, start_index=0,
                     load_always=False, include_subfolders=True,
                     subfolder_prefix=True, name_filter="", skip_existing_in="", batch_fit="resize_to_first"):
+
+        if not str(directory or "").strip():                       # an empty field runs the built-in sample
+            import folder_paths
+            from ...kubakub import samples
+            directory = samples.frames(folder_paths.get_temp_directory())
+            print("[KubaNodes] load images from dir: " + samples.note("folder of images", "directory"))
 
         if not os.path.isdir(directory):
             raise FileNotFoundError(f"Directory '{directory}' cannot be found.")
@@ -204,7 +219,8 @@ class LoadImagesFromDirWithNames:
             raise FileNotFoundError(f"No images to load after filtering")
 
         image_batch, mask_batch = self._batch(images, masks, batch_fit)
-        return (images, masks, filenames, subfolders, source_paths, total, actual_start, image_batch, mask_batch)
+        return (images, masks, filenames, subfolders, source_paths, total, actual_start, image_batch, mask_batch,
+                len(images))
 
     @staticmethod
     def _batch(images, masks, fit):

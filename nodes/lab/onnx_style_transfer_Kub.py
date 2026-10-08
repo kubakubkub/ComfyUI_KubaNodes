@@ -51,14 +51,17 @@ class OnnxStyleTransfer:
     def _resolve(model_path):
         p = os.path.expandvars((model_path or "").strip().strip('"').strip("'"))
         if not p:
-            raise ValueError("ONNX Style Transfer: set model_path (an .onnx file or a name in models/onnx)")
+            raise ValueError("kubakub onnx style transfer: no model given. Put your trained pix2pix .onnx file in "
+                             "ComfyUI/models/onnx and type its name into 'model_path', or paste its full path "
+                             "there. The pack has no sample model for this node.")
         if not os.path.isabs(p):
             import folder_paths
             cand = os.path.join(folder_paths.models_dir, "onnx", p)
             if os.path.isfile(cand):
                 p = cand
         if not os.path.isfile(p):
-            raise FileNotFoundError(f"ONNX model not found: {p}")
+            raise FileNotFoundError(f"kubakub onnx style transfer: no model file at '{p}'. Put the .onnx file in "
+                                    "ComfyUI/models/onnx and type its name into 'model_path', or paste its full path.")
         return p
 
     def _load_model(self, model_path):

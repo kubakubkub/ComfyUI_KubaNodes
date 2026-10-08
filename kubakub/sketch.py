@@ -322,16 +322,22 @@ def hex_rgb(text, default=(0.0, 0.0, 0.0)):
         return default
 
 
-def overlay(image, strength, amount=1.0, mode="multiply", colour="#000000", grow_px=0, soften_px=0.0):
-    """The line on top of an image: multiply (dark line), screen (light line), or colour (paint it)."""
+def line_shape(strength, height, width, grow_px=0, soften_px=0.0):
+    """The line as it is laid on an image: at the image's size, grown (bolder) and softened -> float32 HxW 0..1."""
     s = np.clip(strength, 0, 1).astype(np.float32)
-    if s.shape != image.shape[:2]:
-        s = cv2.resize(s, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LINEAR)
+    if s.shape != (height, width):
+        s = cv2.resize(s, (width, height), interpolation=cv2.INTER_LINEAR)
     if grow_px > 0:
         k = 2 * int(grow_px) + 1
         s = cv2.dilate(s, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
     if soften_px > 0:
         s = cv2.GaussianBlur(s, (0, 0), float(soften_px))
+    return np.clip(s, 0, 1)
+
+
+def overlay(image, strength, amount=1.0, mode="multiply", colour="#000000", grow_px=0, soften_px=0.0):
+    """The line on top of an image: multiply (dark line), screen (light line), or colour (paint it)."""
+    s = line_shape(strength, image.shape[0], image.shape[1], grow_px, soften_px)
     a = (s * float(amount))[..., None]
     c = np.array(hex_rgb(colour), np.float32)
     img = image[..., :3].astype(np.float32)

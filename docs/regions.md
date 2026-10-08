@@ -37,6 +37,7 @@ one region (unless small regions are dropped). Region ids follow reading order
 | preview | One colour per group, black borders, region id and group id drawn inside each region. Also shown on the node. |
 | scope | MASK, 1 where regions may be (all 1 without a scope). |
 | regions | int32 label map + this table + scope, for the region nodes (33 MB at 4K instead of one float mask per region). |
+| report | Text: mode, how many regions and groups, the size, pixels without a region, then the notes (merged or dropped regions, the sample used when `mask_folder` is empty). |
 
 regions_json:
 
@@ -103,7 +104,9 @@ or `auto` (picks from `budget_mp`, the model's trained budget when 0).
 A k that doesn't divide the target into whole pixels is refused, with the
 nearest exact factors listed. `target_frames` (video) is rounded up to the frame
 rule. Outputs the plan, the grid `width`/`height` for the empty latent,
-`frames`, `fps`, the plan as JSON and a readable report (also shown on the node).
+`frames`, `fps`, the plan as JSON and a readable report (also shown on the node),
+then `k` as a number (2.0, 3.75; the factor that was picked with `auto`) and
+`target_width` / `target_height` in pixels (the widgets, or the size of `size_from`).
 
 **kubakub canvas to work**: any image of the target's aspect (matrix, start
 image, reference, first frame) and an optional mask onto the grid canvas.
@@ -147,7 +150,10 @@ either a new atlas or a patch into an existing one.
   against the names.
 
 Outputs: `regions` (for kubakub region plan), `region_masks`,
-`regions_json`, `preview`. The logic is `facade_core.atlas_from_masks()`, shared
+`regions_json`, `preview`, `report` (how many masks became how many regions and
+groups, pixels without a region, and the notes: renamed, resized, merged or
+dropped masks) and `scope` (the scope that was used, a MASK; all 1 without one).
+The logic is `facade_core.atlas_from_masks()`, shared
 with the mask folder atlas (`label_masks()`).
 
 Example workflow `example_workflows/regions_from_masks_patch.json`: a mask
@@ -176,6 +182,9 @@ Load Checkpoint (MODEL + CLIP). The node calls core SAM3 Detect once per object:
   point is one object and negative points apply to all. Boxes (ctrl+drag) are
   one object each. `point_names` names them in click order, then the boxes.
   Only the connected parts under the click are kept (no stray specks).
+- `boxes`: boxes from core nodes (the `bboxes` output of core SAM3 Detect, in
+  image pixels). They are added after the Points Editor boxes of `bboxes`, one
+  object per box; of a batch, the boxes of the first image are used.
 - `detail` (points and boxes): SAM sees every image at 1008x1008, so on a 4K
   matrix a balustrade is a few dozen pixels. The detail pass segments the
   object's box again on a square crop at full resolution and pastes it back;
@@ -255,6 +264,26 @@ Test without a model (writes a small layered PDF with PyMuPDF and reads it back)
 python_embeded\python.exe ComfyUI\custom_nodes\ComfyUI_KubaNodes\tests\test_illustrator.py
 ```
 
+## kubakub regions to mask
+
+A mask of chosen regions (all windows, one floor) for any effect or core node,
+or as a layer mask for the director.
+
+| input | default | what it does |
+|---|---|---|
+| regions | | From any kubakub regions node. |
+| select | * | Plan selector: names with wildcards (`W_F1_*`), `group:Windows`, `tag:front`; comma = or, space = and, `!` = not. `*` or empty = all. |
+| grow_px | 0 | Grow (> 0) or shrink (< 0) the mask, in pixels. |
+| feather_px | 0 | Soft edge. It blurs the edge both ways, inwards and outwards, over about this many pixels in total. |
+| invert | off | On: everything except the selected regions. |
+| per_region_masks | off | On: `region_masks` gives one mask per selected region. RAM: regions x width x height x 4 bytes (100 regions at 3840x2160 = 3.3 GB). |
+
+| output | |
+|---|---|
+| mask | 1 on the selected regions, after grow, feather and invert. |
+| names | The matching region names, one per line. |
+| region_masks | MASK batch, one per selected region in the order of `names`, before grow, feather and invert. Needs `per_region_masks` on; while it is off, a node connected here stops with a message that says so. Above 4 GB the node stops and asks for a narrower `select`. |
+
 ## kubakub regions to svg / pdf / dxf
 
 Regions (or any MASK) as vector files, in two modes sharing one tracer:
@@ -275,8 +304,12 @@ names as path ids; PDF with one layer (optional content group) per group, which
 Illustrator shows as layers; DXF R12 with one layer per group (closed
 POLYLINEs for outlines, open ones for centerlines, y flipped, curves flattened).
 `width_mm` > 0 writes real millimetres (one uniform scale), `kerf_mm` grows or
-shrinks every outline by kerf / 2 (mitred corners) for cutting. `select` picks
-regions (`W_F1_*`, `group:Windows`, `tag:...`).
+shrinks every outline by kerf / 2 (mitred corners) for cutting; it is ignored
+while `width_mm` is 0. `corner_deg`, `spur_px` and `kerf_mm` are advanced inputs.
+`select` picks regions with the same plan selector as regions to mask
+(`W_F1_*`, `group:Windows`, `tag:...`; comma or new line = or, space = and,
+`!` = not; empty = all). With a `mask` connected the mask is vectorised and
+`regions` and `select` are not used; the report says so.
 
 Tested: a mask-folder atlas, 75 regions -> 223 paths in 5 layers (traced area = pixel
 area for every region); festival line layers as centerlines over 40 x 27 m.

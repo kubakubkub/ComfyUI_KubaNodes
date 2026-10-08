@@ -100,6 +100,22 @@ def passes(root, W=1920, H=1080):
     return folder
 
 
+def frames(root, W=640, H=360, count=12):
+    """Numbered frames of the sample facade, a band of light passing over it (sample_1.png ... sample_12.png, not
+    zero padded) -> folder. For kubakub load images from dir."""
+    folder = _folder(root, "frames")
+    if _done(folder):
+        return folder
+    os.makedirs(folder, exist_ok=True)
+    img = sf.render(W, H)["image"]
+    x = np.arange(W, dtype=np.float32)[None, :, None]
+    for i in range(count):
+        band = np.exp(-0.5 * ((x - W * (i + 0.5) / count) / (W * 0.08)) ** 2)
+        _png(os.path.join(folder, f"sample_{i + 1}.png"), _bgr8(img * (0.55 + 0.6 * band)))
+    _finish(folder)
+    return folder
+
+
 def _srgb8(c):
     c = np.asarray(c, np.float64)
     return (np.where(c <= 0.0031308, c * 12.92, 1.055 * np.power(c, 1 / 2.4) - 0.055) * 255).round().astype(np.uint8)

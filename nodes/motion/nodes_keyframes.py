@@ -167,7 +167,7 @@ class KUBA_KeyframeClips(io.ComfyNode):
                 io.Clip.Input("clip", lazy=True, tooltip="qwen3vl 32b MiniMax H3 encoder (CLIPLoader type minimax)."),
                 io.Vae.Input("vae", lazy=True, tooltip="H3 video VAE."),
                 io.Vae.Input("audio_vae", lazy=True, tooltip="H3 audio VAE."),
-                io.Image.Input("frames", tooltip="The director's frames (render_sequence on)."),
+                io.Image.Input("frames", tooltip="The frames output of kubakub director sequence."),
                 io.Float.Input("fps", default=25.0, min=1.0, max=120.0, tooltip="The director's fps output."),
                 io.String.Input("document", multiline=True, default="", tooltip="The director's document output (its timeline clips)."),
                 io.Audio.Input("audio", optional=True, tooltip="The director's audio output (timeline sound)."),
@@ -196,6 +196,7 @@ class KUBA_KeyframeClips(io.ComfyNode):
                 io.Audio.Output("audio", tooltip="Timeline sound + H3 sound."),
                 io.String.Output("report", tooltip="Per clip: mode, time span, H3 size, frames, steps and time (or "
                                                    "'from the cache')."),
+                io.Float.Output("fps", tooltip="The frame rate (frames per second), passed through for Create Video."),
             ],
         )
 
@@ -311,7 +312,7 @@ class KUBA_KeyframeClips(io.ComfyNode):
         report = "\n".join([f"{len(clips)} clip(s) in {N} frames at {fps:g} fps, {time.perf_counter() - t0:.0f} s", *rows]
                            + ([] if work else ["no clip to render: frames passed through, no H3 model loaded"]))
         log.info("[KUBA director] keyframe clips: %s", report.split("\n")[0])
-        return io.NodeOutput(out, "\n\n".join(prompts), audio_out, report)
+        return io.NodeOutput(out, "\n\n".join(prompts), audio_out, report, float(fps))
 
     @staticmethod
     def _prepare(j, doc, raw, tl, h3cfg, out, fps, W, H, audio, layer_images, model, model_ref, clip, vae, audio_vae,

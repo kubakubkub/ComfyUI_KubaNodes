@@ -119,6 +119,9 @@ class KUBA_FacadeMaskAtlas(io.ComfyNode):
                                                    "borders and ids."),
                 io.Mask.Output("scope", tooltip="1 where regions may be (all 1 without a scope)."),
                 RegionsType.Output("regions", tooltip="Label map + region table for the kubakub region nodes."),
+                io.String.Output("report", tooltip="How many regions and groups were found, pixels left "
+                                                   "without a region, and the notes (merged or dropped "
+                                                   "regions, the sample used when no folder is given)."),
             ],
         )
 
@@ -194,7 +197,10 @@ class KUBA_FacadeMaskAtlas(io.ComfyNode):
         for note in atlas["notes"]:
             log.info("[KUBA facade]   %s", note)
 
-        return io.NodeOutput(masks, json.dumps(atlas, indent=1), preview, scope_out, regions,
+        report = "\n".join([f"{mode}: {n} regions in {len(atlas['groups'])} groups, {w}x{h}, "
+                            f"{atlas['unassigned_px']} px without a region", *atlas["notes"]])
+
+        return io.NodeOutput(masks, json.dumps(atlas, indent=1), preview, scope_out, regions, report,
                              ui=ui.PreviewImage(preview, cls=cls))
 
 

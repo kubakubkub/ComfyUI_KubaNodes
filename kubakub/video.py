@@ -43,18 +43,43 @@ def latent_frame_times(frames: int, fps: float):
     return np.asarray(t)
 
 
+def only_filter(only):
+    """
+    The 'only' text as a predicate on plan entries, or None (empty = all). Comma or line separated; each part is
+    a name wildcard ('W_F1_*') or a plan selector (plan.py: 'group:Windows', 'tag:front', 'region:3-7',
+    'tag:front group:Windows' = and, '!x' = not). A part that is no valid selector stays a name wildcard.
+    """
+    import fnmatch
+    from . import plan as rp
+    pats = [p.strip().lower() for p in (only or "").replace("\n", ",").split(",") if p.strip()]
+    if not pats:
+        return None
+    sections = []
+    for p in pats:
+        try:
+            sections.append(rp.parse_rules(f"[{p}]\n")[0])
+        except rp.PlanError:
+            sections.append(None)
+
+    def hit(e):
+        name = str(e.get("name", "")).lower()
+        return any(fnmatch.fnmatchcase(name, p) or (s is not None and s.match(e) is not None)
+                   for p, s in zip(pats, sections))
+    return hit
+
+
 def clip_groups(entries, only=None):
     """
     Animated regions grouped into clips: one clip per (video prompt, t_start, t_end, motion).
-    entries: resolved plan entries (plan.py). Returns [{"ids", "prompt", "t_start", "t_end", "motion"}].
+    entries: resolved plan entries (plan.py). only: see only_filter.
+    Returns [{"ids", "prompt", "t_start", "t_end", "motion"}].
     """
-    import fnmatch
     groups = {}
-    pats = [p.strip().lower() for p in (only or "").replace("\n", ",").split(",") if p.strip()]
+    wanted = only_filter(only)
     for e in entries:
         if not e.get("animate"):
             continue
-        if pats and not any(fnmatch.fnmatchcase(str(e.get("name", "")).lower(), p) for p in pats):
+        if wanted is not None and not wanted(e):
             continue
         prompt = (e.get("video_prompt") or e.get("prompt") or "").strip()
         key = (prompt, float(e.get("t_start", 0.0)), float(e.get("t_end", -1.0)), float(e.get("motion", 1.0)))

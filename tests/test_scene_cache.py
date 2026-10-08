@@ -266,6 +266,14 @@ try:
     ns.KUBA_SceneWalkthrough.execute(scene, matrix, **dict(walk_kw, seconds=1.6))
     check("walkthrough longer: only views not seen before render", len(calls) > n1
           and sum(len(c["views"]) for c in calls[n1:]) < 40)
+    check("walkthrough: fps (a decimal number) and a shadow mask per frame after the report",
+          len(out1.args) == 4 and isinstance(out1.args[2], float) and out1.args[2] == 25.0
+          and tuple(out1.args[3].shape) == (30, 16, 32) and out1.args[3].dtype == torch.float32, str(out1.args[2:3]))
+    n2 = len(calls)
+    out3 = ns.KUBA_SceneWalkthrough.execute(scene, None, **walk_kw)
+    check("walkthrough without a matrix: runs on the views it has and says so",
+          len(calls) == n2 and tuple(out3.args[0].shape) == tuple(out1.args[0].shape) and "matrix: none" in out3.args[1],
+          out3.args[1])
 
     # --- ids_<key> folder reuse ----------------------------------------------------------------------------------
     builds = []
