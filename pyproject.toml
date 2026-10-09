@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-kubanodes"
 description = "kubakub nodes for projection mapping: facade regions from masks, Illustrator files and 3D ID maps, region-wise diffusion, the kubakub director (layers, lights, timeline, video, H3 clips) and delivery export."
-version = "0.2.0"
+version = "0.3.0"
 license = { file = "LICENSE" }                    # GPL-3.0, as ComfyUI
 requires-python = ">=3.10"
 classifiers = [

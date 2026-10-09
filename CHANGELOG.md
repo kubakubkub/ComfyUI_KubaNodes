@@ -4,7 +4,9 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
-## Not released yet
+## 0.3.0 (2026-10-09)
+
+Masks that move: along a field, on a curve, with the sound. And a review of the inputs and outputs of every node.
 
 - **Masks that move.** New menu group **2d / masks** with two nodes. **kubakub mask field** turns regions (or any
   mask) into a grey ramp: the distance from each region's edge, a direction, the distance from a point, one step per

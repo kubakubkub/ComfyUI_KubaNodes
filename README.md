@@ -13,17 +13,20 @@ regions of starter 01 connected):
 
 ## What's new
 
-**0.2.0**, the building in its street:
-- **Your building is no longer alone.** *kubakub scene surroundings* puts the neighbouring buildings around your
-  model, from a place on the map or from your own file, on real ground if you want (hills and slopes).
-- **The lit place, seen from the audience.** *kubakub scene relight* renders your projection on the building in its
-  street, under your lamps, from where a visitor stands, or from the exact viewpoint of the previz.
-- **Lamps and camera placed by hand.** A plan on the relight node: drag lamps and the audience camera, turn it, and
-  let `live` render again after every move.
-- **A projection keeps its colours** in the relight (new tone mapping, `view = Neutral`), and the previz has a clay
-  colour picker and a wireframe look.
-- **Nothing is downloaded unless you allow it.** The map is fetched only after you write
-  `surroundings_download = on` into kubakub.ini; everything else in the pack stays offline.
+**0.3.0**, masks that move:
+- **A mask can run across the building.** *kubakub mask field* turns your regions into a grey ramp (from each
+  edge inwards, along a direction, out from a point, region after region, or as noise) and *kubakub mask animate*
+  moves a reveal, a band or rings along it, or moves, turns, scales and flashes the mask itself, with a trail if
+  you like. The curve is drawn on the node: buttons for its type, drag on it for the speed.
+- **Masks follow the music.** Any of these moves can run on the beats, the bars, the kick or the hats of a sound.
+  With *swap masks* several layers trade their masks on every step while the pictures stay where they are on the
+  facade; *kubakub sound mask swap* does the same as one node.
+- **The same in the kubakub director.** A layer clipped to regions gets a **field** behaviour (wipe, iris, region
+  by region, dissolve, running band, rings), a soft edge for its clip, and the sound can now come from the graph.
+- **One EXR with many layers** is enough for *render passes*: the node shows a button for every layer in the file.
+- **Inputs and outputs of every node were reviewed.** Many nodes give more out (fps, sound, masks, raw data,
+  reports) and take more in; some old settings that did nothing now work. Saved workflows keep their links; what
+  behaves differently is listed in the changelog.
 
 Everything that changed, version by version: [CHANGELOG.md](CHANGELOG.md). Updates arrive through ComfyUI Manager
 (*Update*) or `git pull`; a problem or a wish: [open an issue](https://github.com/kubakubkub/ComfyUI_KubaNodes/issues).
