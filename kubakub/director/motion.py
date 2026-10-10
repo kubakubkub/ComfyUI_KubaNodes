@@ -295,6 +295,8 @@ def clamp(path, v):
         return min(1.0, max(0.0, v))
     if path in ("w", "h"):
         return max(1.0, v)
+    if path in ("height.value", "height.relief"):
+        return max(0.0, v)
     if path.startswith("fx.") or path.endswith((".power", ".size", ".feather", "env_strength", ".brightness", ".strength", ".distance")):
         return max(0.0, v)
     return v

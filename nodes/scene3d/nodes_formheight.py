@@ -12,6 +12,7 @@ V3 node schema, registered via ../__init__.py.
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 import numpy as np
@@ -20,13 +21,15 @@ import torch
 from comfy_api.latest import io, ui
 
 from ...kubakub import formheight as fh
+from ...kubakub import imio
 from ...kubakub.io_types import SceneType
 from ...kubakub.scene3d import scene_ids
 from ...kubakub.scene3d.bridge import clean_path
-from .nodes_align3d import _from_mesh, _load
+from .nodes_align3d import _from_mesh, _load, _look_of_file, _look_of_mesh
 
 log = logging.getLogger("KUBA.scene3d")
 NAME = "kubakub form height"
+SAMPLE_COLOUR = (0.945, 0.541, 0.345)             # the sample form with colours on: kubakub orange
 
 
 class KUBA_FormHeight(io.ComfyNode):
@@ -74,6 +77,10 @@ class KUBA_FormHeight(io.ComfyNode):
                                tooltip="Which way is up in the model. .glb and .obj files count y as up and Blender "
                                        "turns them when it opens them; the scene counts z. auto tries both and takes "
                                        "the one that lies on the building."),
+                io.Boolean.Input("colours", default=False, optional=True,
+                                 tooltip="On: the 'colour' output shows the forms in the model's own colours (its "
+                                         "texture, or the colours on its points), seen from the scene's camera, on the "
+                                         "clay render of the real building. Off: 'colour' is the clay render alone."),
             ],
             outputs=[
                 io.Image.Output("height", tooltip="The height map: black = the wall, white = white_at_m (or the highest "
@@ -83,12 +90,15 @@ class KUBA_FormHeight(io.ComfyNode):
                                                  "for depth shaders and for displacement."),
                 io.String.Output("report", tooltip="How well the model lies on the building, how high the forms stand, "
                                                    "how much of the picture they cover."),
+                io.Image.Output("colour", tooltip="With 'colours' on: the real building as clay with the forms in the "
+                                                  "model's own colours, no light on them. Connect it to 'image' of "
+                                                  "kubakub height animate and the forms grow in colour."),
             ],
         )
 
     @classmethod
     def execute(cls, scene, model=None, model_file="", wall_m=0.5, smallest_form_m=0.5, counted_from=fh.FROMS[0],
-                white_at_m=0.0, up=fh.UPS[0]) -> io.NodeOutput:
+                white_at_m=0.0, up=fh.UPS[0], colours=False) -> io.NodeOutput:
         t0 = time.perf_counter()
         s = scene_ids.load(scene["folder"], mesh=False)
         try:
@@ -99,15 +109,21 @@ class KUBA_FormHeight(io.ComfyNode):
         counted_from = counted_from if counted_from in fh.FROMS else fh.FROMS[0]
         path = clean_path(model_file)
         scale = float(scene.get("unit_scale") or 1.0)     # the model is in the units of the scene's file
+        look = None                                       # what the model wears, when its colours are asked for
         if model is not None:
             mv, mf = _from_mesh(model)
             if path:
                 notes.append("model and model_file are both given: the connected model is used")
+            if colours:
+                look = _look_of_mesh(model, len(mv), len(mf), fh.shown)
         elif path:
-            _scene, mv, mf = _load(path, "model_file", NAME)
+            loaded, mv, mf = _load(path, "model_file", NAME)
+            if colours:
+                look = _look_of_file(loaded, fh.shown)
         else:
             mv, mf = fh.ball(s)                           # made in the scene's world
             up, scale = fh.UPS[2], 1.0
+            look = {"col": np.tile(SAMPLE_COLOUR, (len(mv), 1)), "parts": [(0, len(mf), None)]}
             notes.append("no model given: a sample form is used (half a ball on the middle of the wall)")
         near = max(2.0 * float(wall_m), 0.02 * w["size_m"])
         tries = []
@@ -136,6 +152,17 @@ class KUBA_FormHeight(io.ComfyNode):
             notes.append(f"the highest form stands {top:.2f} m out, above white_at_m: it is clipped to white")
         if not forms.any():
             notes.append("no form stands in front of the wall: the height map is black. Lower wall_m or smallest_form_m.")
+        clay_file = os.path.join(scene["folder"], "clay.png")
+        clay = imio.imread(clay_file) if os.path.isfile(clay_file) else None
+        colour = np.full(grey.shape + (3,), 0.5, np.float32) if clay is None else clay[..., 2::-1].astype(np.float32) / 255.0
+        if colours and look is None:
+            notes.append("colours is on, but the model carries no texture and no colours: 'colour' is the clay render")
+        elif colours and forms.any():
+            try:
+                rgb = fh.model_view(cam, fh.to_scene(mv, y_up, scale), mf, look)[1]
+            except RuntimeError as e:
+                raise RuntimeError(f"{NAME}: {e}") from e
+            colour = np.where(forms[..., None], rgb, colour).astype(np.float32)
         report = "\n".join([
             f"model {len(mv)} vertices, {len(mf)} faces, view {cam.W}x{cam.H}",
             f"the model covers {cover * 100:.0f} % of the building and lies on {on * 100:.0f} % of it (within {near:.2f} m)",
@@ -144,10 +171,10 @@ class KUBA_FormHeight(io.ComfyNode):
             f"{counted_from}",
             f"{time.perf_counter() - t0:.1f} s", *notes])
         log.info("[KUBA form height] %s", report.replace("\n", "\n    "))
-        img = torch.from_numpy(np.repeat(grey[..., None], 3, -1))[None]
+        img =torch.from_numpy(np.repeat(grey[..., None], 3, -1))[None]
         dep = torch.from_numpy(np.repeat(fh.with_forms(depth, forms, w)[..., None], 3, -1))[None]
         return io.NodeOutput(img, torch.from_numpy(forms.astype(np.float32))[None], dep, report,
-                             ui=ui.PreviewImage(img, cls=cls))
+                             torch.from_numpy(np.ascontiguousarray(colour))[None], ui=ui.PreviewImage(img, cls=cls))
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_FormHeight": KUBA_FormHeight}

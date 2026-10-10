@@ -211,6 +211,16 @@ clip it to regions or mask it. It does not count as a placed object (no region, 
   only that part. See [shader](shader.md).
 - **Effects** (inspector): blur, sharpen, glow, grain, keyframeable, on a layer or on a colour-grade layer
   (then on everything below).
+- **Height**: an image layer can be read as a height map (black = the wall, white = stands furthest out: the
+  `height` of kubakub form height, or a depth map from Depth Anything or Marigold). Inspector → **height** →
+  *grows all together*, *peaks first* or *built up in layers*. **grown** runs from 0 (the bare wall) to 1 (the
+  whole height) and takes keyframes and behaviours: key it from 0 to 1 and the forms come out of the wall, put
+  the sound level on it and they breathe with the music. **look**: *height* shows the grown height as grey (use
+  the layer as another layer's mask, or feed a depth shader), *relief* lights it from the side as clay,
+  *shading* is the same with the flat wall white: set the layer's blend to multiply and it shades the picture
+  under it. `wall` is the grey that counts as the wall, `light from` and `relief` set the light. The window and
+  the render run the same arithmetic. For growth along a field, or a picture that comes out with the forms, use
+  the node kubakub height animate ([scene3d](scene3d.md)).
 - **React to light**: *light → shaded by …* multiplies a layer by the lamps of a light layer (which may stay
   hidden); for physically lit projection use the light layer's projector in paint mode with the video as source.
 - **Colour**: one working space, display-referred sRGB / Rec.709. Embedded ICC profiles (Adobe RGB, P3, CMYK …)

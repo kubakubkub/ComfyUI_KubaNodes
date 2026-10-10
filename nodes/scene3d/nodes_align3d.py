@@ -46,7 +46,7 @@ def _load(path, what, name=NAME):
         raise ValueError(f"{name}: {what} is a {ext or 'file without an ending'}; this node reads {', '.join(READS)}. "
                          "Export it from Blender or Houdini as .glb (or .obj) and give that file.")
     scene = trimesh.load(path, force="scene", process=False)
-    parts = [g for g in scene.dump(concatenate=False) if hasattr(g, "faces") and len(g.vertices)]
+    parts = _parts(scene)
     if not parts:
         raise ValueError(f"{name}: {what} '{os.path.basename(path)}' holds no surface (no triangles).")
     v, f, at = [], [], 0
@@ -55,6 +55,53 @@ def _load(path, what, name=NAME):
         f.append(np.asarray(g.faces, np.int64) + at)
         at += len(g.vertices)
     return scene, np.concatenate(v), np.concatenate(f)
+
+
+def _parts(scene):
+    """The surfaces of a loaded file, each where the file puts it, in the order _load joins them."""
+    return [g for g in scene.dump(concatenate=False) if hasattr(g, "faces") and len(g.vertices)]
+
+
+def _look_of_file(scene, shown):
+    """What a loaded file's surfaces wear, for kubakub/formheight.model_view: texture places, a colour per point, and
+    which faces wear which picture. None when the file holds no colour at all. shown: light values -> picture values."""
+    uv, col, parts, at = [], [], [], 0
+    for g in _parts(scene):
+        n, vis = len(g.vertices), g.visual
+        mat = getattr(vis, "material", None)
+        img = (getattr(mat, "baseColorTexture", None) or getattr(mat, "image", None)) if mat is not None else None
+        u = getattr(vis, "uv", None)
+        c, pic = np.ones((n, 3)), None
+        if img is not None and u is not None and len(u) == n:
+            pic = np.asarray(img.convert("RGB"))
+        elif getattr(vis, "kind", None) == "vertex":
+            c = shown(np.asarray(vis.vertex_colors)[:, :3] / 255.0)
+        elif mat is not None and getattr(mat, "main_color", None) is not None:
+            c = np.tile(shown(np.asarray(mat.main_color)[:3] / 255.0), (n, 1))
+        else:
+            c = None
+        uv.append(np.asarray(u, np.float64) if pic is not None else np.zeros((n, 2)))
+        col.append(np.full((n, 3), 0.8) if c is None else c)
+        parts.append((at, len(g.faces), pic))
+        at += len(g.faces)
+    if not any(p[2] is not None for p in parts) and all(np.allclose(c, 0.8) or np.allclose(c, 1.0) for c in col):
+        return None
+    return {"uv": np.concatenate(uv), "col": np.concatenate(col), "parts": parts}
+
+
+def _look_of_mesh(mesh, n_vertices, n_faces, shown):
+    """The same for the first model of a MESH input. None when it carries neither a texture nor colours."""
+    uvs, tex, vc = getattr(mesh, "uvs", None), getattr(mesh, "texture", None), getattr(mesh, "vertex_colors", None)
+    if mesh.vertices.dim() != 3 or ((uvs is None or tex is None) and vc is None):
+        return None
+    look = {"uv": None, "col": None, "parts": [(0, n_faces, None)]}
+    if uvs is not None and tex is not None:
+        u = uvs[0, :n_vertices].detach().cpu().numpy().astype(np.float64)
+        look["uv"] = np.stack([u[:, 0], 1.0 - u[:, 1]], 1)      # a MESH counts v from the top, as a .glb does
+        look["parts"] = [(0, n_faces, (tex[0].clamp(0.0, 1.0).cpu().numpy() * 255).astype(np.uint8))]
+    else:
+        look["col"] = shown(vc[0, :n_vertices, :3].detach().cpu().numpy())
+    return look
 
 
 def _from_mesh(mesh):

@@ -48,7 +48,8 @@ may have changed since.
   model after kubakub align 3d model: black is the wall, white is where a form stands furthest out, and the wall
   stays your real one. A generated model is one merged mesh that cannot be taken apart; as a height map its forms
   can grow out of the wall, follow a mask field or the sound, throw shadows in the depth shaders, or displace the
-  real model in Houdini or Blender. `wall_m` says what still counts as wall, `smallest_form_m` drops thin lines
+  real model in Houdini or Blender. With `colours` on, a fifth output shows the forms in the model's own
+  colours on the clay render. `wall_m` says what still counts as wall, `smallest_form_m` drops thin lines
   and specks, `counted_from` chooses the flat wall or the real surface. Also gives the forms as a mask and the
   depth of the building with the forms on it. Drawn on the graphics card in about 2 s, no extra packages. No
   model connected runs a sample. Example `form_height.json`, section in [docs/scene3d.md](docs/scene3d.md).
@@ -57,8 +58,14 @@ may have changed since.
   `wall` sets the grey that counts as the wall). `grow` = all together, peaks first, built up in layers, or
   along a field from kubakub mask field; the curve is the one of kubakub mask animate (ramp, sine, beats, hits,
   sound level). Gives the height per frame (for the depth presets of kubakub shader, or as displacement), the
-  same as a relief lit from the side on your picture, and it as masks. Nothing connected runs a sample. Example
-  `height_animate.json`.
+  same as a relief lit from the side on your picture, and it as masks. With a picture of the bare wall on
+  `wall_image` the forms bring their colours with them as they come out. Nothing connected runs a sample.
+  Example `height_animate.json`.
+- **The same in the kubakub director.** An image layer can be read as a height map: inspector → **height** →
+  grows all together, peaks first or built up in layers. *grown* takes keyframes and behaviours, so the forms
+  come out of the wall on the timeline or with the sound. Look: the height as grey, a relief lit from the side,
+  or shading (white on the flat wall, for blend multiply over the picture under it). The window and the render
+  agree per pixel.
 - **kubakub shader mix.** New node in **2d / shader**: two shaders and one mix value, 0 = shader A, 1 = shader
   B. In between they meet in the shaders, not as two pictures laid over each other: **b works on a** (B is an
   effect on A's picture), **a bends b** (A pushes the places B draws at, B melts out of A), **a cuts b** (a wipe

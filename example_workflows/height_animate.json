@@ -1,6 +1,6 @@
 {
  "last_node_id": 99,
- "last_link_id": 8,
+ "last_link_id": 9,
  "nodes": [
   {
    "id": 1,
@@ -151,6 +151,14 @@
      "type": "STRING",
      "links": [],
      "slot_index": 3
+    },
+    {
+     "name": "colour",
+     "type": "IMAGE",
+     "links": [
+      9
+     ],
+     "slot_index": 4
     }
    ],
    "properties": {
@@ -162,7 +170,8 @@
     "the wall's plane",
     0.0,
     "",
-    "auto"
+    "auto",
+    true
    ]
   },
   {
@@ -188,6 +197,12 @@
     },
     {
      "name": "image",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": 9
+    },
+    {
+     "name": "wall_image",
      "type": "IMAGE",
      "shape": 7,
      "link": 1
@@ -429,7 +444,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "## Forms that grow out of the wall\n\n**kubakub height animate** takes a height map (black = the wall, white = furthest out) and lets it grow: one height map per frame, and the same as a relief lit from the side, laid on `image`.\n\nHere the height comes from **kubakub form height** (the sample building with a sample form; see `form_height.json` for your own model). It can be **any depth map** instead: connect the output of Depth Anything or Marigold to `height`, the picture it was made from to `image`, and raise `wall` to the grey of the wall so only what stands in front of it grows.\n\n- `grow`: all together, peaks first, built up in layers, or along the field (connect a kubakub mask field, e.g. radial or a drawn direction).\n- `curve`: ramp grows once; sine breathes; beats / hits and sound level follow a sound on `audio`.\n- `scale` is 0.5 here to keep it quick.\n\n`height` (the grey frames) goes into the depth presets of kubakub shader (hard shadow) or out as displacement; `lit` is a ready clip, also as the guide of kubakub motion guide."
+    "## Forms that grow out of the wall\n\n**kubakub height animate** takes a height map (black = the wall, white = furthest out) and lets it grow: one height map per frame, and the same as a relief lit from the side, laid on `image`.\n\nHere the height comes from **kubakub form height** (the sample building with a sample form; see `form_height.json` for your own model). It can be **any depth map** instead: connect the output of Depth Anything or Marigold to `height`, the picture it was made from to `image`, and raise `wall` to the grey of the wall so only what stands in front of it grows.\n\n- `colours` is on at kubakub form height: its `colour` picture is on `image`, the clay render on `wall_image`, so the form brings its colour with it as it comes out.\n- `grow`: all together, peaks first, built up in layers, or along the field (connect a kubakub mask field, e.g. radial or a drawn direction).\n- `curve`: ramp grows once; sine breathes; beats / hits and sound level follow a sound on `audio`.\n- `scale` is 0.5 here to keep it quick.\n\n`height` (the grey frames) goes into the depth presets of kubakub shader (hard shadow) or out as displacement; `lit` is a ready clip, also as the guide of kubakub motion guide."
    ],
    "title": "Read me"
   }
@@ -440,7 +455,7 @@
    1,
    0,
    3,
-   1,
+   2,
    "IMAGE"
   ],
   [
@@ -498,6 +513,14 @@
    6,
    0,
    "STRING"
+  ],
+  [
+   9,
+   2,
+   4,
+   3,
+   1,
+   "IMAGE"
   ]
  ],
  "groups": [],

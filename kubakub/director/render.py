@@ -102,6 +102,18 @@ def _arrow(v):
         return None
 
 
+def _height(h) -> dict | None:
+    """'height': the layer's picture is a height map that grows (kubakub/heightanim.py), or None (off).
+    {"mode": how it grows, "value": 0 = the bare wall .. 1 = the whole height, "wall": the grey that is the wall,
+    "look": height (grey), relief (lit from the side) or shading (the relief, white on the flat wall), "angle": where the light comes from, "relief": how deep}"""
+    if not isinstance(h, dict) or h.get("on") is False:
+        return None
+    from .. import heightanim as ha
+    return {"mode": h.get("mode") if h.get("mode") in ha.GROWS[:3] else ha.GROWS[0], "value": max(0.0, _num(h, "value", 1.0)),
+            "wall": min(max(_num(h, "wall", 0.0), 0.0), 0.99), "look": h.get("look") if h.get("look") in ha.LOOKS else ha.LOOKS[1],
+            "angle": _num(h, "angle", 35.0), "relief": max(0.0, _num(h, "relief", 1.0))}
+
+
 def _react(r) -> dict | None:
     """'light_react': {"by": light layer id ("" = the first light layer), "amount": 0..1} or None (off)."""
     if not isinstance(r, dict) or r.get("on") is False:
@@ -301,6 +313,7 @@ def parse(doc) -> dict:
             "color": str(raw.get("color") or "#ffffff"),
             "fx": fxm.parse(raw.get("fx")),
             "light_react": _react(raw.get("light_react")),
+            "height": _height(raw.get("height")) if kind == "image" else None,
             "shape": _shape(raw.get("shape")) if kind == "shape" else None,
             "stagger": [b for b in raw.get("motion") or [] if isinstance(b, dict) and b.get("type") == "stagger" and b.get("on") is not False]
                        if raw.get("clip") else [],
@@ -841,6 +854,10 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
 
     def finish(L, piece):
         """A layer's placed pixels with its clip, its effects and the light it reacts to."""
+        hg = L["height"]
+        if hg and piece[1] is not None:                 # its picture is a height map: what has grown of it by now
+            from .. import heightanim as ha
+            piece[1] = ha.layer_look(piece[1], hg["value"], hg["mode"], hg["wall"], hg["look"], hg["angle"], hg["relief"], W)
         if L["clip"]:
             cm = clip_crop(L, ids_of(L["clip"], f"{L['name']} clip"), piece[0])
             piece[2] = cm if piece[2] is None else piece[2] * cm

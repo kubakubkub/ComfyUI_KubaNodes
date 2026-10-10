@@ -417,9 +417,12 @@ not show.
   white is.
 - **up** (advanced): .glb and .obj files count y as up, the scene counts z; *auto* tries both and says which one
   lies on the building.
+- **colours**: on = the `colour` output shows the forms in the model's own colours (its texture, or the colours on
+  its points), seen from the same camera, on the clay render of the real building. No light is put on them: they
+  are the model's plain colours. Off = `colour` is the clay render alone.
 
 Outputs: the **height** map, **forms** (a mask of where a form stands), **depth** (the real building with the
-forms on it as grey depth, near = white) and a **report** (how much of the building the model lies on, how far
+forms on it as grey depth, near = white), **colour** (see `colours`) and a **report** (how much of the building the model lies on, how far
 the forms stand out, how much of the picture they cover; it warns when the model does not lie on the building).
 
 What it is for: the height is a picture, so everything that works on pictures and masks works on it. Brought up
@@ -451,6 +454,8 @@ Depth Anything or Marigold grows the same way.
   0 is the bare wall, 1 the whole height.
 - **image**, **light_angle**, **relief**: for the `lit` output: the picture on the relief (the facade, the clay,
   the picture the depth map came from; empty = clay grey), where the light comes from and how deep it reads.
+- **wall_image**: the picture of the bare wall. With it, `image` shows only where a form has come out, so the
+  forms bring their colours with them: `colour` of kubakub form height on `image`, the clay render on `wall_image`.
 - **fps**, **seconds**, **scale**: the clip. 100 frames at 1920x1080 take about 6 GB of RAM; `scale` makes them
   smaller.
 
@@ -458,3 +463,6 @@ Outputs: **height** (the grey frames: the depth input of the kubakub shader pres
 displacement sequence), **lit** (the growth as a clip, lit from the side with no thrown shadows; it is also a
 guide clip for kubakub motion guide), **masks** (the same as masks), fps, the sound and a report. 100 frames at
 1024x768 take about 5 s. Example: `example_workflows/height_animate.json`.
+
+In the **kubakub director** the same growth is a setting of an image layer (inspector → height), with keyframes
+and behaviours on how far it has grown: see [director](director.md).

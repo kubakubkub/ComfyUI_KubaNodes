@@ -179,6 +179,29 @@ check("node: a model that is somewhere else is said, with what to do", "WARNING:
 deep = nf.io.Mesh.Type(torch.from_numpy((as_file + np.array([0.0, 0, 5.0])).astype(np.float32))[None], mesh.faces)
 out = nf.KUBA_FormHeight.execute(sc, model=deep, up=fh.UPS[1]).result
 check("node: a model whose wall stands 5 m off the real one is said", "covers the building but lies on only 0 %" in out[3], out[3])
+# ---- the forms in the model's own colours
+out = nf.KUBA_FormHeight.execute(sc, colours=True).result
+c = out[4][0].numpy()
+check("colours, the sample: the form in its colour on grey where there is no clay render", out[4].shape == (1, H, W, 3)
+      and np.allclose(c[70, 110], nf.SAMPLE_COLOUR, atol=0.01) and np.allclose(c[5, 5], 0.5), f"{c[70, 110]} {c[5, 5]}")
+check("colours off: the picture is the clay alone", np.allclose(nf.KUBA_FormHeight.execute(sc).result[4].numpy(), 0.5))
+tex = torch.zeros((1, 8, 8, 3))
+tex[:, :, :4, 0] = 1.0                              # the left half of the texture red, the right half blue
+tex[:, :, 4:, 2] = 1.0
+uvs = torch.from_numpy(np.stack([as_file[:, 0] / 10.0, 1.0 - as_file[:, 1] / 6.0], 1).astype(np.float32))[None]
+worn = nf.io.Mesh.Type(mesh.vertices, mesh.faces, uvs=uvs, texture=tex)
+out = nf.KUBA_FormHeight.execute(sc, model=worn, wall_m=0.3, colours=True).result
+c = out[4][0].numpy()
+check("colours, a textured MESH: the forms wear their texture the right way round, the wall stays the real one",
+      np.allclose(c[70, 94], (1, 0, 0), atol=0.02) and np.allclose(c[70, 126], (0, 0, 1), atol=0.02) and np.allclose(c[20, 20], 0.5)
+      and np.allclose(out[0].numpy(), nf.KUBA_FormHeight.execute(sc, model=worn, wall_m=0.3).result[0].numpy()), f"{c[70, 94]} {c[70, 126]} {c[20, 20]}")
+top_red = torch.zeros((1, 8, 8, 3))
+top_red[:, :4, :, 0] = 1.0                           # the upper half of the picture red
+worn = nf.io.Mesh.Type(mesh.vertices, mesh.faces, uvs=uvs, texture=top_red)
+c = nf.KUBA_FormHeight.execute(sc, model=worn, wall_m=0.3, colours=True).result[4][0].numpy()
+check("colours: the top of the texture is the top of the building", c[52, 110, 0] > 0.9 and c[88, 110, 0] < 0.1, f"{c[52, 110]} {c[88, 110]}")
+out = nf.KUBA_FormHeight.execute(sc, model=mesh, wall_m=0.3, colours=True).result
+check("colours: a model without any is said, the picture is the clay", "carries no texture and no colours" in out[3] and np.allclose(out[4].numpy(), 0.5))
 try:
     import trimesh
     p = os.path.join(TMP, "forms.glb")

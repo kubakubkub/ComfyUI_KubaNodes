@@ -50,6 +50,10 @@ class KUBA_HeightAnimate(io.ComfyNode):
                 io.Image.Input("image", optional=True,
                                tooltip="The picture on the relief for 'lit': the facade, a clay render, the picture the "
                                        "depth map was made from. Empty = clay grey."),
+                io.Image.Input("wall_image", optional=True,
+                               tooltip="With 'image': the picture of the bare wall (e.g. the clay render). It shows "
+                                       "where a form has not come out yet, so the forms bring their colours with "
+                                       "them. Empty = 'image' is there from the start."),
                 io.Mask.Input("field", optional=True,
                               tooltip="For grow = along the field: the grey ramp from kubakub mask field, black comes "
                                       "first, white last. Empty = left to right over the forms."),
@@ -111,7 +115,7 @@ class KUBA_HeightAnimate(io.ComfyNode):
     @classmethod
     def execute(cls, height=None, image=None, field=None, grow=ha.GROWS[0], curve="ramp", cycle=3.0, value_from=0.0,
                 value_to=1.0, easing="ease in out", wall=0.0, soft=0.15, light_angle=35.0, relief=1.0, fps=25.0,
-                seconds=0.0, scale=1.0, audio=None) -> io.NodeOutput:
+                seconds=0.0, scale=1.0, audio=None, wall_image=None) -> io.NodeOutput:
         notes = []
         fps = float(min(max(fps, 1.0), 120.0))
         grow = grow if grow in ha.GROWS else ha.GROWS[0]
@@ -131,6 +135,13 @@ class KUBA_HeightAnimate(io.ComfyNode):
             base = np.ascontiguousarray(image[0, ..., :3].cpu().numpy(), np.float32)
             if base.shape[:2] != (H, W):
                 base = cv2.resize(base, (W, H), interpolation=cv2.INTER_AREA)
+        under = None
+        if wall_image is not None and base is not None:
+            under = np.ascontiguousarray(wall_image[0, ..., :3].cpu().numpy(), np.float32)
+            if under.shape[:2] != (H, W):
+                under = cv2.resize(under, (W, H), interpolation=cv2.INTER_AREA)
+        elif wall_image is not None:
+            notes.append("wall_image is not used without 'image' (it is what shows where 'image' has not come out yet)")
         f = None
         if grow == ha.GROWS[3]:
             if field is not None:
@@ -165,7 +176,8 @@ class KUBA_HeightAnimate(io.ComfyNode):
             else:
                 g = np.clip(ha.grown(h, v, grow, f, soft), 0.0, 1.0)
                 masks[i] = torch.from_numpy(g)
-                lit[i] = torch.from_numpy(ha.lit(g, base, light_angle, relief))
+                on = base if under is None else under + (base - under) * np.clip(g / ha.COMES, 0.0, 1.0)[..., None]
+                lit[i] = torch.from_numpy(ha.lit(g, on, light_angle, relief))
             pbar.update_absolute(i + 1, frames)
         grey = masks[..., None].repeat(1, 1, 1, 3)
 

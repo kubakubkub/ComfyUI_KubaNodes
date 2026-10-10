@@ -18,6 +18,11 @@ import numpy as np
 from . import maskfields as mf
 
 GROWS = ("all together", "peaks first", "built up in layers", "along the field")
+LOOKS = ("height", "relief", "shading")               # what a director layer shows of its height
+LAYER_BLUR = 3.0                                     # the same for a director layer (its window works on 8 bit pictures)
+FLAT = 0.8                                           # the grey of a lit relief where the wall is flat
+COMES = 0.04                                         # a form shows its own picture from this height on
+BLUR = 1.2                                           # the smoothing before the light, pixels at 1920 wide
 LIGHT_HEIGHT = math.radians(35.0)                    # the light stands this high above the wall
 
 
@@ -64,15 +69,17 @@ def grown(h, v, grow=GROWS[0], field=None, soft=0.1) -> np.ndarray:
     return (h * max(v, 0.0)).astype(np.float32, copy=False)
 
 
-def lit(h, base=None, angle=0.0, relief=1.0) -> np.ndarray:
+def lit(h, base=None, angle=0.0, relief=1.0, width=None, blur=BLUR) -> np.ndarray:
     """The height as a relief lit from the side: float32 [H, W, 3] in 0-1.
 
     base    the picture on the relief [H, W, 3] (the facade, a clay render, a texture); None = clay grey
     angle   where the light comes from, degrees: 0 = from the left, 90 = from above, 180 = from the right
     relief  how deep the relief reads: at 1 a height of 1 stands a tenth of the picture's width out
+    width   the width of the whole picture when h is a part of it (a layer's box); None = h's own
+    blur    pixels the height is smoothed by first (an 8 bit depth map has steps: they would show as lines)
     """
-    smooth = cv2.GaussianBlur(h, (0, 0), 1.2)             # an 8 bit depth map has steps: they would show as lines
-    k = float(relief) * 0.1 * h.shape[1]
+    smooth = cv2.GaussianBlur(h, (0, 0), float(blur)) if blur >= 0.3 else h
+    k = float(relief) * 0.1 * (width or h.shape[1])
     gx = cv2.Sobel(smooth, cv2.CV_32F, 1, 0, ksize=3, scale=0.125) * k
     gy = cv2.Sobel(smooth, cv2.CV_32F, 0, 1, ksize=3, scale=0.125) * k
     a = math.radians(float(angle))
@@ -81,3 +88,17 @@ def lit(h, base=None, angle=0.0, relief=1.0) -> np.ndarray:
     shade = np.clip(0.75 * shade + 0.05, 0.0, 1.25).astype(np.float32, copy=False)[..., None]
     out = np.repeat(shade, 3, -1) if base is None else base * shade
     return np.clip(out, 0.0, 1.0, out=out)
+
+
+def layer_look(rgb, value, mode=GROWS[0], wall=0.0, look=LOOKS[0], angle=35.0, relief=1.0, width=None) -> np.ndarray:
+    """A director layer whose picture is a height map, at value: the grown height as grey, or as a lit relief
+    (float32 [H, W, 3]), or as shading: the relief with the flat wall white, which changes nothing there under blend
+    multiply and darkens what is under a form's shadow side. rgb is the layer's placed picture, width the canvas
+    width (the look is the same in the small window and the full render). web/kubakub_director.js heightGrown /
+    heightShade are the twins."""
+    g = np.clip(grown(from_grey(rgb, wall), value, mode), 0.0, 1.0)
+    if look in LOOKS[1:]:
+        w = width or g.shape[1]
+        out = lit(g, None, angle, relief, w, LAYER_BLUR * w / 1920.0)
+        return np.minimum(out / FLAT, 1.0, out=out) if look == "shading" else out
+    return np.repeat(g[..., None], 3, -1)

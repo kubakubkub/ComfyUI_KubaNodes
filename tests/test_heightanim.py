@@ -108,8 +108,86 @@ m = out[2].numpy().max(axis=(1, 2))
 check("node: the built-in beat lasts as long as the clip", (np.diff(m[45:]) > 0.2).sum() >= 2, f"{np.round(m[45:], 2)}")
 colour = torch.zeros((1, 48, 80, 3))
 colour[..., 2] = 1.0
+grey = torch.full((1, H, W, 3), 0.5)
+out = nh.KUBA_HeightAnimate.execute(height=img, image=colour, wall_image=grey, seconds=1.0, fps=10.0, cycle=0.5, grow="peaks first", relief=0.0).result
+first, last = out[1][0].numpy(), out[1][-1].numpy()
+check("node, wall_image: the bare wall shows until a form comes out, then the form wears 'image'",
+      np.allclose(first, 0.8 * 0.5, atol=1e-3) and last[48, 40, 2] > 0.7 and last[48, 40, 0] < 0.01 and np.allclose(last[2, 2], 0.8 * 0.5, atol=1e-3),
+      f"{first[48, 40]} {last[48, 40]} {last[2, 2]}")
 out = nh.KUBA_HeightAnimate.execute(height=img, image=colour, seconds=0.2, fps=10.0).result
 check("node: a picture of another size is fitted and lit", out[1].shape == (2, H, W, 3) and float(out[1][..., :2].max()) == 0.0 and float(out[1][..., 2].max()) > 0.7)
+
+# ---- in the director: a layer whose picture is a height map (render.py finish, heightanim.layer_look)
+import json  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
+from kubakub.director import render as rd  # noqa: E402
+
+rgb = np.repeat(h[..., None], 3, -1)
+check("layer look: 'height' is the grown height as grey, 'relief' the node's lit relief at the canvas width",
+      np.allclose(ha.layer_look(rgb, 0.5, "all together")[..., 0], h * 0.5)
+      and np.allclose(ha.layer_look(rgb, 1.0, "peaks first", look="relief", angle=20.0, relief=2.0, width=W),
+                      ha.lit(h, None, 20.0, 2.0, W, ha.LAYER_BLUR * W / 1920.0), atol=1e-5)
+      and np.allclose(ha.layer_look(rgb, 1.0, look="shading", width=W)[0, 0], 1.0) and float(ha.layer_look(rgb, 1.0, look="shading", width=W).min()) < 0.6)
+BASE = np.full((H, W, 3), 0.25, np.float32)
+SRC = {"input:0": np.concatenate([rgb, np.ones((H, W, 1), np.float32)], -1)}
+
+
+def doc(height, **layer):
+    return {"version": 1, "layers": [{"id": "hm", "name": "height", "kind": "image", "source": "input:0", "x": 0, "y": 0, "w": W, "h": H,
+                                      "height": height, **layer}, {"id": "base", "name": "base", "kind": "base"}]}
+
+
+img0 = rd.render(doc({"mode": "all together", "value": 0.5, "look": "height"}), BASE, SRC, image_only=True)["image"]
+check("director render: a height layer shows the height grown so far", np.allclose(img0[..., 0], h * 0.5, atol=1e-5))
+plain = rd.render(doc(None), BASE, SRC, image_only=True)["image"]
+check("director render: without 'height' the layer is the plain picture", np.allclose(plain[..., 0], h, atol=1e-5))
+keyed = doc({"mode": "peaks first", "value": 0.0, "look": "height"}, anim={"height.value": [{"t": 0, "v": 0.0}, {"t": 2, "v": 1.0}]})
+keyed["timeline"] = {"duration": 2.0, "fps": 10}
+mid = rd.render(rd.animate(keyed, 1.0), BASE, SRC, image_only=True)["image"]
+check("director render: 'grown' takes keyframes (peaks first, half way)", np.allclose(mid[..., 0], np.clip(h - 0.5, 0, None), atol=1e-5))
+rel = rd.render(doc({"mode": "all together", "value": 1.0, "look": "relief", "angle": 0.0, "relief": 2.0}), BASE, SRC, image_only=True)["image"]
+check("director render: 'relief' is lit from the side", np.allclose(rel, ha.lit(h, None, 0.0, 2.0, W, ha.LAYER_BLUR * W / 1920.0), atol=1e-5)
+      and rel[48, 28, 0] > rel[0, 0, 0] > rel[48, 52, 0])
+check("director document: unknown modes and looks fall back, values are kept in range",
+      rd.parse(doc({"mode": "sideways", "look": "x", "value": -2, "wall": 5}))["layers"][0]["height"]
+      == {"mode": "all together", "value": 0.0, "wall": 0.99, "look": "relief", "angle": 35.0, "relief": 1.0}
+      and rd.parse(doc({"on": False}))["layers"][0]["height"] is None)
+
+node = shutil.which("node")
+if not node:
+    print("skip the window twin: node.js not found")
+else:                                               # the window's own code (web/kubakub_director.js) on the same numbers
+    js = open(os.path.join(HERE, "..", "web", "kubakub_director.js"), encoding="utf-8").read()
+    engine = js[js.index("// ---- height: a layer's picture as a height map"):js.index("// ---- audio: beats from a mono signal")]
+    CASES = [(v, m) for v in (0.0, 0.3, 1.0, 1.4) for m in ha.GROWS[:3]]
+    SHADES = [(0.0, 1.0, 1.2), (35.0, 2.5, 0.9), (140.0, 0.6, 2.2), (-90.0, 1.0, 0.1)]      # angle, relief, blur
+    vec = os.path.join(TMP, "height_vectors.json")
+    os.makedirs(TMP, exist_ok=True)
+    json.dump({"h": h.ravel().tolist(), "w": W, "hh": H, "cases": CASES, "shades": SHADES}, open(vec, "w"))
+    runner = engine + """
+const V = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8")), h = Float32Array.from(V.h);
+console.log(JSON.stringify({ grown: V.cases.map(([v, m]) => Array.from(heightGrown(h, v, m))),
+  shade: V.shades.map(([a, r, s]) => Array.from(heightShade(h, V.w, V.hh, a, r, 640, s))),
+  lists: [HEIGHT_GROWS, HEIGHT_LOOKS, HEIGHT_DEF] }));
+"""
+    run = os.path.join(TMP, "height_twin.js")
+    open(run, "w", encoding="utf-8").write(runner)
+    res = subprocess.run([node, run, vec], capture_output=True, text=True)
+    if res.returncode:
+        check("window twin runs", False, res.stderr[-600:])
+    else:
+        JS = json.loads(res.stdout)
+        worst = max(float(np.abs(np.array(g, np.float32) - ha.grown(h, v, m).ravel()).max()) for g, (v, m) in zip(JS["grown"], CASES))
+        check(f"window twin: {len(CASES)} grown heights agree per pixel", worst < 1e-6, f"worst {worst}")
+        worst = max(float(np.abs(np.array(g, np.float32).reshape(H, W) - ha.lit(h, None, a, r, 640, s)[..., 0]).max())
+                    for g, (a, r, s) in zip(JS["shade"], SHADES))
+        check(f"window twin: {len(SHADES)} lit reliefs agree per pixel (blur, slope, light)", worst < 2e-4, f"worst {worst}")
+        check("window twin: the lists and defaults are the render's", JS["lists"][0] == list(ha.GROWS[:3]) and JS["lists"][1] == list(ha.LOOKS)
+              and rd.parse(doc({}))["layers"][0]["height"] == JS["lists"][2], f"{JS['lists']}")
+    check("window: the height is read, kept and drawn (the places that copy a layer know it)",
+          all(js.count(s) >= n for s, n in (("height: L.height ? { ...L.height } : undefined", 2), ("height: s.height ? { ...s.height } : undefined", 1),
+                                           ('"light_react", "height", "motion"]', 1), ("this.applyHeight(lc, L, R)", 1), ("if (L.height) c.height", 1))))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print("\nALL PASSED" if not failures else f"\n{len(failures)} FAILED: {failures}")

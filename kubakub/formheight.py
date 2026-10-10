@@ -12,6 +12,7 @@ numpy + opencv; GL only in model_depth. No ComfyUI imports (tests/test_formheigh
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 
 import cv2
@@ -26,14 +27,26 @@ FROMS = ("the wall's plane", "the real surface")
 _VERT = """#version 300 es
 layout(location = 0) in vec4 aClip;
 layout(location = 1) in float aDepth;
+layout(location = 2) in vec2 aUV;
+layout(location = 3) in vec3 aCol;
 out float vDepth;
-void main() { vDepth = aDepth; gl_Position = aClip; }
+out vec2 vUV;
+out vec3 vCol;
+void main() { vDepth = aDepth; vUV = aUV; vCol = aCol; gl_Position = aClip; }
 """
 _FRAG = """#version 300 es
 precision highp float;
+uniform sampler2D uTex;
+uniform float uUseTex;
 in float vDepth;
+in vec2 vUV;
+in vec3 vCol;
 layout(location = 0) out vec4 o;
-void main() { o = vec4(vDepth, 1.0, 0.0, 1.0); }
+layout(location = 1) out vec4 c;
+void main() {
+    o = vec4(vDepth, 1.0, 0.0, 1.0);
+    c = vec4(vCol * (uUseTex > 0.5 ? texture(uTex, vUV).rgb : vec3(1.0)), 1.0);
+}
 """
 
 
@@ -49,77 +62,118 @@ def to_scene(vertices, y_up, unit_scale=1.0) -> np.ndarray:
 def model_depth(cam, vertices, faces) -> np.ndarray:
     """The model seen from the scene's camera: depth along the view axis per pixel (float32 [H, W], metres, 0 = no
     model there). vertices in the scene's world."""
+    return model_view(cam, vertices, faces)[0]
+
+
+def model_view(cam, vertices, faces, look=None) -> tuple:
+    """The model seen from the scene's camera -> (depth as model_depth gives it, its colours float32 [H, W, 3] or
+    None without `look`). The colours are the model's own, with no light on them.
+
+    look  {"uv": [V, 2] texture places, v counted from the bottom (as trimesh holds them), or None;
+           "col": [V, 3] a colour per point in 0-1, or None;
+           "parts": [(first face, how many, picture uint8 [h, w, 3 or 4] or None)]: which faces wear which texture}
+    """
     from . import shader_render as sr
     pc = (np.asarray(vertices, np.float64) - cam.C) @ cam.R
     clip = np.concatenate([pc, np.ones((len(pc), 1))], 1) @ cam.P.T
-    data = np.ascontiguousarray(np.concatenate([clip, -pc[:, 2:3]], 1), np.float32)
+    n = len(pc)
+    uv = look.get("uv") if look else None
+    col = look.get("col") if look else None
+    data = np.ascontiguousarray(np.concatenate([
+        clip, -pc[:, 2:3], np.zeros((n, 2)) if uv is None else uv, np.ones((n, 3)) if col is None else col], 1), np.float32)
     index = np.ascontiguousarray(faces, np.uint32).ravel()
+    parts = look["parts"] if look else [(0, len(index) // 3, None)]
     W, H = cam.W, cam.H
-    with sr.held() as g:
+    with sr.held() as g, contextlib.ExitStack() as undo:
         gl = g.gl
-        made = {}
-        try:
-            made["program"] = program = g._create_program(_VERT, _FRAG)
-            made["vao"] = vao = gl.glGenVertexArrays(1)
-            gl.glBindVertexArray(vao)
-            made["buffers"] = vbo, ebo = [int(b) for b in gl.glGenBuffers(2)]
-            gl.glBindBuffer(gl.GL_ARRAY_BUFFER, vbo)
-            gl.glBufferData(gl.GL_ARRAY_BUFFER, data.nbytes, data, gl.GL_STATIC_DRAW)
-            gl.glEnableVertexAttribArray(0)
-            gl.glVertexAttribPointer(0, 4, gl.GL_FLOAT, False, 20, ctypes.c_void_p(0))
-            gl.glEnableVertexAttribArray(1)
-            gl.glVertexAttribPointer(1, 1, gl.GL_FLOAT, False, 20, ctypes.c_void_p(16))
-            gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, ebo)
-            gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, index.nbytes, index, gl.GL_STATIC_DRAW)
 
-            made["texture"] = target = gl.glGenTextures(1)
-            gl.glBindTexture(gl.GL_TEXTURE_2D, target)
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA32F, W, H, 0, gl.GL_RGBA, gl.GL_FLOAT, None)
-            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
-            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
-            made["depth"] = zbuf = gl.glGenRenderbuffers(1)
-            gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, zbuf)
-            gl.glRenderbufferStorage(gl.GL_RENDERBUFFER, gl.GL_DEPTH_COMPONENT32F, W, H)
-            made["fbo"] = fbo = gl.glGenFramebuffers(1)
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, fbo)
-            gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, target, 0)
-            gl.glFramebufferRenderbuffer(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_RENDERBUFFER, zbuf)
-            gl.glDrawBuffers(1, [gl.GL_COLOR_ATTACHMENT0])
-            if gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE:
-                raise RuntimeError(f"the graphics card refuses a {W}x{H} depth picture.")
-
-            gl.glUseProgram(program)
-            gl.glViewport(0, 0, W, H)
-            gl.glDisable(gl.GL_BLEND)
-            gl.glDisable(gl.GL_CULL_FACE)
-            gl.glEnable(gl.GL_DEPTH_TEST)
-            gl.glDepthFunc(gl.GL_LESS)
-            gl.glDepthMask(True)
-            gl.glClearColor(0, 0, 0, 0)
-            gl.glClearDepthf(1.0)
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-            gl.glDrawElements(gl.GL_TRIANGLES, len(index), gl.GL_UNSIGNED_INT, ctypes.c_void_p(0))
-            buf = np.empty((H, W, 4), np.float32)
-            gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT0)
-            gl.glReadPixels(0, 0, W, H, gl.GL_RGBA, gl.GL_FLOAT, buf)
-        finally:                                          # the shader renders that follow expect no depth test
+        def reset():                                      # the shader renders that follow expect no depth test
             gl.glDisable(gl.GL_DEPTH_TEST)
             gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
             gl.glBindVertexArray(0)
             gl.glUseProgram(0)
-            if "fbo" in made:
-                gl.glDeleteFramebuffers(1, [made["fbo"]])
-            if "depth" in made:
-                gl.glDeleteRenderbuffers(1, [made["depth"]])
-            if "texture" in made:
-                gl.glDeleteTextures(1, [made["texture"]])
-            if "buffers" in made:
-                gl.glDeleteBuffers(2, made["buffers"])
-            if "vao" in made:
-                gl.glDeleteVertexArrays(1, [made["vao"]])
-            if "program" in made:
-                gl.glDeleteProgram(made["program"])
-    return np.where(buf[::-1, :, 1] > 0.5, buf[::-1, :, 0], 0.0).astype(np.float32)
+            gl.glActiveTexture(gl.GL_TEXTURE0)
+
+        program = g._create_program(_VERT, _FRAG)
+        undo.callback(gl.glDeleteProgram, program)
+        undo.callback(reset)
+        vao = gl.glGenVertexArrays(1)
+        undo.callback(gl.glDeleteVertexArrays, 1, [vao])
+        gl.glBindVertexArray(vao)
+        buffers = [int(x) for x in gl.glGenBuffers(2)]
+        undo.callback(gl.glDeleteBuffers, 2, buffers)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, buffers[0])
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, data.nbytes, data, gl.GL_STATIC_DRAW)
+        for at, (size, offset) in enumerate(((4, 0), (1, 16), (2, 20), (3, 28))):
+            gl.glEnableVertexAttribArray(at)
+            gl.glVertexAttribPointer(at, size, gl.GL_FLOAT, False, 40, ctypes.c_void_p(offset))
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, buffers[1])
+        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, index.nbytes, index, gl.GL_STATIC_DRAW)
+
+        fbo = gl.glGenFramebuffers(1)
+        undo.callback(gl.glDeleteFramebuffers, 1, [fbo])
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, fbo)
+        targets = [gl.GL_COLOR_ATTACHMENT0, gl.GL_COLOR_ATTACHMENT1][:2 if look else 1]
+        for attachment in targets:
+            target = gl.glGenTextures(1)
+            undo.callback(gl.glDeleteTextures, 1, [target])
+            gl.glBindTexture(gl.GL_TEXTURE_2D, target)
+            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA32F, W, H, 0, gl.GL_RGBA, gl.GL_FLOAT, None)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+            gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, attachment, gl.GL_TEXTURE_2D, target, 0)
+        zbuf = gl.glGenRenderbuffers(1)
+        undo.callback(gl.glDeleteRenderbuffers, 1, [zbuf])
+        gl.glBindRenderbuffer(gl.GL_RENDERBUFFER, zbuf)
+        gl.glRenderbufferStorage(gl.GL_RENDERBUFFER, gl.GL_DEPTH_COMPONENT32F, W, H)
+        gl.glFramebufferRenderbuffer(gl.GL_FRAMEBUFFER, gl.GL_DEPTH_ATTACHMENT, gl.GL_RENDERBUFFER, zbuf)
+        gl.glDrawBuffers(len(targets), targets)
+        if gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE:
+            raise RuntimeError(f"the graphics card refuses a {W}x{H} depth picture.")
+
+        gl.glUseProgram(program)
+        gl.glUniform1i(gl.glGetUniformLocation(program, "uTex"), 0)
+        use_tex = gl.glGetUniformLocation(program, "uUseTex")
+        gl.glViewport(0, 0, W, H)
+        gl.glDisable(gl.GL_BLEND)
+        gl.glDisable(gl.GL_CULL_FACE)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glDepthFunc(gl.GL_LESS)
+        gl.glDepthMask(True)
+        gl.glClearColor(0, 0, 0, 0)
+        gl.glClearDepthf(1.0)
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        gl.glActiveTexture(gl.GL_TEXTURE0)
+        gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
+        for first, count, picture in parts:
+            if picture is not None and uv is not None:
+                px = np.ascontiguousarray(picture[::-1, :, :3])      # GL counts a picture's rows from the bottom, as the uv
+                tex = gl.glGenTextures(1)
+                undo.callback(gl.glDeleteTextures, 1, [tex])
+                gl.glBindTexture(gl.GL_TEXTURE_2D, tex)
+                gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB8, px.shape[1], px.shape[0], 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, px)
+                gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR_MIPMAP_LINEAR)
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+                gl.glUniform1f(use_tex, 1.0)
+            else:
+                gl.glUniform1f(use_tex, 0.0)
+            gl.glDrawElements(gl.GL_TRIANGLES, int(count) * 3, gl.GL_UNSIGNED_INT, ctypes.c_void_p(int(first) * 12))
+        buf = np.empty((H, W, 4), np.float32)
+        gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT0)
+        gl.glReadPixels(0, 0, W, H, gl.GL_RGBA, gl.GL_FLOAT, buf)
+        depth = np.where(buf[::-1, :, 1] > 0.5, buf[::-1, :, 0], 0.0).astype(np.float32)
+        rgb = None
+        if look:
+            gl.glReadBuffer(gl.GL_COLOR_ATTACHMENT1)
+            gl.glReadPixels(0, 0, W, H, gl.GL_RGBA, gl.GL_FLOAT, buf)
+            rgb = np.clip(buf[::-1, :, :3], 0.0, 1.0)
+    return depth, rgb
+
+
+def shown(values) -> np.ndarray:
+    """Colour values a model holds as light (the colours on its points, a material's plain colour) as picture values."""
+    return np.clip(np.asarray(values, np.float64), 0.0, 1.0) ** (1.0 / 2.2)
 
 
 def _over_view(cam, values, u, v, inverse=False) -> np.ndarray:

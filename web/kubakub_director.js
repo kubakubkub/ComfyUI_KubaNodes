@@ -475,6 +475,7 @@ function repeatApply(c, b, k) {
 }
 function mClamp(p, v) {
   if (p === "opacity") return Math.min(1, Math.max(0, v));
+  if (p === "height.value" || p === "height.relief") return Math.max(0, v);
   if (p === "w" || p === "h") return Math.max(1, v);
   if (p.startsWith("fx.") || [".power", ".size", ".feather", "env_strength", ".brightness", ".strength", ".distance"].some(e => p.endsWith(e))) return Math.max(0, v);
   return v;
@@ -540,6 +541,45 @@ const M_PARAMS = { wiggle: [["amount", "amount"], ["freq", "per second"], ["seed
   pulse: [["amount", "amount"], ["attack", "attack s"], ["decay", "decay s"]], audio: [["amount", "amount"], ["smooth", "release s"]],
   stagger: [["step", "step s"], ["fade", "fade s"]], field: [], swap: [],
   repeat: [["count", "copies"], ["rotate", "rotate °/copy"], ["scale", "scale %/copy"], ["opacity", "opacity/copy"], ["delay", "delay s/copy"]] };
+// ---- height: a layer's picture as a height map that grows (= kubakub/heightanim.py grown / lit; tests/test_heightanim.py)
+const HEIGHT_GROWS = ["all together", "peaks first", "built up in layers"], HEIGHT_LOOKS = ["height", "relief", "shading"];
+const HEIGHT_DEF = { mode: "all together", value: 1, wall: 0, look: "relief", angle: 35, relief: 1 };
+function heightGrown(h, v, mode) {                   // 0 = the bare wall, 1 = the whole height
+  const o = new Float32Array(h.length), m = Math.max(0, v), c = 1 - Math.min(v, 1);
+  if (mode === "peaks first") for (let i = 0; i < h.length; i++) o[i] = Math.max(0, h[i] - c);
+  else if (mode === "built up in layers") for (let i = 0; i < h.length; i++) o[i] = Math.min(h[i], m);
+  else for (let i = 0; i < h.length; i++) o[i] = h[i] * m;
+  return o;
+}
+function heightMirror(i, n) {                        // an index beyond the edge, mirrored without the edge pixel (as OpenCV)
+  if (n === 1) return 0;
+  while (i < 0 || i >= n) i = i < 0 ? -i : 2 * n - 2 - i;
+  return i;
+}
+function heightBlur(a, w, h, sigma) {                // a Gaussian with OpenCV's kernel size for float pictures
+  if (!(sigma >= 0.3)) return a;
+  const r = ((Math.round(sigma * 8 + 1) | 1) - 1) / 2, k = new Float64Array(2 * r + 1), t = new Float32Array(a.length), o = new Float32Array(a.length);
+  let s = 0;
+  for (let i = -r; i <= r; i++) s += k[i + r] = Math.exp(-i * i / (2 * sigma * sigma));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = 0;
+    for (let i = -r; i <= r; i++) v += k[i + r] * a[y * w + (x + i >= 0 && x + i < w ? x + i : heightMirror(x + i, w))];
+    t[y * w + x] = v / s; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = 0;
+    for (let i = -r; i <= r; i++) v += k[i + r] * t[(y + i >= 0 && y + i < h ? y + i : heightMirror(y + i, h)) * w + x];
+    o[y * w + x] = v / s; }
+  return o;
+}
+function heightShade(h0, w, h, angle, relief, width, sigma) {   // the height as a relief lit from the side: grey 0-1, flat = 0.8
+  const p = heightBlur(h0, w, h, sigma), k = relief * 0.1 * width / 8, a = angle * Math.PI / 180, e = 35 * Math.PI / 180;
+  const lx = -Math.cos(a) * Math.cos(e), ly = -Math.sin(a) * Math.cos(e), lz = Math.sin(e), o = new Float32Array(p.length);
+  for (let y = 0; y < h; y++) { const u = heightMirror(y - 1, h) * w, m = y * w, d = heightMirror(y + 1, h) * w;
+    for (let x = 0; x < w; x++) { const l = heightMirror(x - 1, w), r = heightMirror(x + 1, w);
+      const gx = (p[u + r] + 2 * p[m + r] + p[d + r] - p[u + l] - 2 * p[m + l] - p[d + l]) * k;
+      const gy = (p[d + l] + 2 * p[d + x] + p[d + r] - p[u + l] - 2 * p[u + x] - p[u + r]) * k;
+      o[m + x] = Math.min(1, Math.max(0, 0.75 * (-gx * lx - gy * ly + lz) / (Math.sqrt(gx * gx + gy * gy + 1) * lz) + 0.05)); } }
+  return o;
+}
+
 // ---- audio: beats from a mono signal (onset envelope at 100 Hz, tempo by autocorrelation, phase by the best fit)
 function analyzeBeats(x, sr) {
   const hop = Math.max(1, Math.round(sr / 100)), n = Math.floor(x.length / hop);
@@ -923,6 +963,7 @@ class Director {
     if (L.kind === "shape") out.push("color", "shape.feather", ...Object.keys(L.shape || {}).filter(p => p.startsWith("c_")).map(p => "shape." + p));
     if (["image", "paint", "shape", "base", "adjust"].includes(L.kind)) out.push(...Object.keys(FX_DEF).map(k => "fx." + k));
     if (L.light_react) out.push("light_react.amount");
+    if (L.height && L.kind === "image") out.push("height.value", "height.angle", "height.relief");
     if (L.kind === "light" && L.light) {
       out.push(...ANIM_RIG);
       for (const q of L.light.lights) out.push(...ANIM_LAMP.filter(f => q[f] !== undefined || f === "on").map(f => `light.lights.#${q.id}.${f}`));
@@ -1125,7 +1166,7 @@ class Director {
   }
   layerAt(L, t) {                                    // a copy of the layer with its keys and behaviours at time t (for delayed repeats)
     const c = { ...L, fx: L.fx ? { ...L.fx } : undefined, shape: L.shape ? { ...L.shape } : undefined, adjust: L.adjust ? { ...L.adjust } : undefined,
-      light_react: L.light_react ? { ...L.light_react } : undefined, mask: L.mask ? { ...L.mask } : undefined };
+      light_react: L.light_react ? { ...L.light_react } : undefined, height: L.height ? { ...L.height } : undefined, mask: L.mask ? { ...L.mask } : undefined };
     const loops = loopModes(L.motion || []), keyed = new Set();
     for (const [p, keys] of Object.entries(L.anim || {})) if (keys.length) { const v = keyedValue(keys, t, loops[p]); if (v !== undefined) { pathSet(c, p, v); keyed.add(p); } }
     for (const p of Object.keys(L._rest || {})) if (!keyed.has(p)) pathSet(c, p, this.restOf(L, p));
@@ -1706,7 +1747,7 @@ class Director {
   }
   serialize() {
     const keys = ["id", "name", "kind", "source", "visible", "opacity", "blend", "x", "y", "w", "h", "rotation", "flip_h", "flip_v",
-      "clip", "clip_feather", "holes", "mask", "adjust", "action", "prompt", "denoise", "color", "size", "remove_bg", "light", "anim", "video", "media", "shape", "fx", "light_react", "motion"];
+      "clip", "clip_feather", "holes", "mask", "adjust", "action", "prompt", "denoise", "color", "size", "remove_bg", "light", "anim", "video", "media", "shape", "fx", "light_react", "height", "motion"];
     const doc = { version: 1, canvas: [this.W, this.H],
       layers: this.layers.map(L => { const o = Object.fromEntries(keys.filter(k => L[k] !== undefined).map(k => [k, L[k]]));
         for (const p of Object.keys(L._rest || {})) {                       // saved without the behaviours (the node adds them per frame)
@@ -2194,6 +2235,20 @@ class Director {
     const by = L.light_react?.by || ""; return this.layers.find(q => q.kind === "light" && (by ? q.id === by : true)) || null;
   }
   reactLight(Lt) { return this.layers.some(q => q.light_react && +(q.light_react.amount ?? 1) > 0 && this.lightFor(q) === Lt); }
+  applyHeight(lc, L, R) {                             // the layer's picture as a height map, grown so far (= render.py finish)
+    const G = { ...HEIGHT_DEF, ...L.height }, PW = this.PW, PH = this.PH;
+    const x = R ? Math.max(0, Math.floor(R[0])) : 0, y = R ? Math.max(0, Math.floor(R[1])) : 0;
+    const w = R ? Math.min(PW, Math.ceil(R[0] + R[2])) - x : PW, h = R ? Math.min(PH, Math.ceil(R[1] + R[3])) - y : PH;
+    if (w < 1 || h < 1) return;
+    const im = lc.getImageData(x, y, w, h), d = im.data, n = w * h, g = new Float32Array(n), wall = Math.min(0.99, Math.max(0, +G.wall || 0));
+    for (let i = 0, p = 0; i < n; i++, p += 4) g[i] = Math.min(1, Math.max(0, ((d[p] + d[p + 1] + d[p + 2]) / 765 - wall) / (1 - wall)));
+    let o = heightGrown(g, +G.value, G.mode);
+    for (let i = 0; i < n; i++) if (o[i] > 1) o[i] = 1;
+    if (G.look !== "height") { o = heightShade(o, w, h, +G.angle || 0, Math.max(0, +G.relief || 0), PW, 3 * PW / 1920);
+      if (G.look === "shading") for (let i = 0; i < n; i++) o[i] = Math.min(1, o[i] / 0.8); }   // white on the flat wall
+    for (let i = 0, p = 0; i < n; i++, p += 4) d[p] = d[p + 1] = d[p + 2] = Math.round(o[i] * 255);
+    lc.putImageData(im, x, y);
+  }
   applyShade(lc, L) {                                 // x (light on the clay / its albedo), mixed by amount (= render.py light_react)
     const amt = Math.max(0, Math.min(1, +(L.light_react.amount ?? 1))), Lt = this.lightFor(L);
     if (!(amt > 0) || !Lt?.img) return;
@@ -2279,6 +2334,7 @@ class Director {
       } else { this._below = solo ? null : target;   // a shader fill may read what is under it (shaderFill)
         try { this.drawContent(lc, L); } finally { this._below = null; } }
       lc.restore();
+      if (L.height && L.kind === "image") this.applyHeight(lc, L, R);
       if (fxf) {                                     // the layer's effects, before masks by other layers
         const t = this.fxc; t.clearRect(0, 0, PW, PH); t.filter = fxf; t.drawImage(this.lyr, 0, 0); t.filter = "none";
         lc.save(); lc.clearRect(0, 0, PW, PH); lc.drawImage(this.fxtmp, 0, 0); lc.restore(); }
@@ -2601,6 +2657,7 @@ class Director {
               <div class="kkd-field"><span>motion</span><input type="range" data-id="v-motion" min="0" max="1" step="0.05"><span class="v" data-id="v-motion-v"></span></div>
             </div>
           </div>
+          <div data-id="g-height"></div>
           <div data-id="g-react"></div>
           <div data-id="g-fx"></div>
           <div data-id="g-motion"></div>
@@ -2613,7 +2670,7 @@ class Director {
       svg.innerHTML = '<filter id="kkdLumA" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0.2126 0.7152 0.0722 0 0"/><feComposite in2="SourceGraphic" operator="in"/></filter>';
       document.body.appendChild(svg);
     }
-    for (const id of ["layers", "g-motion", "g-fx", "g-react", "i-blend", "i-mask", "sh-fill", "sh-box"]) this.guardHTML(this.$(id));
+    for (const id of ["layers", "g-motion", "g-fx", "g-react", "g-height", "i-blend", "i-mask", "sh-fill", "sh-box"]) this.guardHTML(this.$(id));
     const unguard = e => { for (let n = e.target; n && n !== this.root; n = n.parentElement) if (n._kkdGuard) n._kkdGuard.html = null; };
     this.root.addEventListener("input", unguard, true); this.root.addEventListener("change", unguard, true);
     this.menu = document.createElement("div"); this.menu.className = "kkd-menu"; this.menu.hidden = true;
@@ -2767,6 +2824,16 @@ class Director {
     $("i-bg").textContent = L.remove_bg ? "removed" : "remove";
     this.root.querySelectorAll("[data-a]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.a === L.action)));
     $("i-prompt").value = L.prompt; $("i-den").value = L.denoise; $("i-den-v").textContent = (+L.denoise).toFixed(2);
+    $("g-height").hidden = L.kind !== "image";
+    if (!$("g-height").hidden) { const G = L.height ? { ...HEIGHT_DEF, ...L.height } : null, relief = G && G.look !== "height";
+      const row = (key, label, lo, hi, st, unit, tip) => `<div class="kkd-field" data-tip="${esc(tip)}"><span>${label}</span><input type="range" data-hg="${key}" min="${lo}" max="${hi}" step="${st}" value="${+G[key]}"><span class="v" data-hgv="${key}">${+(+G[key]).toFixed(2)}${unit}</span></div>`;
+      $("g-height").kkdHTML = `<div class="kkd-field" data-tip="Read this picture as a height map (black = the wall, white = stands furthest out: kubakub form height, or a depth map) and let it grow out of the wall. Set a keyframe on 'grown' or give it a behaviour"><span>height</span>
+        <select data-id="hg-mode"><option value="off" ${G ? "" : "selected"}>a plain picture</option>${HEIGHT_GROWS.map(m => `<option value="${m}" ${G?.mode === m ? "selected" : ""}>grows ${m}</option>`).join("")}</select><span></span></div>` + (G ?
+        row("value", "grown", 0, 1, 0.01, "", "0 = the bare wall, 1 = the whole height") +
+        `<div class="kkd-field" data-tip="height: the grown height as grey (a mask for other layers, a depth for shaders). relief: lit from the side, as clay. shading: the same with the flat wall white; set blend to multiply and it shades the picture under it"><span>look</span><select data-id="hg-look">${HEIGHT_LOOKS.map(m => `<option value="${m}" ${G.look === m ? "selected" : ""}>${m}</option>`).join("")}</select><span></span></div>` +
+        row("wall", "wall", 0, 0.99, 0.01, "", "The grey that counts as the wall. 0 for kubakub form height; raise it for a depth map of a whole picture") +
+        (relief ? row("angle", "light from", -180, 180, 1, "°", "Where the light comes from: 0 = left, 90 = above, 180 = right") +
+          row("relief", "relief", 0, 5, 0.05, "", "How deep the relief reads") : "") : ""); }
     const lights = this.layers.filter(q => q.kind === "light");
     $("g-react").hidden = !["image", "paint", "shape"].includes(L.kind) || !lights.length;
     if (!$("g-react").hidden) { const R = L.light_react;
@@ -2950,7 +3017,7 @@ class Director {
   }
   state() {
     return { layers: this.layers.map(L => ({ ...L, mask: { ...L.mask }, adjust: { ...L.adjust }, light: L.light ? JSON.parse(JSON.stringify(L.light)) : undefined,
-      shape: L.shape ? JSON.parse(JSON.stringify(L.shape)) : undefined, fx: L.fx ? { ...L.fx } : undefined, light_react: L.light_react ? { ...L.light_react } : undefined,
+      shape: L.shape ? JSON.parse(JSON.stringify(L.shape)) : undefined, fx: L.fx ? { ...L.fx } : undefined, light_react: L.light_react ? { ...L.light_react } : undefined, height: L.height ? { ...L.height } : undefined,
       anim: L.anim ? JSON.parse(JSON.stringify(L.anim)) : undefined, video: L.video ? { ...L.video } : undefined,
       media: L.media ? JSON.parse(JSON.stringify(L.media)) : undefined, motion: L.motion ? JSON.parse(JSON.stringify(L.motion)) : undefined,
       _rest: L._rest ? { ...L._rest } : undefined, _applied: L._applied ? { ...L._applied } : undefined, _off: L._off ? { ...L._off } : undefined,
@@ -2964,7 +3031,7 @@ class Director {
     if (st.tl) { Object.assign(this.tl, { duration: st.tl.duration, fps: st.tl.fps, markers: JSON.parse(JSON.stringify(st.tl.markers)) });
       this.tlMark = null; this.tl.time = Math.min(this.tl.time, this.tl.duration); this.fillTl?.(); }
     this.layers = st.layers.map(s => { const L = { ...s, mask: { ...s.mask }, adjust: { ...s.adjust }, light: s.light ? JSON.parse(JSON.stringify(s.light)) : undefined,
-      shape: s.shape ? JSON.parse(JSON.stringify(s.shape)) : undefined, fx: s.fx ? { ...s.fx } : undefined, light_react: s.light_react ? { ...s.light_react } : undefined,
+      shape: s.shape ? JSON.parse(JSON.stringify(s.shape)) : undefined, fx: s.fx ? { ...s.fx } : undefined, light_react: s.light_react ? { ...s.light_react } : undefined, height: s.height ? { ...s.height } : undefined,
       anim: s.anim ? JSON.parse(JSON.stringify(s.anim)) : undefined, video: s.video ? { ...s.video } : undefined,
       media: s.media ? JSON.parse(JSON.stringify(s.media)) : undefined, motion: s.motion ? JSON.parse(JSON.stringify(s.motion)) : undefined,
       _rest: s._rest ? { ...s._rest } : undefined, _applied: s._applied ? { ...s._applied } : undefined, _off: s._off ? { ...s._off } : undefined };
@@ -3032,6 +3099,7 @@ class Director {
     if (L.shape) c.shape = JSON.parse(JSON.stringify(L.shape));
     if (L.fx) c.fx = { ...L.fx };
     if (L.light_react) c.light_react = { ...L.light_react };
+    if (L.height) c.height = { ...L.height };
     if (L.motion) c.motion = JSON.parse(JSON.stringify(L.motion));
     if (L._rest) { c._rest = { ...L._rest }; c._applied = { ...L._applied }; }
     if (L._off) c._off = { ...L._off };
@@ -3496,6 +3564,13 @@ class Director {
     $("i-prompt").oninput = e => { this.once(); L().prompt = e.target.value; };
     $("i-den").oninput = e => { this.once(); L().denoise = +e.target.value; $("i-den-v").textContent = L().denoise.toFixed(2); };
     $("i-col").oninput = e => { L().color = e.target.value; };
+    $("g-height").addEventListener("change", e => { const id = e.target.dataset.id; if (id !== "hg-mode" && id !== "hg-look") return; this.snap(); const q = L();
+      if (id === "hg-look") q.height = { ...HEIGHT_DEF, ...q.height, look: e.target.value };
+      else if (e.target.value === "off") delete q.height; else q.height = { ...HEIGHT_DEF, ...q.height, mode: e.target.value };
+      this.renderInspector(); this.renderLayers(); this.draw(); });
+    $("g-height").addEventListener("input", e => { const k = e.target.dataset.hg; if (!k) return; this.once(); const q = L();
+      q.height = { ...HEIGHT_DEF, ...q.height, [k]: +e.target.value };
+      const v = $("g-height").querySelector(`[data-hgv="${k}"]`); if (v) v.textContent = +(+e.target.value).toFixed(2) + (k === "angle" ? "°" : ""); this.draw(); });
     $("g-react").addEventListener("change", e => { if (e.target.dataset.id !== "r-by") return; this.snap(); const q = L();
       if (e.target.value === "off") delete q.light_react; else q.light_react = { by: e.target.value, amount: +(q.light_react?.amount ?? 1) };
       this.renderInspector(); this.renderLayers(); this.draw(); });
