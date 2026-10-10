@@ -19,7 +19,7 @@ downloads. `--check` only reports.
 | | [qwen_image_2.1_vae_bf16](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/vae) | vae | |
 | | turbo LoRA: [Viggle/Qwen-Image-2.1-viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) (by hand) | loras | schedule `qwen21_turbo_5` |
 | | better decoder: [texture-fix VAE](https://huggingface.co/madebyollin/texture-fix-vae-for-qwen-image-2.1) (by hand) | vae | replaces the VAE above |
-| **4 LTX 2.5** | [transformer int8 convrot, gemma4 text encoder, video + audio VAE, latent upscaler x2](https://huggingface.co/Lightricks/LTX-2.5) | diffusion_models, text_encoders, vae, latent_upscale_models | 04, director_video_ltx |
+| **4 LTX 2.5** | [transformer int8 convrot, gemma4 text encoder, video + audio VAE, latent upscaler x2](https://huggingface.co/Lightricks/LTX-2.5) | diffusion_models, text_encoders, vae, latent_upscale_models | 04, director_video_ltx, motion_guide |
 | **5 SAM 3.1** | [sam3.1_multiplex_fp16](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints) | checkpoints | regions_sam3_masks (+ [KJNodes](https://github.com/kijai/ComfyUI-KJNodes) Points Editor) |
 | **MiniMax H3** | open ComfyUI's template *video_minimax_h3_i2v* (Workflow > Browse templates), ComfyUI offers its models | | director_h3_clips |
 

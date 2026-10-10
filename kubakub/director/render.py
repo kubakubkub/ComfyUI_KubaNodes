@@ -20,6 +20,8 @@ Document (version 1):
         "shape": {"type": "rect" | "ellipse" | "poly", "points": [[u, v] 0..1 in the box], "feather": px}, "color": "#rrggbb",
                                    shape only: a solid colour shape in the layer's box (a solid = a rect over the canvas;
                                    hidden and used by another layer's mask = a shape mask); feather = soft edge (sigma, px)
+                                   + "shader": preset name | "code": GLSL, "loops", "speed", "c_<control>": number:
+                                   the shape is filled by that shader instead of the colour (kubakub/shadertoy.py)
         "light": {...}}]}          light only: the rig (scene3d/scene_view.rig_from_doc); the node renders it in
                                    Cycles and hands the pixels in as sources["light:<id>"] (a full-canvas layer)
 
@@ -74,7 +76,30 @@ def _shape(sh) -> dict:
     t = sh.get("type") if sh.get("type") in SHAPES else "rect"
     if t == "poly" and len(pts) < 3:
         t = "rect"
-    return {"type": t, "points": pts, "feather": min(max(_num(sh, "feather", 0.0), 0.0), 500.0)}
+    out = {"type": t, "points": pts, "feather": min(max(_num(sh, "feather", 0.0), 0.0), 500.0)}
+    shader, code = str(sh.get("shader") or ""), str(sh.get("code") or "")
+    if shader or code.strip():                            # filled by a shader instead of the colour
+        out.update(shader=shader, code=code,
+                   loops=int(min(max(_num(sh, "loops", 1), 1), 1000)), speed=_num(sh, "speed", 1.0),
+                   now=dict(sh["now"]) if isinstance(sh.get("now"), dict) else None,
+                   # what the shader reads as its picture (image0): the layers below it, or the built-in noise a
+                   # pasted Shadertoy expects
+                   input=sh["input"] if sh.get("input") in ("below", "noise") else
+                   ("noise" if code.strip() else "below"))
+        out.update({k: float(v) for k, v in sh.items() if k.startswith("c_") and _is_num(v)})     # its controls
+        vec = _arrow(sh.get("vec"))
+        if vec:                                           # an arrow drawn on the layer: (x0, y0, x1, y1) in its box, 0-1
+            out["vec"] = vec
+    return out
+
+
+def _arrow(v):
+    """A drawn arrow as four numbers, or None (missing, not numbers, no length)."""
+    from .. import maskfields as mf
+    try:
+        return list(mf.parse_vector(v) or ()) or None if isinstance(v, (list, tuple)) and all(_is_num(x) for x in v) else None
+    except ValueError:
+        return None
 
 
 def _react(r) -> dict | None:
@@ -134,6 +159,76 @@ def shape_source(L, max_side=4096, cache=None):
     if pad <= 0:
         return out, L
     return out, dict(L, x=L["x"] - pad, y=L["y"] - pad, w=gw, h=gh)   # the grown box, relative to this x, y
+
+
+def is_shader(L) -> bool:
+    sh = L.get("shape") if isinstance(L, dict) else None
+    return bool(isinstance(sh, dict) and (sh.get("shader") or str(sh.get("code") or "").strip()))
+
+
+def _shader_text(sh):
+    from .. import shadertoy as st
+    return st.translated(st.shader_text(str(sh.get("shader") or ""), str(sh.get("code") or "")))
+
+
+def listens(L) -> bool:
+    """A shader fill that reads the sound (its level, a band or the beat): only then is the sound analysed for it."""
+    try:
+        return is_shader(L) and _shader_text(L["shape"]).listens
+    except Exception:  # noqa: BLE001      a broken shader is reported where it is drawn
+        return False
+
+
+def reads_below(L) -> bool:
+    """A shader fill that works on the picture under it (an effect on the layers below, like a colour grade)."""
+    if not is_shader(L) or L["shape"].get("input") != "below":
+        return False
+    try:
+        return 0 in _shader_text(L["shape"]).channels
+    except Exception:  # noqa: BLE001      a broken shader is reported where it is drawn
+        return False
+
+
+def _under(below, L):
+    """The part of the composite so far that lies under the layer's box (black outside the canvas)."""
+    H, W = below.shape[:2]
+    x0, y0 = int(round(min(L["x"], L["x"] + L["w"]))), int(round(min(L["y"], L["y"] + L["h"])))
+    bw, bh = max(1, int(round(abs(L["w"])))), max(1, int(round(abs(L["h"]))))
+    out = np.zeros((bh, bw, 3), np.float32)
+    ax0, ay0, ax1, ay1 = max(0, x0), max(0, y0), min(W, x0 + bw), min(H, y0 + bh)
+    if ax1 > ax0 and ay1 > ay0:
+        out[ay0 - y0:ay1 - y0, ax0 - x0:ax1 - x0] = np.clip(below[ay0:ay1, ax0:ax1, :3], 0, 1)
+    return out
+
+
+def shader_source(L, tl, max_side=4096, below=None):
+    """A shape layer filled by a shader (kubakub/shadertoy.py): the shape's pixels with the shader's picture in the
+    layer's box, as the window draws it (the shader is seen through the shape, nothing outside the box).
+    below: the composite of the layers under this one; a shader with input = below reads the part under its box as
+    its picture (None = not known yet: black). Other pictures a shader reads are the built-in noise."""
+    from .. import shader_render as sr
+    sh = L["shape"]
+    t = _shader_text(sh)
+    out, pad, gw, gh = _shape_pixels(L, max_side)
+    bw, bh = max(1.0, abs(L["w"])), max(1.0, abs(L["h"]))
+    s = out.shape[1] / (bw + 2 * pad)
+    p, iw, ih = int(round(pad * s)), max(1, int(round(bw * s))), max(1, int(round(bh * s)))
+    iw, ih = min(iw, out.shape[1] - p), min(ih, out.shape[0] - p)
+    values = sh.get("now") or sr.now(sh["loops"], sh["speed"], tl["time"], tl["duration"], None, tl.get("fps"))
+    static = {**sr.vector_values(sh.get("vec")), **{c.name: sh.get("c_" + c.name, c.default) for c in t.controls}}
+    pictures = {}
+    for i in t.channels:                              # as the window binds them
+        if i == 0 and sh.get("input") == "below":
+            if below is not None:
+                pictures[0] = (lambda pic: lambda k: ("below", pic))(_under(below, L))
+        elif i not in t.optional:
+            pictures[i] = sr.noise_texture(7 + 2 * i)
+    px = sr.still(t.source, iw, ih, values, static, pictures)
+    inside = np.zeros(out.shape[:2], np.float32)
+    inside[p:p + ih, p:p + iw] = px[..., 3]
+    out[..., 3] *= inside
+    out[p:p + ih, p:p + iw, :3] = px[..., :3]
+    return out, (L if pad <= 0 else dict(L, x=L["x"] - pad, y=L["y"] - pad, w=gw, h=gh))
 
 
 def _shape_pixels(L, max_side):
@@ -451,7 +546,7 @@ def animate(doc, t, ctx=None):
     if not isinstance(d.get("timeline"), dict):
         d["timeline"] = {}
     d["timeline"]["time"] = t                         # stagger weights are evaluated at the document time
-    if ctx is None and any(isinstance(L, dict) and L.get("motion") for L in d.get("layers", [])):
+    if ctx is None and any(isinstance(L, dict) and (L.get("motion") or listens(L)) for L in d.get("layers", [])):
         ctx = mo.context(d)
 
     kv = lambda ks, tt: key_value(ks, tt, True)       # noqa: E731  (keys sorted once per frame below)
@@ -508,6 +603,10 @@ def animate(doc, t, ctx=None):
     for L in out:                                     # applied: the frame needs no keys, only the stagger (clip weights; swaps are in clip_mix)
         if isinstance(L, dict):
             L.pop("anim", None)
+            if is_shader(L):                          # the shader's clock, loop and sound at this frame
+                from .. import shader_render as sr
+                sh = L["shape"] = dict(L["shape"])
+                sh["now"] = sr.now(sh.get("loops") or 1, sh.get("speed") if _is_num(sh.get("speed")) else 1.0, t, dur, ctx, timeline(d)["fps"])
             if L.get("motion"):
                 L["motion"] = [b for b in L["motion"] if isinstance(b, dict) and b.get("type") == "stagger"]
     d["layers"] = out
@@ -687,8 +786,9 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
         kind = fb.get("field") if fb.get("field") in mo.FIELD_KINDS else "edge distance"
         per = fb.get("per") if fb.get("per") in mo.FIELD_PER else "each region"
         order, effect = str(fb.get("order") or "left"), fb.get("effect") if fb.get("effect") in mo.FIELD_EFFECTS else "reveal"
+        vec = _arrow(fb.get("vec"))                     # an arrow drawn on the picture, 0-1 of the canvas
         key = ("field", tuple(ids), kind, per, num("angle", 0.0), num("cx", 0.5), num("cy", 0.5), order, int(num("seed", 1)),
-               num("noise_px", 64.0), bool(fb.get("invert")))
+               num("noise_px", 64.0), bool(fb.get("invert")), tuple(vec) if vec else None)
         f = mc.get(key)
         if f is None:
             with _FIELD_LOCK:                           # the frames of a sequence render in threads: built once
@@ -696,7 +796,8 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
                 if f is None:
                     own = [i for i in ids if i >= 0]
                     lab, n = mf.compact(labels, own)
-                    f = mc[key] = mf.field(lab, n, kind, per, key[4], (key[5], key[6]), order, key[8], key[9], key[10], ids=own)[0]
+                    f = mc[key] = mf.field(lab, n, kind, per, key[4], (key[5], key[6]), order, key[8], key[9], key[10], ids=own,
+                                           vector=vec)[0]
         x0, y0, x1, y1 = box
         vals = [[float(v[0]), float(v[1])] for v in fb["values"] if isinstance(v, (list, tuple)) and len(v) == 2]
         if not vals:
@@ -738,47 +839,8 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
         x0, y0, x1, y1 = box
         return lut[labels[y0:y1, x0:x1]]
 
-    # every layer's own pixels: (box, rgb or None = the base image, alpha or None = opaque)
-    own = [None] * n
-    for i, L in enumerate(layers):
-        if L["kind"] == "base":
-            alpha = None if base_a is None else base_a.copy()
-            if L["holes"]:
-                ids = ids_of(L["holes"], "base holes")
-                if ids:
-                    alpha = np.ones((H, W), np.float32) if alpha is None else alpha
-                    hm = full_mask(ids)
-                    for r0, r1 in _strips(0, H):
-                        alpha[r0:r1] *= 1 - hm[r0:r1]
-            piece = [FULL, None, alpha]
-        elif L["kind"] == "shape":
-            src, Lp = shape_source(L, cache=mc.setdefault(("shapes",), _Memo()))
-            got = place(src, Lp, W, H)
-            if got is None:
-                notes.append(f"{L['name']}: outside the canvas or empty")
-                continue
-            piece = list(got)
-        elif L["kind"] in ("image", "paint", "light"):
-            key = f"light:{L['id']}" if L["kind"] == "light" else L["source"]
-            src = sources.get(key)
-            if src is None:
-                if L["visible"]:
-                    notes.append(f"{L['name']}: " + ("not rendered (connect a scene)" if L["kind"] == "light"
-                                                     else f"source '{key}' not found") + ", layer skipped")
-                continue
-            if key.startswith(("media:", "light:")):    # video / light frames: new pictures every frame
-                got = place(_as_rgba(src), L, W, H) if L["kind"] == "image" else _full(_as_rgba(src), W, H)
-            elif L["kind"] == "image":                  # premultiplied once per source (repeat copies, frames)
-                pre = _per_source(mc, "pre", src, lambda: premultiply(_as_rgba(src)))
-                got = place(pre, L, W, H, pre=pre)
-            else:
-                got = _per_source(mc, "full", src, lambda: _full(_as_rgba(src), W, H), W, H)
-            if got is None:
-                notes.append(f"{L['name']}: outside the canvas or empty")
-                continue
-            piece = list(got)
-        else:
-            continue
+    def finish(L, piece):
+        """A layer's placed pixels with its clip, its effects and the light it reacts to."""
         if L["clip"]:
             cm = clip_crop(L, ids_of(L["clip"], f"{L['name']} clip"), piece[0])
             piece[2] = cm if piece[2] is None else piece[2] * cm
@@ -805,7 +867,62 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
                 shade = np.clip(np.asarray(lsrc)[y0:y1, x0:x1, :3] / albedo, 0, 4)
                 base_part = base_rgb[y0:y1, x0:x1] if prgb is None else prgb
                 piece = [(x0, y0, x1, y1), np.clip(base_part * (1 - rr["amount"] + rr["amount"] * shade), 0, 1).astype(np.float32), pal]
-        own[i] = piece
+        return piece
+
+    # every layer's own pixels: (box, rgb or None = the base image, alpha or None = opaque)
+    own = [None] * n
+    late = set()                         # shader fills that read what is under them: drawn when that is known
+    masking = {j for k, q in enumerate(layers) if q["mask"]["by"]       # layers another one takes as its mask
+               for j in ([k + 1] if q["mask"]["by"] == "below" else [m for m, o in enumerate(layers) if o["id"] == q["mask"]["by"]])}
+    for i, L in enumerate(layers):
+        if L["kind"] == "base":
+            alpha = None if base_a is None else base_a.copy()
+            if L["holes"]:
+                ids = ids_of(L["holes"], "base holes")
+                if ids:
+                    alpha = np.ones((H, W), np.float32) if alpha is None else alpha
+                    hm = full_mask(ids)
+                    for r0, r1 in _strips(0, H):
+                        alpha[r0:r1] *= 1 - hm[r0:r1]
+            piece = [FULL, None, alpha]
+        elif L["kind"] == "shape":
+            src = None
+            if reads_below(L):                        # here only its box and shape, in its colour
+                late.add(i)
+            elif is_shader(L) and (L["visible"] or i in masking):
+                try:
+                    src, Lp = shader_source(L, tl_now)
+                except Exception as e:  # noqa: BLE001      a broken shader must not cost the frame: its colour shows
+                    notes.append(f"{L['name']}: shader not drawn ({str(e).splitlines()[0]})")
+            if src is None:
+                src, Lp = shape_source(L, cache=mc.setdefault(("shapes",), _Memo()))
+            got = place(src, Lp, W, H)
+            if got is None:
+                notes.append(f"{L['name']}: outside the canvas or empty")
+                continue
+            piece = list(got)
+        elif L["kind"] in ("image", "paint", "light"):
+            key = f"light:{L['id']}" if L["kind"] == "light" else L["source"]
+            src = sources.get(key)
+            if src is None:
+                if L["visible"]:
+                    notes.append(f"{L['name']}: " + ("not rendered (connect a scene)" if L["kind"] == "light"
+                                                     else f"source '{key}' not found") + ", layer skipped")
+                continue
+            if key.startswith(("media:", "light:")):    # video / light frames: new pictures every frame
+                got = place(_as_rgba(src), L, W, H) if L["kind"] == "image" else _full(_as_rgba(src), W, H)
+            elif L["kind"] == "image":                  # premultiplied once per source (repeat copies, frames)
+                pre = _per_source(mc, "pre", src, lambda: premultiply(_as_rgba(src)))
+                got = place(pre, L, W, H, pre=pre)
+            else:
+                got = _per_source(mc, "full", src, lambda: _full(_as_rgba(src), W, H), W, H)
+            if got is None:
+                notes.append(f"{L['name']}: outside the canvas or empty")
+                continue
+            piece = list(got)
+        else:
+            continue
+        own[i] = piece if i in late else finish(L, piece)
 
     def mask_crop(i, box):
         """The mask layer's value (shape / brightness, inverted) over box, or None when there is no mask."""
@@ -879,6 +996,13 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
             continue
         if own[i] is None:
             continue
+        if i in late:                                   # its picture is everything composited so far
+            try:
+                got = place(*shader_source(L, tl_now, below=comp), W, H)
+            except Exception as e:  # noqa: BLE001      a broken shader must not cost the frame: its colour shows
+                got = None
+                notes.append(f"{L['name']}: shader not drawn ({str(e).splitlines()[0]})")
+            own[i] = finish(L, list(got) if got is not None else own[i])
         box, rgb, alpha = own[i]
         mk = mask_crop(i, box)
         if mk is not None:

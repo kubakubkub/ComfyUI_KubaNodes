@@ -99,6 +99,47 @@ u8 = (pic * 255).astype(np.uint8)
 ru = al.estimate((src * 255).astype(np.uint8), u8)
 check("8 bit pictures give the same fit", ru["ok"] and corner_error(ru["matrix"], true) < 1.0)
 
+# ---- a clip: it drifts while it plays, one frame is rubbish, the windows are animated
+N = 10
+truth, clip = [], []
+rng = np.random.default_rng(11)
+for k in range(N):
+    frame, M = drifted(edit, 1.0 + 0.001 * k, 1.0, 0.8 * k, -0.5 * k)          # 0 .. 7 px, growing
+    truth.append(M)
+    clip.append(frame)
+clip[4] = rng.random(clip[4].shape).astype(np.float32)                         # a frame with nothing of the building in it
+fits = [al.estimate(src, f) for f in clip]
+off = al.drift(fits, W, H)
+check("a clip: the drift per frame is measured and grows", off[1] < off[5] < off[9] and 8.0 < off[9] < 18.0 and off[4] == 0.0
+      and not fits[4]["ok"], f"{[round(v, 1) for v in off]}")
+track, filled = al.steady(fits, 5)
+errs = [corner_error(track[k], truth[k]) for k in range(N)]
+check("steady over time: every frame is put back to within 1.5 px, the rubbish frame takes its neighbours' correction",
+      filled == 1 and max(errs) < 1.5 and errs[4] < 1.5 and not np.allclose(track[4], np.eye(2, 3)), f"{[round(e, 2) for e in errs]}")
+jit = [al.estimate(src, drifted(edit, 1.0, 1.0, 3.0 + 0.4 * (-1) ** k, 2.0)[0]) for k in range(8)]
+raw = np.array([r["matrix"][0, 2] for r in jit])
+smooth = np.array([m[0, 2] for m in al.steady(jit, 7)[0]])
+check("steady over time: a correction that trembles from frame to frame is smoothed", np.abs(np.diff(smooth)).max() < 0.5 * np.abs(np.diff(raw)).max(),
+      f"raw {np.abs(np.diff(raw)).max():.2f} px, smoothed {np.abs(np.diff(smooth)).max():.2f} px")
+check("steady over time: no frame fitted = nothing moved", all(np.allclose(m, np.eye(2, 3)) for m in al.steady([fits[4]] * 3, 5)[0]))
+
+masks = sf.render(W, H, style="sandstone")["masks"]
+windows = np.zeros((H, W), np.float32)
+for name, (group, m) in masks.items():
+    if "W_" in name or "window" in group.lower():
+        windows = np.maximum(windows, (m > 0).astype(np.float32))
+moving, Mw = drifted(edit, 1.0, 1.0, 5.0, 3.0)
+lively = moving.copy()
+stripes = (np.indices((H, W))[1] // 6 % 2).astype(np.float32)[..., None]
+lively[windows > 0.5] = (stripes * np.array([1.0, 0.6, 0.2]))[windows > 0.5]      # hard stripes in every window: strong false edges
+rs = al.estimate(src, lively, still=1.0 - windows)
+no = al.estimate(src, lively)
+print("   with the mask:", round(corner_error(rs["matrix"], Mw), 2), "px off the truth; without:", al.describe(no), round(corner_error(no["matrix"], Mw), 2))
+check("a 'still' mask: the fit looks only where the clip is meant to stay on the source", 0.03 < float(windows.mean()) < 0.6 and rs["ok"]
+      and corner_error(rs["matrix"], Mw) < 1.0, f"{al.describe(rs)}; windows cover {windows.mean():.2f}")
+check("a 'still' mask that leaves nothing is refused with a reason", not al.estimate(src, lively, still=np.zeros((H, W), np.float32))["ok"]
+      and "still" in al.estimate(src, lively, still=np.zeros((H, W), np.float32))["why"])
+
 print()
 print("all align tests passed" if not failures else f"{len(failures)} FAILED: " + ", ".join(failures))
 sys.exit(1 if failures else 0)

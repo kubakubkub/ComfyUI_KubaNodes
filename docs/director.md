@@ -71,6 +71,44 @@ makes stage 2 four times the pixels, and 1.8 MP x 121 frames runs out of memory)
 Measured on a 12 GB laptop GPU: 121 frames two stages 130 s (960x640 clip, peak VRAM 11.8 GB, 89 °C); a 4 s director
 sequence with a moving lamp + an animated arcade 215 s.
 
+## The whole sequence as a motion guide
+
+**kubakub motion guide (ltx)** goes the other way round: not single layers that LTX animates inside your frames, but
+your whole clip as a rough draft that LTX repaints. Connect the director sequence's **frames** (or a kubakub shader,
+a previz from scene walkthrough, any clip) to **guide**, its **fps** to fps and say in **prompt** what it should
+look like and what moves. What moves, where and when stays yours; the look comes from the prompt.
+
+**repaint** is the number that matters. It is the noise level LTX starts from:
+
+| repaint | what you get |
+|---|---|
+| 0.7 | follows the guide closely and keeps most of the guide's own look |
+| **0.91** | everything is repainted and the motion still follows (the tested value) |
+| 0.95 - 0.98 | freer, follows less |
+| 1 | the guide is ignored: a plain text to video |
+
+Measured with a band of light sweeping over a facade (512x320, 25 frames): at 0.91 the band in the video sat 5 px
+from the guide's, at 1 it went its own way. Small moving things can get lost at 0.91: make them big and bright in
+the guide. With the x2 latent upscaler connected a sharper second stage follows; on a 12 GB card keep `megapixels`
+at 0.2 and up to 121 frames (49 frames, two stages, 960x576: about 20 s once the models are loaded). A connected
+`audio` is held while sampling and passed on. `guide_size` scales the frames back to the guide's size. Nothing
+connected to guide runs a built-in sample. Example: `example_workflows/motion_guide.json`.
+
+**Where and when the repaint shows.** Three more controls on the same node:
+
+- **repaint_mask**: white = LTX's picture, black = your guide as it is, grey = a mix. One mask, or one per frame:
+  the masks of kubakub mask animate, of a kubakub shader or an ID pass let the repaint travel over the picture.
+- **curve**: how the amount runs over the clip. `ramp` goes from your guide to fully repainted once (`cycle` = how
+  long that takes), saw / triangle / sine / square repeat, and sound level, beats, bars and hits follow the sound
+  on `audio`. `curve_from` and `curve_to` are its low and high end. It multiplies the mask.
+- **mask_does**: *shows the repaint* (the default) repaints the whole clip and shows it through the mask and the
+  curve over your guide. *limits the change* is LTX's own noise mask: LTX may only change things inside the mask
+  and keeps your guide's look everywhere; the guide's own pixels are put back where nothing may change
+  (`keep_exact`). Use it when the guide is a finished picture and only a part should come alive.
+
+Why two ways: measured on the GPU, any untouched guide next to a repainted place anchors the look, so a noise mask
+never gives "stone here, previz there". Only showing the full repaint through the mask does.
+
 Two more inputs of the region video sampler, for clips that run on their own (a still, no background video):
 
 - **loop**: every clip comes back to the still and ends on its first frame, so the video repeats without a jump.
@@ -160,6 +198,17 @@ clip it to regions or mask it. It does not count as a placed object (no region, 
   output.
 - **Shapes**: + layer → solid colour, rectangle, ellipse, polygon (click the corners, Enter). Colour and feather;
   hidden and used as another layer's mask = a shape mask.
+- **Shader fill**: a shape can be filled by a moving shader instead of its colour. Inspector → shape → **fill**:
+  a preset (the **pictures** button shows them: clouds, fire, plasma, tunnel, starfield, rings ...)
+  or **own code** (a shader pasted from shadertoy.com). The shader is seen through the shape, so feather, `clip to`, masks, blend modes,
+  effects and behaviours work as on any shape; a solid with a shader fills the whole facade. It plays live in the
+  window (the browser draws it with WebGL) and the node renders the same picture. `loops` = how many times it
+  runs through on the timeline; the sliders below are the shader's own controls, and they take keyframes and
+  behaviours like any other value (wiggle the scale, put the sound level on a width). With a sound on the
+  timeline the shader hears it: raise `sound` or `beat` in a preset. A preset that works on a picture (eight
+  bit, mosaic, contour lines, wireframe, edge glow, glass ...) is an **effect on everything under the layer**,
+  like a colour grade with a shape: a solid turns the whole composition, an ellipse or a layer clipped to regions
+  only that part. See [shader](shader.md).
 - **Effects** (inspector): blur, sharpen, glow, grain, keyframeable, on a layer or on a colour-grade layer
   (then on everything below).
 - **React to light**: *light → shaded by …* multiplies a layer by the lamps of a light layer (which may stay
@@ -193,7 +242,7 @@ each has a time range (from / to), a fade and an on / off switch. The timeline s
 | pulse | a kick on beats, bars, markers or every n s (attack, decay, every nth) | the same numbers |
 | sound level | the loudness of the timeline sound (release); `listen to`: everything, or only its low (kick, bass), mid or high (hats, clicks) frequencies | the same numbers |
 | stagger | the regions a layer is clipped to light up one after another: sequence in / out, chase, wave, random; order left / right / top / bottom / centre / outside / size / random | a layer clipped to regions |
-| field | the clip appears along a grey ramp over its regions, per pixel: a wipe, an iris, outlines closing in, region by region, a dissolve, a running band, rings; on a ramp, saw, sine, square, random, noise, the sound level, or on beats, bars, markers and low / mid / high hits; with a trail (see [masks](masks.md)) | a layer clipped to regions |
+| field | (along = direction or from a point: **arrow → draw**, then drag on the picture, sets where the move starts and ends instead of an angle or a centre in numbers) the clip appears along a grey ramp over its regions, per pixel: a wipe, an iris, outlines closing in, region by region, a dissolve, a running band, rings; on a ramp, saw, sine, square, random, noise, the sound level, or on beats, bars, markers and low / mid / high hits; with a trail (see [masks](masks.md)) | a layer clipped to regions |
 | swap | layers trade their masks in time with the sound (see below) | layers clipped to regions |
 | repeat | copies in a line / grid / ring, rotation / scale / opacity per copy, a delay per copy replays the animation later (echo trails) | image and shape layers |
 

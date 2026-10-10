@@ -102,8 +102,27 @@ def _hash01(i, seed):
     return ((h ^ (h >> np.uint64(16))) & m) / 4294967296.0
 
 
+def parse_vector(text):
+    """'0.2, 0.5, 0.8, 0.5' (x, y of the start, x, y of the end; 0-1 of the picture, y down) -> the four numbers, or
+    None for an empty text or an arrow without a length. Raises ValueError for anything else."""
+    if isinstance(text, (list, tuple)):
+        parts = list(text)
+    else:
+        parts = [p for p in str(text or "").replace(";", ",").replace(" ", ",").split(",") if p.strip()]
+    if not parts:
+        return None
+    try:
+        v = [float(p) for p in parts]
+    except (TypeError, ValueError):
+        v = []
+    if len(v) != 4 or not all(math.isfinite(x) for x in v):
+        raise ValueError("vector is four numbers: x, y of the start and x, y of the end, each 0 to 1 of the picture "
+                         "(for example 0.2, 0.5, 0.8, 0.5). Leave it empty for none.")
+    return None if math.hypot(v[2] - v[0], v[3] - v[1]) < 1e-6 else tuple(v)
+
+
 def field(lab, n, kind="edge distance", per="each region", angle=0.0, centre=(0.5, 0.5), order="left", seed=1,
-          noise_px=64.0, invert=False, px_scale=1.0, ids=None):
+          noise_px=64.0, invert=False, px_scale=1.0, ids=None, vector=None):
     """-> (field float32 [H, W] 0..1, 0 outside the regions; inside bool [H, W]).
 
     edge distance  0 on the edge of a region, 1 at its deepest point
@@ -114,6 +133,9 @@ def field(lab, n, kind="edge distance", per="each region", angle=0.0, centre=(0.
                    pixel of lab (a small preview map draws the same noise)
     per            each region = every region runs 0..1 on its own; all together = one ramp over all of them
     ids            the regions' own ids, in the order of lab's numbers (ties and 'random' in region order use them)
+    vector         an arrow drawn on the picture, (x0, y0, x1, y1) in 0..1 of the canvas, instead of angle / centre:
+                   direction, all together = 0 at its start, 1 at its end (before and after it the ramp stays flat);
+                   direction, each region = its angle; radial, all together = 0 at its start, 1 as far out as it is long
     """
     H, W = lab.shape
     inside = lab >= 0
@@ -122,6 +144,14 @@ def field(lab, n, kind="edge distance", per="each region", angle=0.0, centre=(0.
     live = [(k, b) for k, b in enumerate(bx) if b]
     together = per == "all together"
     ca, sa = round(math.cos(math.radians(angle)), 9), round(math.sin(math.radians(angle)), 9)
+    arrow = None                                     # (start x, y, the way dx, dy) in pixels of this map
+    if vector is not None and kind in ("direction", "radial"):
+        vx0, vy0, vx1, vy1 = (float(v) for v in vector)
+        ddx, ddy = (vx1 - vx0) * (W - 1), (vy1 - vy0) * (H - 1)
+        length = math.hypot(ddx, ddy)
+        if length > 1e-9:
+            arrow = (vx0 * (W - 1), vy0 * (H - 1), ddx, ddy, length)
+            ca, sa = round(ddx / length, 9), round(ddy / length, 9)
     if not live:
         return f, inside
     if kind == "region order":
@@ -142,6 +172,13 @@ def field(lab, n, kind="edge distance", per="each region", angle=0.0, centre=(0.
         hist = np.bincount(np.minimum(NOISE_BINS - 1, (big[inside] * NOISE_BINS).astype(np.int64)), minlength=NOISE_BINS)
         cdf = np.cumsum(hist) / max(1, int(hist.sum()))          # every grey equally often
         f = cdf[np.minimum(NOISE_BINS - 1, (big * NOISE_BINS).astype(np.int64))].astype(np.float32)
+    elif together and arrow is not None:
+        yy, xx = np.arange(H, dtype=np.float64)[:, None], np.arange(W, dtype=np.float64)[None, :]
+        ax0, ay0, ddx, ddy, length = arrow
+        if kind == "direction":
+            f = (((xx - ax0) * ddx + (yy - ay0) * ddy) / (length * length)).astype(np.float32)
+        else:
+            f = (np.hypot(xx - ax0, yy - ay0) / length).astype(np.float32)
     elif together and kind in ("direction", "radial"):
         yy, xx = np.arange(H, dtype=np.float32)[:, None], np.arange(W, dtype=np.float32)[None, :]
         v = xx * ca + yy * sa if kind == "direction" else np.hypot(xx - centre[0] * (W - 1), yy - centre[1] * (H - 1))
@@ -241,6 +278,25 @@ def curve_values(times, curve="ramp", cycle=2.0, phase=0.0, easing="linear", dut
         c = max(1e-6, float(cycle))
         v = [shape(curve, max(0.0, (t - times[0]) / c + phase), easing, duty, seed) for t in times]
     return [lo + x * (hi - lo) for x in v], lines
+
+
+TIMED = ("constant",) + CURVES                      # a node's 'curve' choice when staying put is allowed too
+
+
+def timed_values(times, curve, cycle, lo, hi, easing="linear", mono=None, sr=44100, sample=False):
+    """A value per time for a node's 'curve' input: ([values] or None for 'constant', report lines). The curve runs
+    between lo and hi; a sound curve (sound level, beats, bars, hits) reads mono / sr (sample = the built-in beat)."""
+    if curve not in CURVES:
+        return None, []
+    ctx, lines = None, []
+    if needs_sound(curve):
+        ctx, lines = sound_context(mono, sr, curve, 0.0, sample)
+    values, more = curve_values(times, curve, float(cycle), 0.0, easing, lo=float(lo), hi=float(hi), ctx=ctx)
+    return values, lines + more
+
+
+def needs_sound(curve) -> bool:
+    return curve in TRIGGERS or curve == "sound level"
 
 
 # --------------------------------------------------------------------------

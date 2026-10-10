@@ -77,6 +77,13 @@ class KUBA_MaskField(io.ComfyNode):
                 io.Boolean.Input("invert", default=False, tooltip="Black and white swapped: the move runs the other way."),
                 io.Boolean.Input("split_shapes", default=True, optional=True, advanced=True,
                                  tooltip="mask input: on = every separate shape is its own region; off = one region per mask."),
+                io.String.Input("vector", default="", optional=True,
+                                tooltip="An arrow instead of angle and centre: draw it on the node (drag on the picture "
+                                        "under 'draw the direction'), or type x, y of its start and x, y of its end, "
+                                        "each 0 to 1 of the picture. direction, all together: the ramp starts at the "
+                                        "arrow's start and ends at its end. direction, each region: its angle. "
+                                        "radial, all together: its start is the centre, its length how far out the "
+                                        "ramp reaches. Empty = angle and centre_x / centre_y."),
             ],
             outputs=[
                 io.Mask.Output("field", tooltip="The grey ramp, 0 to 1 inside the regions, 0 outside."),
@@ -88,8 +95,12 @@ class KUBA_MaskField(io.ComfyNode):
     @classmethod
     def execute(cls, regions=None, mask=None, select="*", field="edge distance", per="each region", angle=0.0,
                 order="left", centre_x=0.5, centre_y=0.5, noise_px=64.0, seed=1, invert=False,
-                split_shapes=True) -> io.NodeOutput:
+                split_shapes=True, vector="") -> io.NodeOutput:
         notes = []
+        try:
+            arrow = mf.parse_vector(vector)
+        except ValueError as e:
+            raise ValueError(f"kubakub mask field: {e}") from e
         if regions is not None:
             from ...kubakub.director.render import select_regions
             ids = [r["region_id"] for r in regions.table.get("regions", [])]
@@ -108,7 +119,13 @@ class KUBA_MaskField(io.ComfyNode):
             lab, n, _ = mf.sample_regions()
             notes.append("nothing connected: the windows of the sample facade are used (connect regions or a mask)")
         f, inside = mf.field(lab, n, field, per, float(angle), (float(centre_x), float(centre_y)), order, int(seed),
-                             float(noise_px), bool(invert))
+                             float(noise_px), bool(invert), vector=arrow)
+        if arrow and field not in ("direction", "radial"):
+            notes.append(f"the drawn arrow is not used by field = {field} (it sets direction and radial)")
+        elif arrow and field == "radial" and per != "all together":
+            notes.append("the drawn arrow is not used: radial per region starts at each region's own centre")
+        elif arrow:
+            notes.append("the drawn arrow is used" + (" (its angle)" if per != "all together" else ""))
         report = "\n".join([f"{n} regions, {lab.shape[1]}x{lab.shape[0]}, field = {field}"
                             + (f" ({per})" if field not in ("region order", "noise") else "")] + notes)
         log.info("[KUBA mask field] %s", report.replace("\n", "\n    "))

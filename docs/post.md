@@ -10,8 +10,14 @@ Everything works on one still or a batch of frames, before **export video / fram
   shear on the edges both pictures share, so rows of identical windows cannot send it to the wrong window. It is
   refused, and the picture returned as it is, when the pictures have too little in common, when the fit asks for
   more than a drift (4 % of the long edge, 5 % scale), or when the same fit from other starting points ends
-  somewhere else; the report says which. `fit = move only` for a plain shift; for a clip, `frames = one fit for
-  all` (advanced) gives every frame the first frame's correction. About 3 s per picture. It corrects the picture
+  somewhere else; the report says which. `fit = move only` for a plain shift. For a clip (`frames`, advanced): `one fit for
+  all` gives every frame the first frame's correction; `steady over time` is for a clip that drifts while it plays:
+  every frame is fitted, a frame whose fit is refused takes the correction of its neighbours, and the track is
+  smoothed over `smooth` frames so nothing trembles; `measure only` moves nothing and tells you how far the clip
+  sits off (the report per frame, and the new `drift` output: the largest distance in pixels at the corners). A
+  clip with parts that move on purpose gets a `still` mask: white where it is meant to stay on the source (the
+  walls, not the animated windows); the fit looks only there. In the test a clip whose windows were filled with
+  moving stripes was refused without the mask and landed 0.1 px from the truth with it. About 3 s per picture. It corrects the picture
   as a whole: parts that moved differently from each other stay as they are. Not needed after the region sampler,
   which pastes inside masks. kubakub versions does this by itself for `generate = whole picture`.
   Test: `tests/test_align.py`.

@@ -4,6 +4,7 @@
 // ships with the pack (web/fonts, OFL). Look: kubakub.art (Hanken Grotesk, #f18a58 actions, #a187b7 selection).
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { pickShader, shaderPresets } from "./kubakub_shader.js";
 
 const HERE = new URL(".", import.meta.url).href;
 const OPS = { normal: "source-over", multiply: "multiply", screen: "screen", overlay: "overlay", darken: "darken",
@@ -315,9 +316,16 @@ function edt1(f, n, d, v, z) {                        // squared distance transf
 }
 // The ramp of a field behaviour over the clipped pixels: Float32Array [LW * LH], 0..1 inside the regions, 0 outside.
 // rp [{ id, pos (pixel indices), box [x0, y0, x1, y1) }], pxScale = picture pixels per pixel of this map (noise)
+const arrowOf = v => Array.isArray(v) && v.length === 4 && v.every(x => Number.isFinite(+x)) && Math.hypot(v[2] - v[0], v[3] - v[1]) > 1e-6 ? v.map(Number) : null;
 function fieldRamp(rp, LW, LH, b, pxScale) {
   const F = new Float32Array(LW * LH), kind = FIELD_KINDS.includes(b.field) ? b.field : "edge distance", together = b.per === "all together";
-  const ang = mNum(b, "angle", 0) * Math.PI / 180, ca = Math.round(Math.cos(ang) * 1e9) / 1e9, sa = Math.round(Math.sin(ang) * 1e9) / 1e9;
+  const ang = mNum(b, "angle", 0) * Math.PI / 180;
+  let ca = Math.round(Math.cos(ang) * 1e9) / 1e9, sa = Math.round(Math.sin(ang) * 1e9) / 1e9, arrow = null;
+  const vec = arrowOf(b.vec);                         // an arrow drawn on the picture instead of angle / centre
+  if (vec && (kind === "direction" || kind === "radial")) {
+    const ddx = (vec[2] - vec[0]) * (LW - 1), ddy = (vec[3] - vec[1]) * (LH - 1), len = Math.hypot(ddx, ddy);
+    if (len > 1e-9) { arrow = [vec[0] * (LW - 1), vec[1] * (LH - 1), ddx, ddy, len]; ca = Math.round(ddx / len * 1e9) / 1e9; sa = Math.round(ddy / len * 1e9) / 1e9; }
+  }
   const live = rp.filter(r => r.pos.length), seed = Math.trunc(mNum(b, "seed", 1));
   if (!live.length) return F;
   if (kind === "region order") {
@@ -336,6 +344,10 @@ function fieldRamp(rp, LW, LH, b, pxScale) {
     }
     let acc = 0; for (let i = 0; i < NOISE_BINS; i++) { acc += hist[i]; hist[i] = acc / Math.max(1, total); }
     for (const r of live) for (const q of r.pos) F[q] = hist[Math.min(NOISE_BINS - 1, Math.floor(raw[q] * NOISE_BINS))];
+  } else if (together && arrow) {                     // 0 at the arrow's start, 1 at its end (radial: as far out as it is long)
+    const [ax, ay, ddx, ddy, len] = arrow, l2 = ddx * ddx + ddy * ddy;
+    for (const r of live) for (const q of r.pos) { const x = q % LW, y = (q - x) / LW;
+      F[q] = kind === "direction" ? ((x - ax) * ddx + (y - ay) * ddy) / l2 : Math.hypot(x - ax, y - ay) / len; }
   } else if (together && kind !== "edge distance") {
     const cx = mNum(b, "cx", 0.5) * (LW - 1), cy = mNum(b, "cy", 0.5) * (LH - 1);
     const at = q => { const x = q % LW, y = (q - x) / LW; return kind === "direction" ? Math.fround(Math.fround(x * ca) + Math.fround(y * sa)) : Math.hypot(x - cx, y - cy); };
@@ -740,6 +752,81 @@ const mkCanvas = (w, h) => Object.assign(document.createElement("canvas"), { wid
 const iw = im => im.videoWidth || im.naturalWidth || im.width, ih = im => im.videoHeight || im.naturalHeight || im.height;
 // ---- video layers: an image layer whose source is a video file, timed by media.segments (kubakub/director/media.py)
 const VIDEO_RE = /\.(mp4|mov|m4v|mkv|webm|avi|mxf|mpg|mpeg|wmv|gif)$/i;
+// ---- shader fill of a shape layer: WebGL 2 draws the text the node renders with (kubakub/shadertoy.py), live
+const isShader = L => L?.kind === "shape" && !!(L.shape?.shader || (L.shape?.code || "").trim());
+const SHADER_SOUND = ["kLevel", "kLow", "kMid", "kHigh", "kBeat", "kBeats"];      // = shadertoy.SOUND: a shader that reads one listens
+const ctlValue = (sh, c) => { const v = sh["c_" + c.name]; return v != null && v !== "" && Number.isFinite(+v) ? +v : c.default; };   // a control's value on a shape
+const SHADER_VS = `#version 300 es
+out vec2 v_texCoord;
+void main() { vec2 v[3] = vec2[](vec2(-1, -1), vec2(3, -1), vec2(-1, 3)); v_texCoord = v[gl_VertexID] * 0.5 + 0.5; gl_Position = vec4(v[gl_VertexID], 0, 1); }`;
+const SHADER_ARROW = ["kFrom", "kTo", "kDir", "kVector", "kField"];      // a shader that reads one of these follows a drawn arrow
+const SHADER_NEW = "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    vec2 uv = fragCoord / iResolution.xy;\n    float v = 0.5 + 0.5 * sin(uv.x * 20.0 + 6.2831853 * kLoop);\n    fragColor = vec4(vec3(v), 1.0);\n}\n";
+const shaderGL = {
+  gl: null, cv: null, progs: new Map(), noise: [], black: null, pic: null,
+  init() {
+    if (this.gl && this.gl.isContextLost()) { this.gl = null; this.progs.clear(); this.noise = []; this.black = this.pic = null; }   // after a GPU reset: a new one
+    if (this.gl !== null) return this.gl;
+    this.cv = mkCanvas(2, 2);
+    const gl = this.gl = this.cv.getContext("webgl2", { premultipliedAlpha: false, preserveDrawingBuffer: true, antialias: false }) || false;
+    if (!gl) return false;
+    gl.bindVertexArray(gl.createVertexArray());
+    const tex = (w, h, data, wrap) => { const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + 7); gl.bindTexture(gl.TEXTURE_2D, t);
+      if (data) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      for (const [q, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, wrap], [gl.TEXTURE_WRAP_T, wrap]]) gl.texParameteri(gl.TEXTURE_2D, q, v);
+      return t; };
+    for (let i = 0; i < 4; i++) {                    // the built-in noise (= shader_render.noise_picture, bit for bit)
+      const N = 256, seed = 7 + 2 * i, px = new Uint8Array(N * N * 4), byte = (x, y, sd) => Math.floor(hash01(((x + N) % N) + ((y + N) % N) * N, sd) * 256);
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) px.set([byte(x, y, seed), byte(x - 37, y + 17, seed), byte(x, y, seed + 1), byte(x - 37, y + 17, seed + 1)], (y * N + x) * 4);
+      this.noise.push(tex(N, N, px, gl.REPEAT));
+    }
+    this.black = tex(1, 1, new Uint8Array([0, 0, 0, 255]), gl.CLAMP_TO_EDGE);   // a picture nothing is connected to
+    this.pic = tex(1, 1, new Uint8Array([0, 0, 0, 255]), gl.CLAMP_TO_EDGE);     // the layers below, uploaded per draw
+    const ramp = new Uint8Array(256 * 4); for (let i = 0; i < 256; i++) ramp.set([i, 255, 0, 255], i * 4);   // kField = left to right, kMask = 1
+    const field = tex(256, 1, ramp, gl.CLAMP_TO_EDGE);
+    gl.activeTexture(gl.TEXTURE0 + 4); gl.bindTexture(gl.TEXTURE_2D, field);
+    gl.activeTexture(gl.TEXTURE0 + 5); gl.bindTexture(gl.TEXTURE_2D, this.black);              // kPrev: node only
+    return gl;
+  },
+  program(src) {                                     // compiled once per shader text; { error } when it does not compile
+    let p = this.progs.get(src); if (p) return p;
+    const gl = this.gl, sh = (type, text) => { const s = gl.createShader(type); gl.shaderSource(s, text); gl.compileShader(s); return s; };
+    const vs = sh(gl.VERTEX_SHADER, SHADER_VS), fs = sh(gl.FRAGMENT_SHADER, src), prog = gl.createProgram();
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) p = { error: (gl.getShaderInfoLog(fs) || gl.getProgramInfoLog(prog) || "the shader does not compile").trim() };
+    else { p = { prog, uni: [] };
+      for (let i = 0, n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS); i < n; i++) { const u = gl.getActiveUniform(prog, i); p.uni.push({ name: u.name, type: u.type, loc: gl.getUniformLocation(prog, u.name) }); } }
+    if (this.progs.size >= 16) { const [k, old] = this.progs.entries().next().value; if (old.prog) gl.deleteProgram(old.prog); this.progs.delete(k); }
+    this.progs.set(src, p); return p;
+  },
+  // -> its canvas (use it before the next draw) or { error }. pictures[n] for iChannel n: a canvas (the layers below),
+  // "noise" or null (nothing there), as render.shader_source binds them
+  draw(src, w, h, values, pictures = []) {
+    const gl = this.init(); if (!gl) return { error: "this browser has no WebGL 2" };
+    const p = this.program(src); if (p.error) return p;
+    if (this.cv.width !== w || this.cv.height !== h) { this.cv.width = w; this.cv.height = h; }
+    const res = new Float32Array(12);
+    for (let i = 0; i < 4; i++) {
+      const q = pictures[i]; gl.activeTexture(gl.TEXTURE0 + i);
+      if (q === "noise") { gl.bindTexture(gl.TEXTURE_2D, this.noise[i]); res.set([256, 256, 1], i * 3); }
+      else if (q && q.width) { gl.bindTexture(gl.TEXTURE_2D, this.pic); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, q); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); res.set([q.width, q.height, 1], i * 3); }
+      else gl.bindTexture(gl.TEXTURE_2D, this.black);
+    }
+    gl.viewport(0, 0, w, h); gl.useProgram(p.prog); gl.disable(gl.BLEND);
+    for (const u of p.uni) {
+      const m = /^iChannel(\d)$/.exec(u.name), v = values[u.name];
+      if (m) gl.uniform1i(u.loc, +m[1]);
+      else if (u.name === "kFieldTex") gl.uniform1i(u.loc, 4);
+      else if (u.name === "kPrevTex") gl.uniform1i(u.loc, 5);
+      else if (u.name === "iResolution") gl.uniform3f(u.loc, w, h, 1);
+      else if (u.name === "iChannelResolution[0]") gl.uniform3fv(u.loc, res);
+      else if (u.type === gl.INT) gl.uniform1i(u.loc, Math.round(+v || 0));
+      else if (u.type === gl.FLOAT) gl.uniform1f(u.loc, +v || 0);
+    }
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    return this.cv;
+  },
+};
 const isVideoName = n => VIDEO_RE.test(String(n || ""));
 const isVideo = L => L?.kind === "image" && /^(file|path):/.test(L.source || "") && isVideoName(L.source);   // path: = linked from disk
 function mediaSegs(media, dur) {                    // = media.segments(): normalised, sorted by start
@@ -833,7 +920,7 @@ class Director {
   animPaths(L) {
     const out = [...ANIM_LAYER.filter(p => L.kind === "image" || L.kind === "shape" || p === "opacity" || p === "visible")];
     if (L.kind === "adjust") out.push(...ANIM_ADJUST);
-    if (L.kind === "shape") out.push("color", "shape.feather");
+    if (L.kind === "shape") out.push("color", "shape.feather", ...Object.keys(L.shape || {}).filter(p => p.startsWith("c_")).map(p => "shape." + p));
     if (["image", "paint", "shape", "base", "adjust"].includes(L.kind)) out.push(...Object.keys(FX_DEF).map(k => "fx." + k));
     if (L.light_react) out.push("light_react.amount");
     if (L.kind === "light" && L.light) {
@@ -847,7 +934,7 @@ class Director {
     const m = p.match(/^light\.(lights|glow)\.#([^.]+)\.(.+)$/);
     if (m) { const list = L.light?.[m[1]] || [], i = list.findIndex(e => e.id === m[2]), e = list[i];
       return `${m[1] === "lights" ? (e?.type || "lamp") + " " + (i + 1) : "glow " + (i + 1)} ${m[3]}`; }
-    return p.replace(/^light\./, "").replace(/^adjust\./, "").replace("projector.brightness", "projector").replace(/_/g, " ");
+    return p.replace(/^shape\.c_/, "shader ").replace(/^light\./, "").replace(/^adjust\./, "").replace("projector.brightness", "projector").replace(/_/g, " ");
   }
   syncEval() {                                       // remember what every value is now (edits are found against it)
     this.evalCache = new Map();
@@ -904,7 +991,7 @@ class Director {
     const off = this.tl.audio?.offset || 0, key = [this.tl.beat?.bpm, this.tl.beat?.phase, off, this.tl.duration, (this.tl.markers || []).map(m => m.t).join(",")].join("|");
     if (this._mctx?.key !== key) this._mctx = { key, beats: beatTimes(this.tl.beat, off, this.tl.duration), markers: (this.tl.markers || []).map(m => m.t).filter(Number.isFinite).sort((a, b) => a - b), offset: off };
     const file = this.tl.audio?.file || "";
-    const wantLevel = file && this.layers?.some(L => L.motion?.some(b => b.on !== false && (b.type === "audio" || b.type === "field" && b.curve === "level")));
+    const wantLevel = file && this.layers?.some(L => this.shaderListens(L) || L.motion?.some(b => b.on !== false && (b.type === "audio" || b.type === "field" && b.curve === "level")));
     if (wantLevel && this._levelFile !== file) {       // the node's own curve (motion.level_curve), so preview = render
       this._levelFile = file; this._level = null;
       api.fetchApi("/kubakub/director/level", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file }) })
@@ -913,7 +1000,7 @@ class Director {
         .catch(e => console.warn("[kubakub director] level", e));
     }
     this._mctx.level = this._levelFile === file ? this._level : null;
-    const wantBands = file && this.layers?.some(L => L.motion?.some(b => b.on !== false && (b.type === "audio" && M_BANDS.includes(b.band) || b.type === "swap" && M_BANDS.includes(b.trigger) || b.type === "field" && (M_BANDS.includes(b.curve) || b.curve === "level" && M_BANDS.includes(b.band)))));
+    const wantBands = file && this.layers?.some(L => this.shaderListens(L) || L.motion?.some(b => b.on !== false && (b.type === "audio" && M_BANDS.includes(b.band) || b.type === "swap" && M_BANDS.includes(b.trigger) || b.type === "field" && (M_BANDS.includes(b.curve) || b.curve === "level" && M_BANDS.includes(b.band)))));
     if (wantBands && this._soundFile !== file) {       // loudness and hits per band (kubakub/sound.py), so preview = render
       this._soundFile = file; this._sound = null;
       api.fetchApi("/kubakub/director/level", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file, bands: true }) })
@@ -995,8 +1082,9 @@ class Director {
             const chk = (k, label, tip) => `<label class="kkd-mf" data-tip="${tip}"><span>${label}</span><input type="checkbox" data-mi="${i}" data-mk="${k}" ${b[k] ? "checked" : ""}></label>`;
             return `<label class="kkd-mf" data-tip="The grey ramp the move runs along. edge → middle: from each region's edge inward. direction: a wipe. from a point: an iris. region by region: one region after another. noise: a dissolve"><span>along</span><select data-mi="${i}" data-mk="field">${[["edge distance", "edge → middle"], ["direction", "direction"], ["radial", "from a point"], ["region order", "region by region"], ["noise", "noise"]].map(([v, l]) => opt(v, kind, l)).join("")}</select></label>`
             + (kind === "region order" || kind === "noise" ? "" : `<label class="kkd-mf" data-tip="each region: every region runs on its own (all windows open at once). all together: one move over all of them (a wipe across the facade)"><span>per</span><select data-mi="${i}" data-mk="per">${[["each region", "each region"], ["all together", "all together"]].map(([v, l]) => opt(v, b.per || "each region", l)).join("")}</select></label>`)
-            + (kind === "direction" ? num(b, i, "angle", "angle °") : "")
-            + (kind === "radial" && b.per === "all together" ? num(b, i, "cx", "centre x 0-1") + num(b, i, "cy", "centre y 0-1") : "")
+            + (kind === "direction" && !arrowOf(b.vec) ? num(b, i, "angle", "angle °") : "")
+            + (kind === "radial" && b.per === "all together" && !arrowOf(b.vec) ? num(b, i, "cx", "centre x 0-1") + num(b, i, "cy", "centre y 0-1") : "")
+            + (kind === "direction" || (kind === "radial" && b.per === "all together") ? `<label class="kkd-mf" data-tip="${kind === "direction" ? (b.per === "all together" ? "Drag an arrow on the picture: the move starts at its start and ends at its end (for example from one window corner to the other)" : "Drag an arrow on the picture: every region runs in its direction") : "Drag an arrow on the picture: it starts at the centre and is as long as the move reaches"}"><span>arrow</span><span style="display:flex;gap:4px"><button class="kkd-pill" data-mvec="${i}" aria-pressed="${this.armed()?.b === b}">${arrowOf(b.vec) ? "redraw" : "draw"}</button>${arrowOf(b.vec) ? `<button class="kkd-pill" data-mvecx="${i}" data-tip="Remove the arrow: angle and centre count again">clear</button>` : ""}</span></label>` : "")
             + (kind === "region order" ? `<label class="kkd-mf"><span>order</span><select data-mi="${i}" data-mk="order">${[["left", "left → right"], ["right", "right → left"], ["top", "top → bottom"], ["bottom", "bottom → top"], ["centre", "centre → out"], ["outside", "outside → in"], ["size", "biggest first"], ["random", "random"]].map(([v, l]) => opt(v, b.order || "left", l)).join("")}</select></label>` + (b.order === "random" ? num(b, i, "seed", "seed") : "") : "")
             + (kind === "noise" ? num(b, i, "noise_px", "blob px") + num(b, i, "seed", "seed") : "")
             + chk("invert", "the other way", "The move runs from white to black: from the middle out, right to left, the last region first")
@@ -1063,8 +1151,13 @@ class Director {
     const k2 = p => (L.anim?.[p] || []).length > 1, box = L.kind === "image" || L.kind === "shape";
     return [...(box && (k2("x") || k2("y")) ? ["position"] : []), ...Object.keys(L.anim || {}).filter(k2)];
   }
+  syncShader() {                                     // the shader sliders of the selected layer show its values at the playhead
+    const L = this.cur(); if (!L || !isShader(L)) return;
+    for (const el of this.root.querySelectorAll('[data-id="sh-box"] [data-shc]')) { const v = +L.shape["c_" + el.dataset.shc]; if (!Number.isFinite(v) || document.activeElement === el) continue;
+      el.value = v; const lab = el.parentElement.querySelector("[data-shcv]"); if (lab) lab.textContent = +v.toFixed(3); }
+  }
   setTime(t, quiet) {
-    this.applyTime(Math.round(t * this.tl.fps) / this.tl.fps);
+    this.applyTime(Math.round(t * this.tl.fps) / this.tl.fps); this.syncShader();
     if (!quiet) this._panels = true;                 // rendered with the next frame (key repeat / scrubbing: once per frame)
     this.draw();
   }
@@ -1917,7 +2010,7 @@ class Director {
     let X0 = Infinity, Y0 = Infinity, X1 = -1, Y1 = -1;
     let F = null, fp = null, fwt = null, fe, fs, fw, fn;
     if (fb) {                                        // the ramp once per selection and field, then this frame's values
-      const fk = stable([fb.field, fb.per, fb.angle, fb.cx, fb.cy, fb.order, fb.seed, fb.noise_px, !!fb.invert]);
+      const fk = stable([fb.field, fb.per, fb.angle, fb.cx, fb.cy, fb.order, fb.seed, fb.noise_px, !!fb.invert, arrowOf(fb.vec)]);
       if (c.fkey !== fk) { c.fkey = fk; c.F = fieldRamp(c.rp, lab.w, lab.h, fb, this.W / lab.w); }
       F = c.F; fe = FIELD_EFFECTS.includes(fb.effect) ? fb.effect : "reveal";
       const fv = fieldPruned(fval, fe); fp = fv.map(v => v[0]); fwt = fv.map(v => v[1]);
@@ -1992,17 +2085,78 @@ class Director {
       g.drawImage(L.img, -L.w / 2 * k, -L.h / 2 * k, L.w * k, L.h * k); g.restore();
     } else if (L.kind === "shape" && L.shape) {       // = render.shape_source: the path in the box, blurred by the feather
       const w = L.w * k, h = L.h * k, sh = L.shape, f = (+sh.feather || 0) * k;
-      g.save(); g.translate((L.x + L.w / 2) * k, (L.y + L.h / 2) * k); g.rotate(L.rotation * Math.PI / 180);
-      g.scale(L.flip_h ? -1 : 1, L.flip_v ? -1 : 1);
-      if (f > 0.5 * k) g.filter = `blur(${f}px)`;
-      g.fillStyle = isHex(L.color) ? L.color : "#ffffff"; g.beginPath();
-      if (sh.type === "ellipse") g.ellipse(0, 0, Math.abs(w) / 2, Math.abs(h) / 2, 0, 0, Math.PI * 2);
-      else if (sh.type === "poly" && (sh.points || []).length >= 3) sh.points.forEach(([u, v], i) => (i ? g.lineTo : g.moveTo).call(g, -w / 2 + u * w, -h / 2 + v * h));
-      else g.rect(-w / 2, -h / 2, w, h);
-      g.fill(); g.restore();
+      const fill = isShader(L) ? this.shaderFill(L) : null;      // = render.shader_source: the shader seen through the shape
+      const shape = (q, colour) => {
+        q.save(); q.translate((L.x + L.w / 2) * k, (L.y + L.h / 2) * k); q.rotate(L.rotation * Math.PI / 180);
+        q.scale(L.flip_h ? -1 : 1, L.flip_v ? -1 : 1);
+        if (f > 0.5 * k) q.filter = `blur(${f}px)`;
+        q.fillStyle = colour; q.beginPath();
+        if (sh.type === "ellipse") q.ellipse(0, 0, Math.abs(w) / 2, Math.abs(h) / 2, 0, 0, Math.PI * 2);
+        else if (sh.type === "poly" && (sh.points || []).length >= 3) sh.points.forEach(([u, v], i) => (i ? q.lineTo : q.moveTo).call(q, -w / 2 + u * w, -h / 2 + v * h));
+        else q.rect(-w / 2, -h / 2, w, h);
+        q.fill();
+        if (fill) { q.filter = "none"; q.globalCompositeOperation = "source-in"; q.drawImage(fill, -w / 2, -h / 2, w, h); }
+        q.restore();
+      };
+      if (!fill) shape(g, isHex(L.color) ? L.color : "#ffffff");
+      else { const s = this._shc ||= mkCanvas(1, 1); if (s.width !== g.canvas.width || s.height !== g.canvas.height) { s.width = g.canvas.width; s.height = g.canvas.height; }
+        const q = s.getContext("2d"); q.clearRect(0, 0, s.width, s.height); shape(q, "#ffffff"); g.drawImage(s, 0, 0); }
     }
     if (L.clip) { g.save(); g.globalCompositeOperation = "destination-in"; const cf = (+L.clip_feather || 0) * this.k / 2;   // clip feather: a blurred mask
       if (cf > 0.2) g.filter = `blur(${cf}px)`; g.drawImage(this.clipMask(L), 0, 0); g.restore(); }
+  }
+  shaderInfo(L) {                                    // the shader's text and controls, asked from the node once per shader
+    const sh = L.shape, own = (sh.code || "").trim(), key = own ? "c:" + sh.code : "p:" + sh.shader, all = (this._shaders ||= new Map());
+    let e = all.get(key);
+    if (!e) { all.set(key, e = { pending: true });
+      api.fetchApi("/kubakub/shader/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(own ? { code: sh.code } : { preset: sh.shader }) })
+        .then(r => r.json()).then(j => { Object.assign(e, j, { pending: false }); if (this.closed) return; if (j.error) note("shader: " + j.error); this.renderInspector(); this.draw(); })
+        .catch(err => { all.delete(key); e.pending = false; e.error = String(err); console.warn("[kubakub director] shader", err); }); }      // not kept: asked again at the next draw
+    return e;
+  }
+  shaderListens(L) {                                 // = render.listens: only a shader that reads the sound has it analysed
+    return isShader(L) && (this.shaderInfo(L).uses || []).some(u => SHADER_SOUND.includes(u));
+  }
+  shaderNow(sh) {                                    // = shader_render.now: the clock, the loop and the sound at the playhead
+    const t = this.tl.time, D = Math.max(1e-6, this.tl.duration), c = this.motionCtx(), bt = c.beats || [];
+    let n = 0; while (n < bt.length && bt[n] <= t + 1e-6) n++;
+    const lv = band => Math.min(1, Math.max(0, mLevel(c, t, 0.15, band)));
+    const fps = +this.tl.fps > 0 ? +this.tl.fps : 25;
+    return { iTime: t * (Number.isFinite(+sh.speed) ? +sh.speed : 1), iTimeDelta: 1 / fps, iFrame: Math.round(t * fps), iFrameRate: fps, iSampleRate: 44100, kSeconds: D,
+      kLoop: (t / D * Math.max(1, Math.round(+sh.loops || 1))) % 1, kLevel: lv("all"), kLow: lv("low"), kMid: lv("mid"), kHigh: lv("high"),
+      kBeat: n && bt.length > 1 ? Math.max(0, 1 - (t - bt[n - 1]) / (bt[1] - bt[0])) : 0, kBeats: n };
+  }
+  shaderDefaults(L, info) {                         // write the controls the layer does not hold yet (their defaults)
+    const miss = (info.controls || []).filter(c => { const v = L.shape["c_" + c.name]; return v == null || v === "" || !Number.isFinite(+v); });
+    if (miss.length) L.shape = { ...L.shape, ...Object.fromEntries(miss.map(c => ["c_" + c.name, c.default])) };
+  }
+  shaderInput(L) {                                   // = render._shape: what the shader reads as its picture (image0)
+    const sh = L.shape; return sh.input === "below" || sh.input === "noise" ? sh.input : (sh.code || "").trim() ? "noise" : "below";
+  }
+  shaderFill(L) {                                    // the shader at the layer's box size, or null (the colour shows)
+    const info = this.shaderInfo(L); if (!info.source) return null;
+    this.shaderDefaults(L, info);
+    const k = this.k, s = Math.min(1, 4096 / Math.max(1, Math.abs(L.w) * k, Math.abs(L.h) * k));
+    const w = Math.max(1, Math.round(Math.abs(L.w) * k * s)), h = Math.max(1, Math.round(Math.abs(L.h) * k * s)), u = this.shaderNow(L.shape);
+    const av = arrowOf(L.shape.vec);                 // = shader_render.vector_values: a shader counts y from the bottom
+    if (av) Object.assign(u, { kAx: av[0], kAy: 1 - av[1], kBx: av[2], kBy: 1 - av[3], kVector: 1, kVecField: 1 });
+    for (const c of info.controls || []) u[c.name] = ctlValue(L.shape, c);
+    const pictures = [null, null, null, null], below = this.shaderInput(L) === "below";
+    for (const i of info.channels || []) {
+      if (i === 0 && below) {                        // = render._under: the composite so far, under the layer's box
+        if (!this._below) continue;
+        const bw = Math.max(1, Math.round(Math.abs(L.w) * k)), bh = Math.max(1, Math.round(Math.abs(L.h) * k));
+        const c = this._undc ||= mkCanvas(1, 1); if (c.width !== bw || c.height !== bh) { c.width = bw; c.height = bh; }
+        const g = c.getContext("2d"); g.globalCompositeOperation = "copy"; g.fillStyle = "#000"; g.fillRect(0, 0, bw, bh); g.globalCompositeOperation = "source-over";
+        g.drawImage(this._below, Math.round(Math.min(L.x, L.x + L.w) * k), Math.round(Math.min(L.y, L.y + L.h) * k), bw, bh, 0, 0, bw, bh);
+        pictures[0] = c;
+      } else if (!(info.optional || []).includes(i)) pictures[i] = "noise";
+    }
+    const out = shaderGL.draw(info.source, w, h, u, pictures);
+    if (out.error) { if (!info.glError) { const lines = out.error.split("\n").map(l => /ERROR:\s*\d+:(\d+):\s*(.*)/.exec(l)).filter(Boolean).map(m => `line ${m[1]}: ${m[2].trim()}`);
+        info.glError = "the shader does not compile.\n" + (lines.slice(0, 6).join("\n") || out.error.trim()); note("shader: " + info.glError.split("\n").slice(0, 2).join(" "));
+        setTimeout(() => { if (!this.closed) this.renderInspector(); }, 0); } return null; }
+    return out;
   }
   maskSource(i) {
     const L = this.layers[i]; if (!L || !L.mask.by) return null;
@@ -2122,7 +2276,8 @@ class Director {
         lc.filter = this.filterOf(L.adjust); lc.drawImage(target, 0, 0); lc.filter = "none";
         if (L.clip) { lc.globalCompositeOperation = "destination-in"; const cf = (+L.clip_feather || 0) * this.k / 2;
           if (cf > 0.2) lc.filter = `blur(${cf}px)`; lc.drawImage(this.clipMask(L), 0, 0); lc.filter = "none"; }
-      } else this.drawContent(lc, L);
+      } else { this._below = solo ? null : target;   // a shader fill may read what is under it (shaderFill)
+        try { this.drawContent(lc, L); } finally { this._below = null; } }
       lc.restore();
       if (fxf) {                                     // the layer's effects, before masks by other layers
         const t = this.fxc; t.clearRect(0, 0, PW, PH); t.filter = fxf; t.drawImage(this.lyr, 0, 0); t.filter = "none";
@@ -2278,7 +2433,56 @@ class Director {
       edges: [P(0, -L.h / 2), P(L.w / 2, 0), P(0, L.h / 2), P(-L.w / 2, 0)],
       rot: P(0, -L.h / 2 - 90 / this.S()), top: P(0, -L.h / 2), c: [cx, cy], cos: c, sin: s };
   }
+  // An arrow drawn on the picture. A field behaviour keeps it in 0-1 of the canvas (its regions do not move with
+  // the layer); a shader fill keeps it in 0-1 of the layer's box, so it travels with the layer.
+  boxPoint(L, x, y, back) {                          // a canvas point as 0-1 of the layer's box (its turn and flips undone), or back
+    const a = L.rotation * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), cx = L.x + L.w / 2, cy = L.y + L.h / 2;
+    const w = Math.max(1, Math.abs(L.w)), h = Math.max(1, Math.abs(L.h)), fx = L.flip_h ? -1 : 1, fy = L.flip_v ? -1 : 1;
+    if (back) { const lx = (x - 0.5) * w * fx, ly = (y - 0.5) * h * fy; return [cx + lx * c - ly * s, cy + lx * s + ly * c]; }
+    const dx = x - cx, dy = y - cy;
+    return [(dx * c + dy * s) * fx / w + 0.5, (-dx * s + dy * c) * fy / h + 0.5];
+  }
+  armed() {                                          // the arrow that waits to be drawn, while what it belongs to is still there
+    const v = this.vecDraw, L = this.layers?.[this.sel];
+    if (v && !(L && L.id === v.id && (v.sh ? isShader(L) : (L.motion || []).includes(v.b) && v.b.type === "field"))) this.vecDraw = null;
+    return this.vecDraw;
+  }
+  setArrow(L, at, p) {                               // p = [x0, y0, x1, y1] in canvas pixels; false = too short to be one
+    if (Math.hypot(p[2] - p[0], p[3] - p[1]) < 2 / this.S()) return false;
+    const r = v => Math.round(v * 1e5) / 1e5;
+    if (at.sh) L.shape = { ...L.shape, vec: [...this.boxPoint(L, p[0], p[1]), ...this.boxPoint(L, p[2], p[3])].map(r) };
+    else { at.b.vec = [r(p[0] / this.W), r(p[1] / this.H), r(p[2] / this.W), r(p[3] / this.H)]; this.applyTime(this.tl.time); }
+    return true;
+  }
+  arrows(L) {                                        // the arrows of a layer, in canvas pixels
+    const out = [];
+    for (const b of L.motion || []) { const v = b.type === "field" && b.on !== false && (b.field === "direction" || b.field === "radial") && arrowOf(b.vec);
+      if (v) out.push([v[0] * this.W, v[1] * this.H, v[2] * this.W, v[3] * this.H]); }
+    const s = isShader(L) && arrowOf(L.shape.vec);
+    if (s) out.push([...this.boxPoint(L, s[0], s[1], true), ...this.boxPoint(L, s[2], s[3], true)]);
+    return out;
+  }
+  drawArrows() {
+    const L = this.layers[this.sel]; if (!L) return;
+    const ctx = this.ctx, X = x => this.OX() + x * this.S(), Y = y => this.OY() + y * this.S();
+    ctx.save(); ctx.lineCap = "round";
+    for (const [x0, y0, x1, y1] of this.arrows(L)) {
+      const a = Math.atan2(y1 - y0, x1 - x0), hx = X(x1), hy = Y(y1);
+      for (const [col, wd] of [["rgba(0,0,0,.55)", 6], [ORANGE, 3]]) {
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = wd;
+        ctx.beginPath(); ctx.moveTo(X(x0), Y(y0)); ctx.lineTo(hx, hy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - 16 * Math.cos(a - 0.45), hy - 16 * Math.sin(a - 0.45)); ctx.lineTo(hx - 16 * Math.cos(a + 0.45), hy - 16 * Math.sin(a + 0.45)); ctx.closePath(); ctx.fill(); if (wd > 3) ctx.stroke();
+        ctx.beginPath(); ctx.arc(X(x0), Y(y0), wd > 3 ? 7 : 5, 0, 7); ctx.fill();
+      }
+    }
+    if (this.armed() && !this.vecDrag) {              // waiting for the drag: say so on the stage
+      ctx.font = "600 13px 'Hanken Grotesk', sans-serif"; const t = "drag an arrow on the picture · Esc to cancel", w = ctx.measureText(t).width + 20;
+      ctx.fillStyle = "rgba(20,18,24,.85)"; ctx.fillRect(this.OX() + 10, this.OY() + 10, w, 26); ctx.fillStyle = "#fff"; ctx.fillText(t, this.OX() + 20, this.OY() + 28);
+    }
+    ctx.restore();
+  }
   drawSelection() {
+    this.drawArrows();
     const L = this.layers[this.sel]; if (!L || !L.visible || !this.transformable(L)) return;
     const ctx = this.ctx, h = this.handles(L), sx = p => this.OX() + p[0] * this.S(), sy = p => this.OY() + p[1] * this.S();
     ctx.strokeStyle = LAV; ctx.lineWidth = 2; ctx.beginPath(); h.corners.forEach((p, i) => i ? ctx.lineTo(sx(p), sy(p)) : ctx.moveTo(sx(p), sy(p))); ctx.closePath(); ctx.stroke();
@@ -2365,6 +2569,8 @@ class Director {
           <div data-id="g-shape"><div class="kkd-sub">shape</div>
             <div class="kkd-field"><span>colour</span><input type="color" data-id="sh-col"><span></span></div>
             <div class="kkd-field" data-tip="Soft edge (px of the delivery size); it spreads outside the shape"><span>feather</span><input type="range" data-id="sh-f" min="0" max="200" step="1"><span class="v" data-id="sh-f-v"></span></div>
+            <div class="kkd-field" data-tip="Fill the shape with a moving shader instead of the colour: a preset, or your own code (a Shadertoy works) · it plays live and renders the same"><span>fill</span><select data-id="sh-fill"></select><button class="kkd-pill" data-id="sh-pick" data-tip="Every shader as a small picture: click one">pictures</button></div>
+            <div data-id="sh-box"></div>
           </div>
           <div data-id="g-paint"><div class="kkd-sub">brush</div>
             <div class="kkd-field"><span>colour</span><input type="color" data-id="i-col"><span></span></div>
@@ -2407,7 +2613,7 @@ class Director {
       svg.innerHTML = '<filter id="kkdLumA" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0.2126 0.7152 0.0722 0 0"/><feComposite in2="SourceGraphic" operator="in"/></filter>';
       document.body.appendChild(svg);
     }
-    for (const id of ["layers", "g-motion", "g-fx", "g-react", "i-blend", "i-mask"]) this.guardHTML(this.$(id));
+    for (const id of ["layers", "g-motion", "g-fx", "g-react", "i-blend", "i-mask", "sh-fill", "sh-box"]) this.guardHTML(this.$(id));
     const unguard = e => { for (let n = e.target; n && n !== this.root; n = n.parentElement) if (n._kkdGuard) n._kkdGuard.html = null; };
     this.root.addEventListener("input", unguard, true); this.root.addEventListener("change", unguard, true);
     this.menu = document.createElement("div"); this.menu.className = "kkd-menu"; this.menu.hidden = true;
@@ -2454,13 +2660,15 @@ class Director {
     this.$("brush").hidden = !(t === "brush" || t === "erase"); this.draw();
   }
   thumb(L) {                                         // cached until the layer's pixels change
-    const key = L.kind === "base" ? this.baseImage() : L.kind === "paint" ? "v" + (L.ver || 0) : L.kind === "adjust" ? "adj" : L.kind === "shape" ? "s" + L.color + L.shape?.type : L.img;
+    const key = L.kind === "base" ? this.baseImage() : L.kind === "paint" ? "v" + (L.ver || 0) : L.kind === "adjust" ? "adj" : L.kind === "shape" ? "s" + L.color + L.shape?.type + (isShader(L) ? "~" : "") : L.img;
     if (L._thumb && L._thumbKey === key) return L._thumb;
     const c = mkCanvas(68, 46), g = c.getContext("2d"); g.fillStyle = "#3b3b3e"; g.fillRect(0, 0, 68, 46);
     if (L.kind === "base") g.drawImage(this.baseImage(), 0, 0, 68, 46);
     else if (L.kind === "paint") g.drawImage(L.canvas, 0, 0, 68, 46);
     else if (L.kind === "light") { if (L.img) g.drawImage(L.img, 0, 0, 68, 46); else { g.fillStyle = ORANGE; g.beginPath(); g.arc(34, 23, 7, 0, 7); g.fill(); } }
-    else if (L.kind === "shape") { g.fillStyle = isHex(L.color) ? L.color : "#fff"; g.beginPath();
+    else if (L.kind === "shape") { g.fillStyle = isHex(L.color) ? L.color : "#fff";
+      if (isShader(L)) { const gr = g.createLinearGradient(12, 8, 56, 38); gr.addColorStop(0, LAV); gr.addColorStop(1, ORANGE); g.fillStyle = gr; }
+      g.beginPath();
       if (L.shape?.type === "ellipse") g.ellipse(34, 23, 22, 15, 0, 0, 7); else if (L.shape?.type === "poly") { g.moveTo(14, 38); g.lineTo(54, 38); g.lineTo(34, 8); } else g.rect(12, 8, 44, 30); g.fill(); }
     else if (L.kind === "adjust") { const gr = g.createLinearGradient(0, 0, 68, 0); gr.addColorStop(0, "#222"); gr.addColorStop(1, ORANGE); g.fillStyle = gr; g.fillRect(8, 16, 52, 14); }
     else if (L.img) { const k = Math.min(60 / iw(L.img), 40 / ih(L.img)); g.drawImage(L.img, 34 - iw(L.img) * k / 2, 23 - ih(L.img) * k / 2, iw(L.img) * k, ih(L.img) * k); }
@@ -2483,7 +2691,7 @@ class Director {
         <span class="kkd-grip" data-tip="Drag to change what is in front|Ctrl ] / Ctrl [">⋮⋮</span>
         <button class="kkd-eye ${L.visible ? "on" : ""}" data-eye="${i}" aria-label="show or hide" data-tip="Show / hide|Alt H"></button>
         <img class="kkd-thumb" alt="" src="${this.thumb(L)}">
-        <span class="kkd-lname">${L.mask.by === "below" ? "↳ " : ""}${esc(L.name)}<small>${L.kind === "image" ? (L.blend !== "normal" ? esc(L.blend) : isVideo(L) ? "video" : "image") : L.kind === "shape" ? (L.w >= this.W * 0.98 && L.h >= this.H * 0.98 && L.shape?.type === "rect" ? "solid" : esc(L.shape?.type || "shape")) : esc(L.kind)}${L.clip ? " · in " + esc(L.clip) : ""}${this.maskLabel(i)}${L.kind === "image" && !L.img ? (isVideo(L) ? " · video not loaded" : " · missing file") : ""}${L.video?.on ? " · ltx" : ""}${L.kind === "light" ? " · " + esc(L.pendingKey ? "rendering…" : L.err ? "failed" : L.img ? L.light.environment + ", " + L.light.lights.filter(q => q.on !== false).length + " lights" : "not rendered") : ""}</small></span>
+        <span class="kkd-lname">${L.mask.by === "below" ? "↳ " : ""}${esc(L.name)}<small>${L.kind === "image" ? (L.blend !== "normal" ? esc(L.blend) : isVideo(L) ? "video" : "image") : isShader(L) ? "shader: " + esc((L.shape.code || "").trim() ? "own code" : L.shape.shader) : L.kind === "shape" ? (L.w >= this.W * 0.98 && L.h >= this.H * 0.98 && L.shape?.type === "rect" ? "solid" : esc(L.shape?.type || "shape")) : esc(L.kind)}${L.clip ? " · in " + esc(L.clip) : ""}${this.maskLabel(i)}${L.kind === "image" && !L.img ? (isVideo(L) ? " · video not loaded" : " · missing file") : ""}${L.video?.on ? " · ltx" : ""}${L.kind === "light" ? " · " + esc(L.pendingKey ? "rendering…" : L.err ? "failed" : L.img ? L.light.environment + ", " + L.light.lights.filter(q => q.on !== false).length + " lights" : "not rendered") : ""}</small></span>
         ${this.relTag(i)}
       </div>`).join("");
     this.$("count").textContent = this.layers.length;
@@ -2512,6 +2720,24 @@ class Director {
     Object.assign(this.regpick.style, { top: (r.bottom + 4) + "px", left: r.left + "px", minWidth: r.width + "px" });
     this.regpick.hidden = false; this.regpick.dataset.for = input.dataset.id; this.regHi = -1;
     this.regpick.querySelector(".on")?.scrollIntoView({ block: "nearest" });
+  }
+  renderShader(L) {                                  // the fill menu of a shape and, for a shader, its loops, code and controls
+    const $ = id => this.$(id); let sh = L.shape || {}; const own = !!(sh.code || "").trim(), on = isShader(L);
+    if (!this._shPresets) { this._shPresets = [];
+      shaderPresets().then(j => { this._shNodeOnly = j.node_only || []; this._shPresets = (j.presets || []).filter(p => !this._shNodeOnly.includes(p)); if (!this.closed) this.renderInspector(); }).catch(e => { this._shPresets = null; console.warn("[kubakub director] shader presets", e); }); }     // null: asked again next time
+    $("sh-fill").kkdHTML = `<option value="" ${on ? "" : "selected"}>colour</option>` + this._shPresets.map(p => `<option value="${esc(p)}" ${!own && sh.shader === p ? "selected" : ""}>${esc(p)}</option>`).join("")
+      + `<option value="~code" ${own ? "selected" : ""}>own code…</option>`;
+    if (!on) { $("sh-box").kkdHTML = ""; return; }
+    const info = this.shaderInfo(L); this.shaderDefaults(L, info); sh = L.shape;
+    const num = (name, d) => ctlValue(sh, { name, default: d });
+    $("sh-box").kkdHTML = (info.about && !own ? `<div style="font-size:11px;opacity:.7;margin:2px 0 6px">${esc(info.about)}</div>` : "")
+      + (own ? `<textarea data-id="sh-code" rows="8" spellcheck="false" style="font-family:monospace;font-size:11px" data-tip="The Image tab of a Shadertoy, or a GLSL fragment shader · click outside to apply">${esc(sh.code)}</textarea>` : "")
+      + (info.error || info.glError ? `<div style="font-size:11px;margin:2px 0 6px;color:${ORANGE};white-space:pre-wrap">${esc(info.error || info.glError)} · the layer shows its colour until this is fixed</div>` : "")
+      + `<div class="kkd-field" data-tip="How many times the shader runs through on the timeline (presets loop without a jump)"><span>loops</span><input type="number" data-id="sh-loops" min="1" max="1000" step="1" value="${Math.max(1, Math.round(+sh.loops || 1))}"><span></span></div>`
+      + ((info.channels || []).includes(0) ? `<div class="kkd-field" data-tip="What the shader works on (its image0): the layers below this one, so it is an effect on them · or the built-in noise, which most pasted Shadertoys expect"><span>picture</span><select data-id="sh-input"><option value="below" ${this.shaderInput(L) === "below" ? "selected" : ""}>the layers below</option><option value="noise" ${this.shaderInput(L) === "noise" ? "selected" : ""}>built-in noise</option></select><span></span></div>` : "")
+      + ((info.uses || []).some(u => SHADER_ARROW.includes(u)) ? `<div class="kkd-field" data-tip="Drag an arrow on the layer: the shader runs from its start to its end, takes its direction, or starts at its start (what this shader does with it is in the line above)"><span>arrow</span><span style="display:flex;gap:4px"><button class="kkd-pill" data-id="sh-vec" aria-pressed="${this.armed()?.sh === true}">${arrowOf(sh.vec) ? "redraw" : "draw"}</button>${arrowOf(sh.vec) ? `<button class="kkd-pill" data-id="sh-vecx" data-tip="Remove the arrow">clear</button>` : ""}</span><span></span></div>` : "")
+      + (own ? `<div class="kkd-field" data-tip="How fast the shader's clock (iTime) runs"><span>speed</span><input type="number" data-id="sh-speed" step="0.1" value="${Number.isFinite(+sh.speed) ? +sh.speed : 1}"><span></span></div>` : "")
+      + (info.controls || []).map(c => `<div class="kkd-field" data-tip="${esc(c.about || c.name)} · ${c.min} to ${c.max}, ${c.default} at the start"><span>${esc(c.name.replace(/_$/, ""))}</span><input type="range" data-shc="${esc(c.name)}" min="${c.min}" max="${c.max}" step="any" value="${num(c.name, c.default)}"><span class="v" data-shcv="${esc(c.name)}">${+num(c.name, c.default).toFixed(3)}</span></div>`).join("");
   }
   renderInspector() {
     const L = this.layers[this.sel]; if (!L) return; const $ = id => this.$(id);
@@ -2555,7 +2781,7 @@ class Director {
             return `<div class="kkd-field" data-tip="${esc(t)}"><span>${label}</span><input type="range" data-fx="${key}" min="${lo}" max="${hi}" step="${st}" value="${esc(f[key])}"><span class="v" data-fxv="${key}">${+(+f[key]).toFixed(2)}${unit}</span></div>`; }).join("")).join(""); }
     this.renderMotion(L);
     $("g-shape").hidden = L.kind !== "shape";
-    if (L.kind === "shape") { $("sh-col").value = isHex(L.color) ? L.color : "#ffffff"; $("sh-f").value = +L.shape?.feather || 0; $("sh-f-v").textContent = (+L.shape?.feather || 0) + " px"; }
+    if (L.kind === "shape") { $("sh-col").value = isHex(L.color) ? L.color : "#ffffff"; $("sh-f").value = +L.shape?.feather || 0; $("sh-f-v").textContent = (+L.shape?.feather || 0) + " px"; this.renderShader(L); }
     $("g-paint").hidden = L.kind !== "paint"; if (L.kind === "paint") { $("i-col").value = L.color; $("i-size").value = L.size; $("i-size-v").textContent = L.size + " px"; }
     $("g-adj").hidden = L.kind !== "adjust";
     if (L.kind === "adjust") for (const k of Object.keys(L.adjust)) { $("a-" + k).value = L.adjust[k]; $("a-" + k + "-v").textContent = k === "hue" ? L.adjust[k] + "°" : (+L.adjust[k]).toFixed(2); }
@@ -3312,6 +3538,10 @@ class Director {
       if (k === "path" && String(b.path).startsWith("fx.") && !q.fx) q.fx = { ...fxOf(q) };
       if (k === "type" || k === "path" || k === "wave" || k === "trigger" || k === "mode" || k === "order" || k === "layout" || k === "band" || k === "field" || k === "per" || k === "effect" || k === "curve") this.renderInspector();
       motionChanged(); });
+    $("g-motion").addEventListener("click", e => {                // a field's arrow: draw it on the picture, or remove it
+      const dr = e.target.closest("[data-mvec]"), cl = e.target.closest("[data-mvecx]"), q = L();
+      if (dr) { const b = q.motion?.[+dr.dataset.mvec]; this.vecDraw = !b || this.armed()?.b === b ? null : { id: q.id, b }; this.setTool("move"); this.renderInspector(); this.draw(); }
+      else if (cl && q.motion?.[+cl.dataset.mvecx]) { this.snap(); delete q.motion[+cl.dataset.mvecx].vec; this.vecDraw = null; this.renderInspector(); motionChanged(); } });
     $("g-motion").addEventListener("click", e => { const d = e.target.closest("[data-mdel]"); if (!d) return; this.snap();
       const q = L(); q.motion.splice(+d.dataset.mdel, 1); if (!q.motion.length) delete q.motion; this.renderInspector(); motionChanged(); });
     $("g-fx").addEventListener("click", e => { const q = L(), del = e.target.closest("[data-fxdel]");
@@ -3325,6 +3555,26 @@ class Director {
       (this._fxAdded ||= new WeakMap()).set(q, [...(this._fxAdded.get(q) || []), name]); this.renderInspector(); });
     $("sh-col").oninput = e => { this.once(); L().color = e.target.value; this.renderLayers(); this.draw(); };
     $("sh-f").oninput = e => { this.once(); const q = L(); q.shape = { ...q.shape, feather: +e.target.value }; $("sh-f-v").textContent = e.target.value + " px"; this.draw(); };
+    $("sh-fill").onchange = e => { this.snap(); const q = L(), v = e.target.value, keep = { type: q.shape.type, points: q.shape.points || [], feather: +q.shape.feather || 0 };
+      q.shape = !v ? keep : v === "~code" ? { ...keep, shader: "", code: (q.shape.code || "").trim() ? q.shape.code : SHADER_NEW, loops: q.shape.loops || 1, speed: 1 }
+        : { ...keep, shader: v, code: "", loops: q.shape.loops || 1, speed: 1 };      // another shader has other controls: they start at their defaults
+      for (const p of Object.keys(q.anim || {})) if (p.startsWith("shape.c_")) delete q.anim[p];          // and the old ones' keys and behaviours go
+      if (q.motion) { q.motion = q.motion.filter(b => !String(b.path || "").startsWith("shape.c_")); if (!q.motion.length) delete q.motion; }
+      for (const p of Object.keys(q._rest || {})) if (p.startsWith("shape.c_")) delete q._rest[p];
+      this.applyTime(this.tl.time);
+      this.renderInspector(); this.renderLayers(); this.drawTimeline(); this.draw(); };
+    $("sh-pick").onclick = e => pickShader(e.currentTarget, (L().shape?.code || "").trim() ? "" : L().shape?.shader || "", name => {
+      const s = $("sh-fill"); if (![...s.options].some(o => o.value === name)) return; s.value = name; s.dispatchEvent(new Event("change")); }, this._shNodeOnly || []);
+    $("sh-box").addEventListener("input", e => { const q = L(), d = e.target.dataset; if (!q?.shape) return;
+      if (d.shc) { this.once(); q.shape = { ...q.shape, ["c_" + d.shc]: +e.target.value }; const v = $("sh-box").querySelector(`[data-shcv="${d.shc}"]`); if (v) v.textContent = +(+e.target.value).toFixed(3); this.draw(); }
+      else if (d.id === "sh-loops") { this.once(); q.shape = { ...q.shape, loops: Math.max(1, Math.round(+e.target.value || 1)) }; this.draw(); }
+      else if (d.id === "sh-speed") { this.once(); q.shape = { ...q.shape, speed: Number.isFinite(+e.target.value) ? +e.target.value : 1 }; this.draw(); } });
+    $("sh-box").addEventListener("click", e => { const q = L(), id = e.target.closest("[data-id]")?.dataset.id; if (!q?.shape) return;
+      if (id === "sh-vec") { this.vecDraw = this.armed()?.sh ? null : { id: q.id, sh: true }; this.setTool("move"); this.renderInspector(); this.draw(); }
+      else if (id === "sh-vecx") { this.snap(); const { vec, ...rest } = q.shape; q.shape = rest; this.vecDraw = null; this.renderInspector(); this.draw(); } });
+    $("sh-box").addEventListener("change", e => { const q = L(), id = e.target.dataset.id; if (!q?.shape) return;
+      if (id === "sh-input") { this.snap(); q.shape = { ...q.shape, input: e.target.value === "noise" ? "noise" : "below" }; this.draw(); }
+      else if (id === "sh-code" && e.target.value !== q.shape.code) { this.snap(); q.shape = { ...q.shape, code: e.target.value }; this.renderInspector(); this.draw(); } });
     $("i-size").oninput = e => { L().size = +e.target.value; $("i-size-v").textContent = L().size + " px"; };
     $("i-clear").onclick = () => { this.snap(); const q = L(); q.canvas.getContext("2d").clearRect(0, 0, this.PW, this.PH); q.dirty = true; q.ver = (q.ver || 0) + 1; this.refresh();
       (window.requestIdleCallback || (f => setTimeout(f, 50)))(() => { if (this.layers?.includes(q)) this.paintPix(q); }); };
@@ -3608,6 +3858,16 @@ class Director {
       const [x, y] = toM(e); cv.setPointerCapture(e.pointerId); this.tlFocus = false;
       if (this.tool === "hand" || this.space || e.button === 1) { drag = { mode: "pan", sx: e.clientX, sy: e.clientY, px: this.panX, py: this.panY }; cv.style.cursor = "grabbing"; return; }
       if (this.tool === "poly") { (this.polyDraft ||= []).push([x, y]); this.draw(); return; }
+      if (this.armed()) {                            // an arrow for a field behaviour or a shader fill of the selected layer
+        const q = this.cur(), at = this.vecDraw;
+        drag = { mode: "vec", q, at, x0: x, y0: y, old: at.sh ? q.shape.vec : at.b.vec, drawn: false }; this.vecDrag = [x, y, x, y];
+        this.vecAbort = () => { if (drag?.mode !== "vec") return;         // Esc while dragging: the arrow as it was
+          if (drag.drawn) { if (at.sh) { const { vec, ...rest } = q.shape; q.shape = drag.old ? { ...rest, vec: drag.old } : rest; }
+            else if (drag.old) at.b.vec = drag.old; else delete at.b.vec;
+            this.applyTime(this.tl.time); }
+          drag = null; this.vecDrag = null; };
+        this.draw(); return;
+      }
       if (this.tool === "move") {                    // lamps of the selected light layer: drag them over the facade
         const s = lampAt(e);
         if (s) { this.lsel = s.i; this.renderLightPanel(); drag = { mode: "lamp", q: s.q, x, y, lx: +s.q.x || 0, lh: +s.q.height || 0, pending: this.state(), sx: e.clientX, sy: e.clientY }; this.draw(); return; }
@@ -3648,6 +3908,10 @@ class Director {
         if (drag.altCopy) { const c = this.duplicate(false); if (c) { drag.q = c; drag.pending = null; } drag.altCopy = false; }   // Alt drag: the copy moves (one undo step), a plain Alt click copies nothing
         if (drag.pending) drag.pending = this.commit(drag.pending);
       }
+      if (drag.mode === "vec") { this.vecDrag = [drag.x0, drag.y0, x, y];
+        if (!drag.drawn && Math.hypot(x - drag.x0, y - drag.y0) >= 2 / this.S()) { this.snap(); drag.drawn = true; }      // one undo step, and only for a real arrow
+        if (drag.drawn) this.setArrow(drag.q, drag.at, this.vecDrag);
+        this.draw(); return; }
       if (drag.mode === "lamp") {
         const [ax, ah] = this.toFacade(drag.x, drag.y), [bx, bh] = this.toFacade(x, y);
         drag.q.x = +(drag.lx + bx - ax).toFixed(2); drag.q.height = +(drag.lh + bh - ah).toFixed(2);
@@ -3698,6 +3962,7 @@ class Director {
     });
     const idlePix = q => (window.requestIdleCallback || (f => setTimeout(f, 50)))(() => { if (this.layers?.includes(q) && q.kind === "paint") this.paintPix(q); });
     const endDrag = () => { if (drag?.mode === "paint" && drag.q) idlePix(drag.q);
+      if (drag?.mode === "vec") { this.vecDrag = null; if (drag.drawn) { this.vecDraw = null; this.scheduleDraft(); } this.renderInspector(); }   // a click without a drag: still armed
       if (drag?.mode === "paint" || drag?.mode === "lamp") this.renderLayers(); if (drag && !drag.pending) this.scheduleDraft(); drag = null; this.guides = []; this.setTool(this.tool); };
     cv.addEventListener("pointerup", endDrag);
     cv.addEventListener("pointercancel", endDrag);
@@ -3735,6 +4000,7 @@ class Director {
       if (this.tool === "poly" && (k === "Escape" || k === "Enter")) { e.stopPropagation(); e.preventDefault();
         if (k === "Enter") this.finishPoly(); else { this.polyDraft = null; this.setTool("move"); } return; }
       if (typing && k === "Escape") { e.stopPropagation(); e.preventDefault(); this.fillTl?.(); e.target.blur(); this.root.focus?.(); return; }   // leave the field, keep the window
+      if (k === "Escape" && this.vecDraw) { e.stopPropagation(); e.preventDefault(); this.vecAbort?.(); this.vecDraw = null; this.renderInspector(); this.draw(); return; }
       if (k === "Escape") { e.stopPropagation(); const open = [this.menu, this.filemenu, this.keypop, this.outpop, this.diffpop, this.exportpop, this.clipPop].filter(Boolean).find(p => !p.hidden); if (open) open.hidden = true; else this.close(); return; }
       if (typing) { e.stopPropagation(); if (ctrl && k === "Enter") { e.preventDefault(); this.apply(); } return; }
       e.stopPropagation();

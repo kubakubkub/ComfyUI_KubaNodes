@@ -1,0 +1,760 @@
+{
+ "id": "6f2a9c1e-3b74-4d58-9a0e-5c1d7e8f2a46",
+ "revision": 0,
+ "last_node_id": 99,
+ "last_link_id": 13,
+ "nodes": [
+  {
+   "id": 2,
+   "type": "KUBA_Shader",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    420,
+    760
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "image0",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "image1",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "image2",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "image3",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "mask",
+     "type": "MASK",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "field",
+     "type": "MASK",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "shape": 7,
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [
+      7
+     ]
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": null
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": [
+      8
+     ]
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "links": null
+    },
+    {
+     "name": "frame_count",
+     "type": "INT",
+     "links": null
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": null
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Shader"
+   },
+   "title": "1 · the guide: any moving clip",
+   "widgets_values": [
+    "depth scan",
+    "",
+    "",
+    768,
+    448,
+    25.0,
+    1.96,
+    1.0,
+    1,
+    true,
+    0.0,
+    1.0,
+    "auto",
+    true,
+    0.0,
+    1.0,
+    0.15,
+    "auto"
+   ]
+  },
+  {
+   "id": 10,
+   "type": "UNETLoader",
+   "pos": [
+    460,
+    0
+   ],
+   "size": [
+    400,
+    90
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "directory": "diffusion_models"
+     }
+    ]
+   },
+   "widgets_values": [
+    "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+    "default"
+   ],
+   "title": "ltx 2.5 22b distilled int8"
+  },
+  {
+   "id": 15,
+   "type": "ModelAttentionBackend",
+   "pos": [
+    460,
+    130
+   ],
+   "size": [
+    400,
+    60
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "links": [
+      2
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ModelAttentionBackend"
+   },
+   "widgets_values": [
+    "comfy kitchen attention"
+   ],
+   "title": "comfy kitchen attention (int8)"
+  },
+  {
+   "id": 13,
+   "type": "CLIPLoader",
+   "pos": [
+    460,
+    230
+   ],
+   "size": [
+    400,
+    110
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      3
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "directory": "text_encoders"
+     }
+    ]
+   },
+   "widgets_values": [
+    "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+    "ltxv",
+    "default"
+   ],
+   "title": "gemma 4 12b int8"
+  },
+  {
+   "id": 11,
+   "type": "VAELoader",
+   "pos": [
+    460,
+    380
+   ],
+   "size": [
+    400,
+    60
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      4
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "ltx-2.5-video-vae-conv-bf16.safetensors"
+   ],
+   "title": "ltx video vae"
+  },
+  {
+   "id": 12,
+   "type": "VAELoader",
+   "pos": [
+    460,
+    480
+   ],
+   "size": [
+    400,
+    60
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      5
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "ltx-2.5-audio-vae-bf16.safetensors",
+      "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors",
+      "directory": "vae"
+     }
+    ]
+   },
+   "widgets_values": [
+    "ltx-2.5-audio-vae-bf16.safetensors"
+   ],
+   "title": "ltx audio vae"
+  },
+  {
+   "id": 14,
+   "type": "LatentUpscaleModelLoader",
+   "pos": [
+    460,
+    580
+   ],
+   "size": [
+    400,
+    60
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "LATENT_UPSCALE_MODEL",
+     "type": "LATENT_UPSCALE_MODEL",
+     "links": [
+      6
+     ],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LatentUpscaleModelLoader",
+    "models": [
+     {
+      "name": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+      "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+      "directory": "latent_upscale_models"
+     }
+    ]
+   },
+   "widgets_values": [
+    "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
+   ],
+   "title": "ltx spatial upscaler x2"
+  },
+  {
+   "id": 20,
+   "type": "KUBA_MotionGuide",
+   "pos": [
+    900,
+    0
+   ],
+   "size": [
+    440,
+    520
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 2
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 3
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 4
+    },
+    {
+     "name": "audio_vae",
+     "type": "VAE",
+     "link": 5
+    },
+    {
+     "name": "guide",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": 7
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": 8
+    },
+    {
+     "name": "upscale_model",
+     "type": "LATENT_UPSCALE_MODEL",
+     "shape": 7,
+     "link": 6
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "repaint_mask",
+     "type": "MASK",
+     "shape": 7,
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "frames",
+     "type": "IMAGE",
+     "links": [
+      9
+     ]
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": [
+      10
+     ]
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "links": [
+      11
+     ]
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      13
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_MotionGuide"
+   },
+   "title": "2 · ltx repaints it, the motion stays",
+   "widgets_values": [
+    "a sandstone building facade at night, a sheet of bright warm light travels through the building from front to back and lights up columns, windows and cornices one after another, cinematic, detailed stone",
+    0.91,
+    42,
+    "fixed",
+    25.0,
+    0.2,
+    121,
+    0.6,
+    false,
+    "camera movement, zoom, pan, shaky, blurry, low quality, text, watermark",
+    "constant",
+    2.0,
+    0.0,
+    1.0,
+    "linear",
+    true,
+    "shows the repaint"
+   ]
+  },
+  {
+   "id": 21,
+   "type": "CreateVideo",
+   "pos": [
+    1380,
+    0
+   ],
+   "size": [
+    300,
+    100
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 9
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": 10
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "shape": 7,
+     "link": 11
+    }
+   ],
+   "outputs": [
+    {
+     "name": "VIDEO",
+     "type": "VIDEO",
+     "links": [
+      12
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CreateVideo"
+   },
+   "widgets_values": [
+    "",
+    "auto",
+    "sRGB",
+    "none"
+   ]
+  },
+  {
+   "id": 22,
+   "type": "SaveVideo",
+   "pos": [
+    1380,
+    140
+   ],
+   "size": [
+    420,
+    460
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "link": 12
+    },
+    {
+     "name": "format",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null
+    },
+    {
+     "name": "codec",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveVideo"
+   },
+   "widgets_values": [
+    "video/kubakub_motion_guide"
+   ],
+   "title": "the video (output/video)"
+  },
+  {
+   "id": 23,
+   "type": "PreviewAny",
+   "pos": [
+    900,
+    570
+   ],
+   "size": [
+    440,
+    200
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "*",
+     "link": 13
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": null
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    -330
+   ],
+   "size": [
+    900,
+    290
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## A rough clip in, a finished video out\n\n**kubakub motion guide (ltx)** takes a moving clip and lets LTX repaint it. What moves, where and when stays yours; how it looks comes from the prompt.\n\nHere the guide is a **kubakub shader** (*depth scan*: a sheet of light travelling through the sample facade). Use instead:\n\n- the **frames** of a **kubakub director sequence** (your layers, masks, lamps, shader fills, in time with your sound)\n- a previz from **scene walkthrough** or your own 3D render\n- any clip from Load Video\n\n**repaint** is the one number that matters: **0.91** repaints everything and still follows the guide. Higher (0.95 - 0.98) is freer, lower (0.7) keeps the guide's own look. At 1 the guide is ignored. Say in the prompt what moves, the same as in the guide.\n\n**Where and when:** connect a mask to **repaint_mask** (white = the repaint shows, black = the guide stays exactly; one mask per frame makes the repaint travel, for example from kubakub mask animate) and pick a **curve** (ramp = from your guide to fully repainted; beats = with the sound).\n\nSmall moving things can get lost: make them big and bright in the guide. On a 12 GB card: 0.2 megapixels, up to 121 frames. Bypass the upscaler (node 14) for a fast first look.\n"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   10,
+   0,
+   15,
+   0,
+   "MODEL"
+  ],
+  [
+   2,
+   15,
+   0,
+   20,
+   0,
+   "MODEL"
+  ],
+  [
+   3,
+   13,
+   0,
+   20,
+   1,
+   "CLIP"
+  ],
+  [
+   4,
+   11,
+   0,
+   20,
+   2,
+   "VAE"
+  ],
+  [
+   5,
+   12,
+   0,
+   20,
+   3,
+   "VAE"
+  ],
+  [
+   6,
+   14,
+   0,
+   20,
+   6,
+   "LATENT_UPSCALE_MODEL"
+  ],
+  [
+   7,
+   2,
+   0,
+   20,
+   4,
+   "IMAGE"
+  ],
+  [
+   8,
+   2,
+   2,
+   20,
+   5,
+   "FLOAT"
+  ],
+  [
+   9,
+   20,
+   0,
+   21,
+   0,
+   "IMAGE"
+  ],
+  [
+   10,
+   20,
+   1,
+   21,
+   1,
+   "FLOAT"
+  ],
+  [
+   11,
+   20,
+   2,
+   21,
+   2,
+   "AUDIO"
+  ],
+  [
+   12,
+   21,
+   0,
+   22,
+   0,
+   "VIDEO"
+  ],
+  [
+   13,
+   20,
+   3,
+   23,
+   0,
+   "STRING"
+  ]
+ ],
+ "floatingLinks": null,
+ "groups": [],
+ "definitions": null,
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.6,
+   "offset": [
+    60,
+    380
+   ]
+  }
+ },
+ "version": 0.4
+}

@@ -579,6 +579,8 @@ def motion_needs(doc):
     swap masks on low / mid / high."""
     level = bands = False
     for L in (doc or {}).get("layers", []):
+        if rd.listens(L):                             # a shader fill that listens hears the level and the three bands
+            level = bands = True
         for b in (L.get("motion") or []) if isinstance(L, dict) else []:
             if not isinstance(b, dict) or b.get("on") is False:
                 continue

@@ -49,16 +49,25 @@ def _corr(a, b):
     return float((a * b).sum() / (np.sqrt((a * a).sum() * (b * b).sum()) + 1e-12))
 
 
-def estimate(source, edited, model="affine", work=WORK):
+def estimate(source, edited, model="affine", work=WORK, still=None):
     """
     The warp that maps source pixels to where they sit in `edited` (2x3, at the size of `source`), found on edges.
     model: 'shift' (move only), 'rigid' (move + turn), 'affine' (move, scale, shear).
+    still: optional mask (H, W, 0..1) of where `edited` is meant to sit on the source; the fit looks only there
+    (a clip whose windows are animated: everything but the windows).
     -> dict(matrix 2x3 float64, ok bool, why str, before / after edge match, shift_px, scale_x, scale_y, corner_px).
     """
     src, edt = _gray(source), _gray(edited)
     H, W = src.shape
     if edt.shape != (H, W):
         edt = cv2.resize(edt, (W, H), interpolation=cv2.INTER_AREA)
+    if still is not None:
+        still = np.asarray(still, np.float32)
+        if still.shape != (H, W):
+            still = cv2.resize(still, (W, H), interpolation=cv2.INTER_AREA)
+        if float((still > 0.5).mean()) < 0.02:
+            return _result(np.eye(2, 3), False, "the 'still' mask leaves under 2 % of the picture to fit on: not applied",
+                           None, None, W, H)
     longest = max(W, H)
     sizes = [s for s in (160, 320, 640) if s < min(work, longest)] + [min(work, longest)]
     levels = []
@@ -68,6 +77,9 @@ def estimate(source, edited, model="affine", work=WORK):
         inner = np.zeros((h, w), np.uint8)             # the fit ignores a band along the border: a picture that was
         by, bx = max(2, int(h * BORDER)), max(2, int(w * BORDER))   # shifted or padded has edges there that mean nothing
         inner[by:h - by, bx:w - bx] = 255
+        if still is not None:                          # and what is meant to move
+            inner[cv2.resize(still, (w, h), interpolation=cv2.INTER_AREA) <= 0.5] = 0
+            inner = cv2.erode(inner, np.ones((7, 7), np.uint8))     # the edge picture is soft: keep clear of the moving part's rim
         levels.append((f, edges(cv2.resize(src, (w, h), interpolation=cv2.INTER_AREA)),
                        edges(cv2.resize(edt, (w, h), interpolation=cv2.INTER_AREA)), inner))
     before = _corr(levels[-1][1], levels[-1][2])
@@ -181,6 +193,44 @@ def apply(edited, matrix, size=None):
         return img.copy()
     out = cv2.warpAffine(img, M, (W, H), flags=cv2.INTER_CUBIC | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
     return np.clip(out, 0, 1) if out.dtype.kind == "f" else out
+
+
+def steady(results, window=9):
+    """
+    The fits of a clip's frames as one steady track: [2x3 per frame], how many frames were filled in.
+    Each frame fitted alone trembles by a fraction of a pixel, and a frame whose fit was refused would jump back to
+    where it was. Here a refused frame takes its correction from its neighbours, single outliers are taken out (a
+    median of three) and the six numbers of the warp are smoothed over `window` frames.
+    """
+    n = len(results)
+    P = np.array([np.asarray(r["matrix"], np.float64).reshape(6) for r in results])
+    good = np.array([bool(r["ok"]) for r in results])
+    if not good.any():
+        return [np.eye(2, 3) for _ in range(n)], 0
+    idx = np.arange(n)
+    for k in range(6):
+        if not good.all():
+            P[~good, k] = np.interp(idx[~good], idx[good], P[good, k])
+    if n >= 3:
+        pad = np.concatenate([P[:1], P, P[-1:]])
+        P = np.median(np.stack([pad[:-2], pad[1:-1], pad[2:]]), axis=0)
+    w = int(max(1, min(window, n)))
+    if w > 1:
+        half = w // 2
+        x = np.arange(-half, half + 1)
+        kernel = np.exp(-0.5 * (x / max(w / 4.0, 1e-6)) ** 2)
+        kernel /= kernel.sum()
+        # past both ends the track goes on in a straight line (the mirror image through the end point): repeating the
+        # end frame instead would pull the ends of a clip that drifts steadily back towards its middle
+        m = np.arange(1, half + 1).clip(max=n - 1)
+        pad = np.concatenate([2 * P[:1] - P[m][::-1], P, 2 * P[-1:] - P[n - 1 - m]])
+        P = np.stack([np.convolve(pad[:, k], kernel, mode="valid") for k in range(6)], axis=1)
+    return [P[i].reshape(2, 3) for i in range(n)], int((~good).sum())
+
+
+def drift(results, W, H):
+    """How far each frame sat off the source, in pixels at the corners (0 where it was in place or the fit was refused)."""
+    return [float(_measure(np.asarray(r["matrix"], np.float64), W, H)[3]) if r["ok"] else 0.0 for r in results]
 
 
 def align(source, edited, model="affine"):

@@ -26,13 +26,15 @@ def _frames(images):
     return [images[i, ..., :3].cpu().float().numpy() for i in range(int(images.shape[0]))]
 
 
-def _map(fn, n):
-    """fn(i) for every frame into one numpy batch (threads: numpy / opencv release the GIL)."""
-    out = [None] * n
+def _each(fn, n) -> list:
+    """[fn(i) for every frame] (threads: numpy / opencv release the GIL)."""
     with ThreadPoolExecutor(max_workers=max(1, min(8, (os.cpu_count() or 4) - 2, n))) as pool:
-        for i, r in zip(range(n), pool.map(fn, range(n))):
-            out[i] = r
-    return torch.from_numpy(np.stack(out).astype(np.float32))
+        return list(pool.map(fn, range(n)))
+
+
+def _map(fn, n):
+    """fn(i) for every frame into one numpy batch."""
+    return torch.from_numpy(np.stack(_each(fn, n)).astype(np.float32, copy=False))
 
 
 def _masked(fn, fr, mask):
@@ -274,29 +276,75 @@ class KUBA_AlignToSource(io.ComfyNode):
                 io.Combo.Input("fit", options=["move and scale", "move only"], default="move and scale",
                                tooltip="move and scale: shift, scale and a little shear (what image models do). "
                                        "move only: a shift, when the size is known to be right."),
-                io.Combo.Input("frames", options=["each on its own", "one fit for all"], default="each on its own",
-                               optional=True, advanced=True,
+                io.Combo.Input("frames", options=["each on its own", "one fit for all", "steady over time", "measure only"],
+                               default="each on its own", optional=True, advanced=True,
                                tooltip="For a batch. one fit for all: the first picture is fitted and every frame gets "
-                                       "the same correction (a clip that drifted as a whole stays steady)."),
+                                       "the same correction (a clip that drifted as a whole stays steady). steady over "
+                                       "time: for a clip that drifts while it plays; every frame is fitted, a frame "
+                                       "whose fit is refused takes the correction of its neighbours, and the track is "
+                                       "smoothed so nothing trembles. measure only: nothing is moved, the report and "
+                                       "'drift' say how far the clip sits off."),
+                io.Mask.Input("still", optional=True,
+                              tooltip="For a clip with parts that move on purpose: white where the clip is meant to "
+                                      "stay on the source (the walls, not the animated windows). The fit looks only "
+                                      "there. One mask for all frames."),
+                io.Int.Input("smooth", default=9, min=1, max=99, step=2, optional=True, advanced=True,
+                             tooltip="steady over time: how many frames the correction is smoothed over."),
             ],
             outputs=[io.Image.Output("images", tooltip="The pictures on the source, at its size."),
-                     io.String.Output("report", tooltip="Per picture: how far it sat off, or why it was left as it is.")],
+                     io.String.Output("report", tooltip="Per picture: how far it sat off, or why it was left as it is."),
+                     io.Float.Output("drift", tooltip="The largest distance a picture sat off the source, in pixels at "
+                                                      "its corners, before the correction.")],
         )
 
     @classmethod
-    def execute(cls, images, source, fit, frames="each on its own") -> io.NodeOutput:
+    def execute(cls, images, source, fit, frames="each on its own", still=None, smooth=9) -> io.NodeOutput:
         t0 = time.perf_counter()
         model = "affine" if fit == "move and scale" else "shift"
         srcs, imgs = _frames(source), _frames(images)
         H, W = srcs[0].shape[:2]
         results = [None] * len(imgs)
+        keep = still.reshape((-1,) + tuple(still.shape[-2:]))[0].cpu().float().numpy() if still is not None else None
+
+        def src_of(i):
+            return srcs[i] if i < len(srcs) else srcs[-1]
+
+        def done(out, lines, drift):                     # the report: a summary, then the first frames one by one
+            lines += [f"{i + 1}: {al.describe(r)}" for i, r in enumerate(results[:24])]
+            if len(results) > 24:
+                lines.append(f"... and {len(results) - 24} more")
+            log.info("[KUBA post] align to source: %s", lines[0])
+            return io.NodeOutput(out, "\n".join(lines), float(drift))
+
+        if frames in ("steady over time", "measure only"):
+            results = _each(lambda i: al.estimate(src_of(i), imgs[i], model, still=keep), len(imgs))
+            off = al.drift(results, W, H)
+            worst = max(off) if off else 0.0
+            refused = sum(1 for r in results if not r["ok"])
+            lines = [f"{len(imgs)} frames: they sit up to {worst:.1f} px off the source at the corners (frame "
+                     f"{off.index(worst) + 1}), {sum(off) / max(1, len(off)):.1f} px on average"
+                     + (f"; {refused} could not be fitted" if refused else "")]
+            if frames == "measure only":
+                same = images.dim() == 4 and tuple(images.shape[1:3]) == (H, W)      # then the clip goes out as it came in
+                out = images if same else _map(lambda i: al.apply(imgs[i], np.eye(2, 3), (W, H)), len(imgs))
+                lines.append("measure only: nothing was moved")
+            else:
+                track, filled = al.steady(results, int(smooth))
+                out = _map(lambda i: al.apply(imgs[i], track[i], (W, H)).astype(np.float32), len(imgs))
+                left = max(float(np.abs(track[i] - track[i - 1]).max()) for i in range(1, len(track))) if len(track) > 1 else 0.0
+                lines.append(f"steady over time: one smooth correction over {int(smooth)} frames"
+                             + (f", {filled} frames took theirs from their neighbours" if filled else "")
+                             + (": no frame could be fitted, nothing was moved" if refused == len(imgs) else "")
+                             + f" ({time.perf_counter() - t0:.1f} s; the correction changes by at most {left:.2f} px from frame to frame)")
+            if keep is not None:
+                lines.append(f"fitted on the 'still' mask only ({100 * float((keep > 0.5).mean()):.0f} % of the picture)")
+            return done(out, lines, worst)
 
         def one(i):
-            src = srcs[i] if i < len(srcs) else srcs[-1]
             if frames == "one fit for all" and i > 0:
                 r = results[0]
             else:
-                r = al.estimate(src, imgs[i], model)
+                r = al.estimate(src_of(i), imgs[i], model, still=keep)
             results[i] = r
             return al.apply(imgs[i], r["matrix"], (W, H)).astype(np.float32)
 
@@ -305,12 +353,7 @@ class KUBA_AlignToSource(io.ComfyNode):
         out = torch.from_numpy(first)[None] if rest is None else torch.cat([torch.from_numpy(first)[None], rest])
         moved = sum(1 for r in results if r["ok"] and r["why"] == "aligned")
         lines = [f"{moved} of {len(imgs)} pictures moved back onto the source, {time.perf_counter() - t0:.1f} s"]
-        lines += [f"{i + 1}: {al.describe(r)}" for i, r in enumerate(results[:24])]
-        if len(results) > 24:
-            lines.append(f"... and {len(results) - 24} more")
-        report = "\n".join(lines)
-        log.info("[KUBA post] align to source: %s", lines[0])
-        return io.NodeOutput(out, report)
+        return done(out, lines, max(al.drift(results, W, H) or [0.0]))
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_AlignToSource": KUBA_AlignToSource, "KUBA_ColourMatch": KUBA_ColourMatch, "KUBA_ApplyLUT": KUBA_ApplyLUT,

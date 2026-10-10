@@ -4,6 +4,71 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## Next (not released yet)
+
+- **kubakub shader.** New menu group **2d / shader** with one node: moving pictures and masks drawn by a shader on
+  the graphics card, with no AI model. 51 presets, all looping: clouds, fire, plasma, starfield, aurora, rings,
+  a brick wave, sound bars; for mapping a line-up grid, contours that follow your regions, and the building's own
+  shapes as contour lines, a wire mesh, a blueprint, a point cloud or a sheet of light through its depth (from
+  a render and its depth pass); endless travel (tunnel, grid flight, endless zoom, corridor); pixels (eight bit
+  with old console palettes, characters, halftone, mosaic, old screen, pixel smear); analog video (a worn VHS tape
+  with bleeding colours, snow, a tracking band and the head switch at the bottom, a composite cable with crawling
+  colour fringes, scan lines pushed by the brightness; *wear* turns the whole tape up or down); and slit scan, datamosh and
+  trails, which build each frame on the one before. **pick a preset by its picture** on the node shows them all as small
+  pictures. Or paste a shader from shadertoy.com (click into its code, Ctrl+A, Ctrl+C, paste) or your own GLSL
+  fragment shader. You do not need to understand the code: a shader that expects a noise picture gets a built-in
+  one, a shader that cannot run here (buffer tabs, cubemaps, sound shaders) is named, a pasted link says how to
+  copy the code instead, and a mistake is reported with its line. The shader gets a loop, a clock, the sound (level, low / mid / high, beats), a
+  field and a mask from kubakub mask field, and up to four pictures or clips. Every `uniform float name; // default
+  min max` line is a control, set in `controls`. About 14 ms per frame at 1920x1080. Nothing connected runs a
+  preset. Example `shader.json`, page [docs/shader.md](docs/shader.md). No new packages: it draws in the GL context
+  that comes with ComfyUI.
+- **The same in the kubakub director.** A shape layer has a new **fill**: its colour, a shader preset (with the
+  same picture picker) or your own code. The shader is seen through the shape, so feather, clip to regions, masks, blend modes, effects and
+  behaviours work as before. It plays live in the window and the node renders the same picture. The shader's
+  controls are sliders in the inspector and take keyframes and behaviours; with a sound on the timeline the shader
+  hears its level, its bands and its beats. A preset that works on a picture (eight bit, mosaic, contour lines,
+  wireframe, edge glow, glass ...) is an effect on everything under the layer: a solid turns the whole
+  composition, a feathered ellipse or a layer clipped to regions only that part; two of them stack. Saved
+  compositions without a shader are unchanged.
+- **kubakub align 3d model.** New node in **3d / scene**: a model from an image-to-3D workflow (Trellis,
+  Hunyuan3D ...) is moved, turned and scaled onto the real model of the building, so it opens in Blender or
+  Houdini where the projector and the camera expect it. `per axis` also corrects a length the generator misread
+  and the report names it. Takes MESH inputs or files (.glb, .obj, .ply, .stl), writes the aligned .glb and gives
+  the matrix. Example `align_3d_model.json`, section in [docs/scene3d.md](docs/scene3d.md).
+- **kubakub shader mix.** New node in **2d / shader**: two shaders and one mix value, 0 = shader A, 1 = shader
+  B. In between they meet in the shaders, not as two pictures laid over each other: **b works on a** (B is an
+  effect on A's picture), **a bends b** (A pushes the places B draws at, B melts out of A), **a cuts b** (a wipe
+  in the shape of A's pattern), or a plain blend. The mix runs on a curve or with the sound, and a picture or a
+  clip on `image` is what both work on. Example `shader_mix.json`.
+- **Draw the direction.** An arrow instead of angles and pixel positions. On **kubakub mask field** and **kubakub
+  shader** drag it on the node, on the picture under *draw the direction* (or type it into the new `vector`
+  input); in the **kubakub director** a field behaviour (along = direction or from a point) and a shader fill
+  have an *arrow* row: press draw and drag on the picture. A wipe then starts at the arrow's start and ends at
+  its end (draw it from one window corner to the other), an iris opens from its start and reaches as far as it
+  is long. Shaders follow it too: presets that run along the field run from its start to its end, stripes, rain
+  and pixel smear take its direction, rings, ripples and radar start at its start; your own code reads `kFrom`,
+  `kTo`, `kDir` and `kVector`. Window and render agree per pixel. Nothing changes without an arrow.
+- **kubakub motion guide (ltx).** New node in **2d / motion**: a rough moving clip becomes a finished video that
+  keeps its motion. Connect the frames of a director sequence, a kubakub shader, a 3D previz or any clip as
+  `guide` and say in `prompt` what it should look like: LTX 2.5 repaints it, and what moves, where and when stays
+  yours. `repaint` sets how far it goes (0.91 repaints everything and still follows; lower keeps more of the
+  guide's own look; 1 ignores the guide). Optional sharper second stage with the x2 upscaler, a sound can be held
+  while sampling. 49 frames in about 20 s on a 12 GB card. Nothing connected to `guide` runs a sample. Example
+  `motion_guide.json`, section in [docs/director.md](docs/director.md). **Where and when:** `repaint_mask` says
+  where the repaint shows (white) and where your guide stays exactly (black); one mask per frame, from kubakub
+  mask animate or a shader, makes the repaint travel. `curve` says when: a ramp from your guide to fully
+  repainted, a repeating wave, or with the sound. `mask_does` = limits the change uses LTX's own noise mask
+  instead: only the masked part may change and the guide's look stays.
+- **A pasted Shadertoy's alpha is ignored**, as on shadertoy.com: many of them write 0 there and were invisible
+  as a director fill and gave an empty mask on the node. Their mask is their brightness. A plain fragment shader
+  (`void main`) can still write an alpha.
+- **align to source keeps a clip on the building.** `frames` has two new choices: **steady over time** fits every
+  frame of a clip that drifts while it plays and smooths the correction so nothing trembles (a frame that cannot
+  be fitted takes its neighbours' correction), and **measure only** moves nothing and reports how far the clip
+  sits off. A new `still` mask says where a clip is meant to stay on the source, for clips with parts that move
+  on purpose. New output `drift` (pixels at the corners). The old choices work as before.
+
 ## 0.3.0 (2026-10-09)
 
 Masks that move: along a field, on a curve, with the sound. And a review of the inputs and outputs of every node.

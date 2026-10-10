@@ -26,6 +26,7 @@ Houdini or TouchDesigner.
 | angle | 0 | direction: 0 = left to right, 90 = top to bottom, 180 = right to left. |
 | order | left | region order: left / right / top / bottom, centre (from the middle out), outside, size (the biggest first), random. |
 | centre_x, centre_y | 0.5 | radial with `all together`: the centre, 0 to 1 across the picture. |
+| vector | empty | An arrow instead of `angle` and `centre`: drag it on the node, on the picture under **draw the direction** (run the node once and the picture is your regions), or type x, y of its start and x, y of its end, each 0 to 1 of the picture. direction with `all together`: the ramp starts at the arrow's start and ends at its end, so an arrow from one window corner to the other is a wipe exactly across that window. direction with `each region`: every region runs at the arrow's angle. radial with `all together`: the start is the centre, the length how far out the ramp reaches. |
 | noise_px | 64 | noise: the size of the blobs in pixels. |
 | seed | 1 | noise and order = random: another pattern. |
 | invert | off | The move runs the other way. |

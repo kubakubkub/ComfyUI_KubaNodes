@@ -342,3 +342,28 @@ The motion is computed in numpy (`kubakub/scene3d/pieces.py`, one matrix per pie
 moves the vertices. On the 12 GB laptop: 451 pieces of a festival facade, 24 frames at 960x648 and 16 samples in
 about 10 s (0.4 s per frame).
 
+## A generated model onto the real one
+
+An image-to-3D workflow (Trellis, Hunyuan3D ...) gives a model that sits somewhere in space, at some size, often
+turned, so it lands anywhere when you open it in Blender or Houdini. **kubakub align 3d model** moves, turns and
+scales it onto the real model of the building (the template), so it is where your projector and camera expect it.
+
+- **model** / **model_file**: the generated model, from an image-to-3D node or as a file (.glb, .gltf, .obj, .ply,
+  .stl; a file keeps its materials and textures).
+- **template** / **template_file**: the real model, at the place and size your scene uses. From Blender or Houdini
+  export it as .glb.
+- **scale**: *per axis* also corrects a length the generator misread (a model made from one picture is often too
+  deep or too high) and the report names it ("z was 24 % too long"); *one scale* keeps the proportions; *keep the
+  size* only moves and turns.
+- **mirror**: also tries mirrored fits, for a result that sits right but has left and right swapped.
+
+Outputs: the aligned **model**, the **file** it wrote (output/3d/<save_name>_00001.glb), the 4x4 **matrix** and a
+**report**: how far off it was, how close it is now, what was turned and scaled.
+
+How exact: on the sample building, moved, turned 37°, shrunk to a thirtieth and made a quarter too deep, every
+vertex came back within 0.02 % of the building's size; with a floor read a third too high, within 0.2 to 1 %
+depending on how it was turned (6 to 30 cm on a 24 m facade), so check a model that needed a correction per axis. A real generated model differs in shape from the template, so it will sit less tightly: read the
+report (it says so when more than 2 % stays off) and look at it in the viewer. A building that looks the same from
+left and right can be fitted either way round; `mirror` and the textures tell them apart, the shape alone cannot.
+`points` (advanced) trades time for exactness. Nothing connected runs a sample. Example:
+`example_workflows/align_3d_model.json`.

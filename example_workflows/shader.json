@@ -1,0 +1,636 @@
+{
+ "id": "b3d1f6a0-7c42-4e19-8f5a-2e9c4d7a6b13",
+ "revision": 0,
+ "last_node_id": 7,
+ "last_link_id": 8,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_MaskField",
+   "pos": [
+    60,
+    110
+   ],
+   "size": [
+    360,
+    420
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "mask",
+     "type": "MASK",
+     "shape": 7,
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "field",
+     "type": "MASK",
+     "links": [
+      1
+     ]
+    },
+    {
+     "name": "mask",
+     "type": "MASK",
+     "links": [
+      2
+     ]
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": null
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_MaskField"
+   },
+   "widgets_values": [
+    "*",
+    "edge distance",
+    "each region",
+    0.0,
+    "left",
+    0.5,
+    0.5,
+    64.0,
+    1,
+    false,
+    true
+   ]
+  },
+  {
+   "id": 2,
+   "type": "KUBA_Shader",
+   "pos": [
+    470,
+    110
+   ],
+   "size": [
+    460,
+    1100
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "image0",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "image1",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "image2",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "image3",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "mask",
+     "type": "MASK",
+     "shape": 7,
+     "link": 2
+    },
+    {
+     "name": "field",
+     "type": "MASK",
+     "shape": 7,
+     "link": 1
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "shape": 7,
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [
+      4
+     ]
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": null
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": [
+      5
+     ]
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "links": [
+      6
+     ]
+    },
+    {
+     "name": "frame_count",
+     "type": "INT",
+     "links": null
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      8
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Shader"
+   },
+   "widgets_values": [
+    "scan band",
+    "",
+    "bands = 2, beat = 1",
+    0,
+    0,
+    25.0,
+    4.0,
+    1.0,
+    2,
+    true,
+    0.0,
+    1.0,
+    "auto",
+    true,
+    0.0,
+    1.0,
+    0.15,
+    "auto"
+   ]
+  },
+  {
+   "id": 4,
+   "type": "CreateVideo",
+   "pos": [
+    1000,
+    110
+   ],
+   "size": [
+    270,
+    150
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "images",
+     "locked": null,
+     "name": "images",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "link": 4
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "audio",
+     "locked": null,
+     "name": "audio",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "AUDIO",
+     "pos": null,
+     "link": 6
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "fps",
+     "locked": null,
+     "name": "fps",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": 5
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "bit_depth",
+     "locked": null,
+     "name": "bit_depth",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "COMBO",
+     "widget": {
+      "name": "bit_depth"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "color_space",
+     "locked": null,
+     "name": "color_space",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "COMBO",
+     "widget": {
+      "name": "color_space"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "codec",
+     "locked": null,
+     "name": "codec",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "COMBO",
+     "widget": {
+      "name": "codec"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "VIDEO",
+     "locked": null,
+     "name": "VIDEO",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "VIDEO",
+     "pos": null,
+     "slot_index": null,
+     "links": [
+      7
+     ]
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.38.2",
+    "Node name for S&R": "CreateVideo"
+   },
+   "widgets_values": [
+    30,
+    "auto",
+    "sRGB",
+    "none"
+   ],
+   "widgets_values_named": {
+    "fps": 30,
+    "bit_depth": "auto",
+    "color_space": "sRGB",
+    "codec": "none"
+   }
+  },
+  {
+   "id": 5,
+   "type": "SaveVideo",
+   "pos": [
+    1310,
+    110
+   ],
+   "size": [
+    270,
+    106
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "video",
+     "locked": null,
+     "name": "video",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "VIDEO",
+     "pos": null,
+     "link": 7
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "filename_prefix",
+     "locked": null,
+     "name": "filename_prefix",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "STRING",
+     "widget": {
+      "name": "filename_prefix"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "format",
+     "locked": null,
+     "name": "format",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "widget": {
+      "name": "format"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "codec",
+     "locked": null,
+     "name": "format.codec",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "widget": {
+      "name": "format.codec"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "codec",
+     "locked": null,
+     "name": "codec",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "widget": {
+      "name": "codec"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "video",
+     "locked": null,
+     "name": "video",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "VIDEO",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.38.2",
+    "Node name for S&R": "SaveVideo"
+   },
+   "widgets_values": [
+    "kubakub/shader",
+    "auto",
+    "auto",
+    "auto"
+   ],
+   "widgets_values_named": {
+    "filename_prefix": "kubakub/mask_animate",
+    "format": "auto",
+    "format.codec": "auto",
+    "codec": "auto"
+   }
+  },
+  {
+   "id": 6,
+   "type": "PreviewAny",
+   "pos": [
+    1000,
+    320
+   ],
+   "size": [
+    210,
+    122
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "source",
+     "locked": null,
+     "name": "source",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "*",
+     "pos": null,
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "STRING",
+     "locked": null,
+     "name": "STRING",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "STRING",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    }
+   ],
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.38.2",
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "widgets_values_named": {}
+  },
+  {
+   "id": 7,
+   "type": "MarkdownNote",
+   "pos": [
+    60,
+    -150
+   ],
+   "size": [
+    830,
+    200
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## A shader on the windows\n\n**kubakub shader** draws moving pictures with a small program that runs on the graphics card. Here the preset *scan band* runs two bands of light along the field from **kubakub mask field** (the distance from each window's edge; nothing connected = the windows of the sample facade) and flashes on the beat. No AI model.\n\n**Try:** press **pick a preset by its picture** at the bottom of the node and click another one (clouds, fire, plasma, tunnel, starfield ...). Change the numbers in `controls` (the report lists every control), raise `loops`.\n\n**A shader from shadertoy.com:** open it there, click into the code, Ctrl+A, Ctrl+C, then paste into `code`. You do not need to understand it; the node says what it needs. Connect your own regions to the field and your own sound to `audio`. `images` and `masks` go into any node, or as a layer into the kubakub director."
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   5,
+   "MASK"
+  ],
+  [
+   2,
+   1,
+   1,
+   2,
+   4,
+   "MASK"
+  ],
+  [
+   4,
+   2,
+   0,
+   4,
+   0,
+   "IMAGE"
+  ],
+  [
+   5,
+   2,
+   2,
+   4,
+   2,
+   "FLOAT"
+  ],
+  [
+   6,
+   2,
+   3,
+   4,
+   1,
+   "AUDIO"
+  ],
+  [
+   7,
+   4,
+   0,
+   5,
+   0,
+   "VIDEO"
+  ],
+  [
+   8,
+   2,
+   5,
+   6,
+   0,
+   "STRING"
+  ]
+ ],
+ "floatingLinks": null,
+ "groups": [],
+ "definitions": null,
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.7,
+   "offset": [
+    40,
+    200
+   ]
+  }
+ },
+ "version": 0.4
+}

@@ -185,6 +185,9 @@ FIDS = [5, 2, 9, 4]
 FRAMPS = [dict(field=k, per=pr, angle=an, cx=0.3, cy=0.7, order=od, seed=sd, noise_px=9.0, invert=inv)
           for k in mo.FIELD_KINDS for pr in mo.FIELD_PER
           for an, od, sd, inv in ((0, "left", 1, False), (37, "centre", 3, True), (90, "random", 7, False), (200, "size", 2, False))]
+FRAMPS += [dict(field=k, per=pr, angle=11, cx=0.5, cy=0.5, order="left", seed=1, noise_px=9.0, invert=inv, vec=v)     # a drawn arrow
+           for k in ("direction", "radial", "edge distance") for pr in mo.FIELD_PER
+           for v, inv in (([0.1, 0.2, 0.9, 0.7], False), ([0.8, 0.9, 0.3, 0.15], True), ([0.5, 0.5, 0.5, 0.5], False))]
 FALONG = [(f / 20, p / 10, ef, sf, wd, rg) for f in range(21) for p in range(-1, 12) for ef in mo.FIELD_EFFECTS
           for sf, wd, rg in ((0.05, 0.2, 3), (0.01, 0.5, 1), (0.4, 0.05, 6))]
 
@@ -194,7 +197,7 @@ def py_fields():
     from kubakub import maskfields as mf
     lab, n = mf.compact(np.array(FMAP, np.int32), FIDS)
     ramps = [mf.field(lab, n, c["field"], c["per"], c["angle"], (c["cx"], c["cy"]), c["order"], c["seed"], c["noise_px"], c["invert"],
-                      px_scale=2.5, ids=FIDS)[0].ravel().tolist() for c in FRAMPS]
+                      px_scale=2.5, ids=FIDS, vector=c.get("vec"))[0].ravel().tolist() for c in FRAMPS]
     along = [float(mf.along(np.array([[f]], np.float32), p, ef, sf, wd, rg)[0, 0]) for f, p, ef, sf, wd, rg in FALONG]
     return ramps, along
 

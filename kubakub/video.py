@@ -194,3 +194,121 @@ def paste_frame(frame: np.ndarray, clip_frame: np.ndarray, box, alpha: np.ndarra
     a = alpha[y0:y1, x0:x1, None]
     frame[y0:y1, x0:x1] = frame[y0:y1, x0:x1] * (1 - a) + c * a
     return frame
+
+
+# ---- motion guide: a clip LTX repaints while it keeps the motion ---------------------------------------------------
+
+GUIDE_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0)     # LTX 2.5 distilled, stage 1
+GUIDE_SIGMAS_2 = (0.85, 0.725, 0.4219, 0.0)                                                # after the x2 upscaler
+
+
+def guide_sigmas(repaint: float, base=GUIDE_SIGMAS) -> list:
+    """The noise levels to sample through when the start is a guide clip and not pure noise: `repaint` first (1 =
+    pure noise, the whole schedule), then the schedule's own steps below it. A step closer than 0.02 under the start
+    is left out (it would be a step that does nothing)."""
+    r = float(min(1.0, max(0.05, repaint)))
+    if r >= base[0]:
+        return list(base)
+    return [r] + [s for s in base if s < r - 0.02]
+
+
+def guide_size(w: int, h: int, megapixels: float) -> tuple:
+    """The LTX size (multiples of 32) for a guide of w x h at about `megapixels`: of the grid sizes around it, the
+    one closest to the guide's own shape (the guide is scaled to it, so the less it is stretched the better)."""
+    a = float(w) / float(h)
+    px = max(0.01, float(megapixels)) * 1e6
+    fw, fh = math.sqrt(px * a) / SPATIAL, math.sqrt(px / a) / SPATIAL
+    sizes = [(max(1, x), max(1, y)) for x in (math.floor(fw), math.ceil(fw)) for y in (math.floor(fh), math.ceil(fh))]
+    x, y = min(sizes, key=lambda s: (abs(math.log(s[0] / s[1] / a)), abs(s[0] * s[1] * SPATIAL * SPATIAL - px)))
+    return x * SPATIAL, y * SPATIAL
+
+
+def guide_frames(frames: np.ndarray, w: int, h: int) -> np.ndarray:
+    """A guide clip (F, H, W, 3) at the LTX size and a valid LTX length: the last frame is repeated up to 8k + 1."""
+    out = [cv2.resize(f, (w, h), interpolation=cv2.INTER_AREA if f.shape[1] >= w else cv2.INTER_CUBIC)
+           if f.shape[:2] != (h, w) else f for f in frames]
+    out += [out[-1]] * (ltx_frames(len(out)) - len(out))
+    return np.ascontiguousarray(np.stack(out), dtype=np.float32)
+
+
+def _strength(mask, values, f, n):
+    """How much frame f may be repainted: the mask's frame (a shorter batch holds its last one) times the curve."""
+    v = 1.0 if values is None else float(values[min(f, n - 1)])
+    return v if mask is None else mask[min(f, n - 1, len(mask) - 1)] * v
+
+
+REPAINT_FLOOR = 0.70          # LTX hardly repaints below this noise level (measured: 0.725 = a trace, 0.91 = everything)
+
+
+def repaint_level(amount: np.ndarray, start: float) -> np.ndarray:
+    """Amounts (0-1) as the noise mask LTX reads, for a stage that starts at noise level `start`. LTX takes the mask
+    as the noise level of every place and only changes things near full noise (half the level changes nothing), so
+    an amount above 0 is laid onto the stretch of levels where something happens, REPAINT_FLOOR .. start, with a
+    square root (half the amount = clearly changed). Nothing stays nothing, all stays all."""
+    floor = min(1.0, REPAINT_FLOOR / max(float(start), 1e-6))
+    return np.where(amount > 0.002, floor + (1.0 - floor) * np.sqrt(amount), 0.0).astype(np.float32)
+
+
+def repaint_latent(mask, values, n: int, lat_t: int, lat_w: int, lat_h: int):
+    """How much of every place at every moment is open (0-1), at the latent's size: [1, 1, lat_t, lat_h, lat_w]
+    float32, or None when neither a mask nor a curve is given.
+    mask    None or [M, H, W] 0-1: white = repaint, black = the guide stays (M frames; fewer than n: the last holds)
+    values  None or one number per frame, 0-1: how much of the repaint that frame gets (a curve over time)
+    n       the frames of the guide; a latent frame stands for 8 of them (the first for frame 0) and takes their mean
+    """
+    if mask is None and values is None:
+        return None
+    small = {}
+
+    def at(f):
+        k = min(f, n - 1, len(mask) - 1)
+        if k not in small:
+            small[k] = cv2.resize(np.ascontiguousarray(mask[k], dtype=np.float32), (lat_w, lat_h), interpolation=cv2.INTER_AREA)
+        return small[k]
+
+    out = np.zeros((lat_t, lat_h, lat_w), np.float32)
+    for i in range(lat_t):
+        fs = [0] if i == 0 else range(TEMPORAL * (i - 1) + 1, TEMPORAL * i + 1)
+        for f in fs:
+            v = 1.0 if values is None else float(values[min(f, n - 1)])
+            out[i] += v if mask is None else at(f) * v
+        out[i] /= len(fs)
+    return np.clip(out, 0.0, 1.0)[None, None]
+
+
+def repaint_share(mask, values, n: int) -> float:
+    """How much of the whole clip is open, 0-1 (the mean of mask x curve over the frames)."""
+    means = {}
+    total = 0.0
+    for f in range(n):
+        v = 1.0 if values is None else float(values[min(f, n - 1)])
+        if mask is not None:
+            k = min(f, len(mask) - 1)
+            if k not in means:
+                means[k] = float(np.clip(mask[k], 0.0, 1.0).mean())
+            v *= means[k]
+        total += v
+    return total / max(1, n)
+
+
+def repaint_alpha(mask, values, f: int, n: int, w: int, h: int, step: bool = True):
+    """Where frame f of the result is LTX's picture (1) and where the guide's own pixels (0). [h, w] float32, or a
+    number when there is no mask. step: everything that may be repainted at all, with a short soft edge (the guide's
+    pixels back where LTX was held); else the amount itself (the repainted clip shown through the mask)."""
+    s = _strength(mask, values, f, n)
+    k = 0.1 if step else 1.0
+    if np.isscalar(s):
+        return float(min(1.0, max(0.0, s / k)))
+    return np.clip(cv2.resize(np.ascontiguousarray(s, dtype=np.float32), (w, h), interpolation=cv2.INTER_LINEAR) / k, 0.0, 1.0)
+
+
+def sample_guide(w: int = 768, h: int = 448, frames: int = 49) -> np.ndarray:
+    """The built-in guide: the sample facade in the dark, a band of light sweeping over it from left to right."""
+    from . import sample_facade as sf
+    pic = np.asarray(sf.render(w, h, style="night")["image"], np.float32)[..., :3]
+    x = np.linspace(0, 1, w, dtype=np.float32)[None, :, None]
+    out = np.empty((frames, h, w, 3), np.float32)
+    for i in range(frames):
+        k = np.clip(1 - np.abs(x - (0.08 + 0.84 * i / max(1, frames - 1))) / 0.09, 0, 1)
+        out[i] = np.clip(pic * (0.22 + 1.3 * k * k * (3 - 2 * k)), 0, 1)
+    return out

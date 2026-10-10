@@ -139,6 +139,27 @@ try:
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 
+# ---- align to source on a clip: steady over time, measure only, the drift output
+import cv2  # noqa: E402
+from kubapack.kubakub import sample_facade as _sf  # noqa: E402
+_src = _sf.render(640, 360)["image"]
+_clip = []
+for _k in range(6):
+    _M = np.float32([[1, 0, 1.0 * _k], [0, 1, -0.6 * _k]])
+    _clip.append(cv2.warpAffine(_src, _M, (640, 360), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT))
+_clip_t, _src_t = torch.from_numpy(np.stack(_clip)), torch.from_numpy(_src)[None]
+_o = npo.KUBA_AlignToSource.execute(_clip_t, _src_t, "move only", frames="steady over time", smooth=3).result
+_before, _after = float((_clip_t[5] - _src_t[0]).abs().mean()), float((_o[0][5] - _src_t[0]).abs().mean())
+check("align to source, steady over time: a drifting clip is back on the source", _o[0].shape == _clip_t.shape and _after < 0.35 * _before
+      and "steady over time" in _o[1] and 4.0 < _o[2] < 8.0, f"{_before:.4f} -> {_after:.4f}, drift {_o[2]:.2f}; {_o[1][:200]}")
+_m = npo.KUBA_AlignToSource.execute(_clip_t, _src_t, "move only", frames="measure only").result
+check("align to source, measure only: nothing is moved, the drift is reported", torch.equal(_m[0], _clip_t) and "nothing was moved" in _m[1]
+      and abs(_m[2] - _o[2]) < 1e-6 and "px off the source" in _m[1], _m[1][:200])
+_e = npo.KUBA_AlignToSource.execute(_clip_t[:2], _src_t, "move only").result
+check("align to source: the old modes give the new drift output too", len(_e) == 3 and _e[2] >= 0.0)
+_st = torch.ones((1, 360, 640))
+check("align to source: a still mask is taken", "still" in npo.KUBA_AlignToSource.execute(_clip_t, _src_t, "move only", frames="measure only", still=_st).result[1])
+
 print()
 print("all post node tests passed" if not failures else f"{len(failures)} FAILED: " + ", ".join(failures))
 sys.exit(1 if failures else 0)
