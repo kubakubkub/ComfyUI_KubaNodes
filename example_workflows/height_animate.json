@@ -1,0 +1,509 @@
+{
+ "last_node_id": 99,
+ "last_link_id": 8,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_SceneRender",
+   "pos": [
+    0,
+    0
+   ],
+   "size": [
+    420,
+    560
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "clay",
+     "type": "IMAGE",
+     "links": [
+      1
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "ids_preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "normal",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 3
+    },
+    {
+     "name": "coverage",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 4
+    },
+    {
+     "name": "folder",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 5
+    },
+    {
+     "name": "scene_json",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 7
+    },
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "links": [
+      2
+     ],
+     "slot_index": 8
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SceneRender"
+   },
+   "widgets_values": [
+    "",
+    0,
+    0,
+    -1,
+    "shelves layers facing planes parts objects materials collections",
+    "shelves",
+    0.05,
+    3.0,
+    0.02,
+    "-0.5 -0.05 0.05 0.5",
+    "",
+    "",
+    "",
+    1.0,
+    0.5
+   ]
+  },
+  {
+   "id": 2,
+   "type": "KUBA_FormHeight",
+   "pos": [
+    460,
+    0
+   ],
+   "size": [
+    420,
+    560
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "scene",
+     "type": "KUBA_SCENE",
+     "link": 2
+    },
+    {
+     "name": "model",
+     "type": "MESH",
+     "shape": 7,
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "height",
+     "type": "IMAGE",
+     "links": [
+      3
+     ],
+     "slot_index": 0
+    },
+    {
+     "name": "forms",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_FormHeight"
+   },
+   "widgets_values": [
+    0.5,
+    0.5,
+    "the wall's plane",
+    0.0,
+    "",
+    "auto"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "KUBA_HeightAnimate",
+   "pos": [
+    920,
+    0
+   ],
+   "size": [
+    420,
+    800
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "height",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": 3
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": 1
+    },
+    {
+     "name": "field",
+     "type": "MASK",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "shape": 7,
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "height",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "lit",
+     "type": "IMAGE",
+     "links": [
+      4
+     ],
+     "slot_index": 1
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": [
+      5
+     ],
+     "slot_index": 3
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "links": [
+      6
+     ],
+     "slot_index": 4
+    },
+    {
+     "name": "frame_count",
+     "type": "INT",
+     "links": [],
+     "slot_index": 5
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      8
+     ],
+     "slot_index": 6
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_HeightAnimate"
+   },
+   "widgets_values": [
+    "peaks first",
+    "ramp",
+    3.0,
+    0.0,
+    1.0,
+    "ease in out",
+    0.0,
+    0.15,
+    35.0,
+    1.0,
+    25.0,
+    0.0,
+    0.5
+   ]
+  },
+  {
+   "id": 4,
+   "type": "CreateVideo",
+   "pos": [
+    1380,
+    0
+   ],
+   "size": [
+    300,
+    100
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 4
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": 5
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "shape": 7,
+     "link": 6
+    }
+   ],
+   "outputs": [
+    {
+     "name": "VIDEO",
+     "type": "VIDEO",
+     "links": [
+      7
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CreateVideo"
+   },
+   "widgets_values": [
+    "",
+    "auto",
+    "sRGB",
+    "none"
+   ]
+  },
+  {
+   "id": 5,
+   "type": "SaveVideo",
+   "pos": [
+    1380,
+    240
+   ],
+   "size": [
+    420,
+    460
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "link": 7
+    },
+    {
+     "name": "format",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null
+    },
+    {
+     "name": "codec",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "links": [],
+     "slot_index": 0
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveVideo"
+   },
+   "widgets_values": [
+    "video/kubakub_height_animate"
+   ],
+   "title": "the video (output/video)"
+  },
+  {
+   "id": 6,
+   "type": "PreviewAny",
+   "pos": [
+    920,
+    840
+   ],
+   "size": [
+    420,
+    200
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "STRING",
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": null
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Report"
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    0,
+    -360
+   ],
+   "size": [
+    1340,
+    320
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## Forms that grow out of the wall\n\n**kubakub height animate** takes a height map (black = the wall, white = furthest out) and lets it grow: one height map per frame, and the same as a relief lit from the side, laid on `image`.\n\nHere the height comes from **kubakub form height** (the sample building with a sample form; see `form_height.json` for your own model). It can be **any depth map** instead: connect the output of Depth Anything or Marigold to `height`, the picture it was made from to `image`, and raise `wall` to the grey of the wall so only what stands in front of it grows.\n\n- `grow`: all together, peaks first, built up in layers, or along the field (connect a kubakub mask field, e.g. radial or a drawn direction).\n- `curve`: ramp grows once; sine breathes; beats / hits and sound level follow a sound on `audio`.\n- `scale` is 0.5 here to keep it quick.\n\n`height` (the grey frames) goes into the depth presets of kubakub shader (hard shadow) or out as displacement; `lit` is a ready clip, also as the guide of kubakub motion guide."
+   ],
+   "title": "Read me"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   3,
+   1,
+   "IMAGE"
+  ],
+  [
+   2,
+   1,
+   8,
+   2,
+   0,
+   "KUBA_SCENE"
+  ],
+  [
+   3,
+   2,
+   0,
+   3,
+   0,
+   "IMAGE"
+  ],
+  [
+   4,
+   3,
+   1,
+   4,
+   0,
+   "IMAGE"
+  ],
+  [
+   5,
+   3,
+   3,
+   4,
+   1,
+   "FLOAT"
+  ],
+  [
+   6,
+   3,
+   4,
+   4,
+   2,
+   "AUDIO"
+  ],
+  [
+   7,
+   4,
+   0,
+   5,
+   0,
+   "VIDEO"
+  ],
+  [
+   8,
+   3,
+   6,
+   6,
+   0,
+   "STRING"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub example workflow"
+ },
+ "version": 0.4
+}

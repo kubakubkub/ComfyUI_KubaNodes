@@ -14,6 +14,7 @@ sound_values work without it (tests/test_shadertoy.py).
 from __future__ import annotations
 
 import bisect
+import contextlib
 import ctypes
 import functools
 import sys
@@ -208,6 +209,14 @@ def render(source, width, height, frames, static=None, textures=None, on_frame=N
     One GL context serves every thread (the director renders its frames in a pool): a render holds it under a lock
     and lets go of it at the end, so the next thread can take it.
     """
+    with held() as g:
+        _render(g, source, width, height, frames, static, textures, on_frame, check_interrupt)
+
+
+@contextlib.contextmanager
+def held():
+    """This module's GL context, current on the calling thread for as long as the block runs -> ComfyUI's GLSL module
+    (its .gl are the GL calls). Other threads wait."""
     g = core()
     EGL = g.EGL
     with _LOCK:
@@ -219,7 +228,7 @@ def render(source, width, height, frames, static=None, textures=None, on_frame=N
             if _OWN.get("vao") is None:
                 _OWN["vao"] = g.gl.glGenVertexArrays(1)
             g.gl.glBindVertexArray(_OWN["vao"])
-            _render(g, source, width, height, frames, static, textures, on_frame, check_interrupt)
+            yield g
         finally:
             try:
                 EGL.eglMakeCurrent(display, EGL.EGL_NO_SURFACE, EGL.EGL_NO_SURFACE, EGL.EGL_NO_CONTEXT)

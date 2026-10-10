@@ -113,12 +113,7 @@ def _depth_vis(depth):
 
 def _depth_gray(depth):
     """Linear grey depth, near = 1, far = 0, background 0 (monotonic, unlike the colour preview)."""
-    fg = depth > 0
-    g = np.zeros(depth.shape, np.float32)
-    if fg.any():
-        lo, hi = float(depth[fg].min()), float(depth[fg].max())
-        g[fg] = 1 - (depth[fg] - lo) / max(hi - lo, 1e-6)
-    return np.repeat(g[..., None], 3, -1)
+    return np.repeat(scene_ids.grey_depth(depth, depth > 0)[..., None], 3, -1)
 
 
 class KUBA_SceneRender(io.ComfyNode):

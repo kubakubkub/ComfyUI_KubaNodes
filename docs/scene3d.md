@@ -368,8 +368,17 @@ scales it onto the real model of the building (the template), so it is where you
 - **mirror**: also tries mirrored fits, for a result that sits right but has left and right swapped (the whole
   model only).
 
-Outputs: the aligned **model**, the **file** it wrote (output/3d/<save_name>_00001.glb), the 4x4 **matrix** and a
-**report**: how far off it was, how close it is now, what was turned and scaled.
+- **file_format**: how the aligned model is written, for more work in other software. *.glb* is one file with the
+  textures inside: Blender reads it with File > Import > glTF, Houdini with File > Import > glTF Scene or a glTF
+  Hierarchy node. *.obj* writes the .obj, its .mtl and the colour texture as a PNG beside it, all named after the
+  file, which any 3D software reads; the roughness / metal and normal maps are written beside it as PNGs too (an
+  .obj material cannot name them, so connect them by hand). Either way the model is written in the template's
+  coordinates and size, with the fit in its points: import it without a transform, into the scene the template
+  came from, and it is in place. A model from the wire keeps its texture or colours in the file as well.
+
+Outputs: the aligned **model**, the **file** it wrote (output/3d/<save_name>_00001.glb or .obj), the 4x4
+**matrix** and a **report**: how far off it was, how close it is now, what was turned and scaled, which files
+were written.
 
 How exact: on the sample building, moved, turned 37°, shrunk to a thirtieth and made a quarter too deep, every
 vertex came back within 0.02 % of the building's size; with a floor read a third too high, within 0.2 to 1 %
@@ -382,3 +391,70 @@ the facade front; the front fit put the outline within about 10 cm and the wall 
 windows visibly beside the template's, because the generator draws them where it likes. Half the faces were the
 invented back and were cut. `points` (advanced) trades time for exactness. Nothing connected runs a sample. Example:
 `example_workflows/align_3d_model.json`.
+
+## The forms of a generated model as a height map
+
+A generated model is one merged mesh: wall, windows and forms in one piece, so nothing in it can be moved on its
+own. But once it lies on the real building, the two can be compared, and what stands in front of the real wall is
+the forms. **kubakub form height** gives that as a picture in the projection view: black on the wall, white where
+a form stands furthest out. The wall stays your real one, so windows the generator drew beside the real ones do
+not show.
+
+- **scene**: from kubakub scene render of the real model. Its camera is the view, so the height map lines up with
+  the clay, the depth and the ID passes.
+- **model** / **model_file**: the model that lies on the building: `model` or `file` of kubakub align 3d model.
+  Give align 3d model the same model file as `template_file` that scene render reads, then both are in the same
+  place. Nothing given = a sample form on the wall.
+- **wall_m**: what stands out of the real surface less than this is the wall. A generated wall never lies exactly
+  on the real one (0.2 to 0.3 m off on a 30 m facade); raise it until the wall is black, lower it to keep flat
+  forms. The height is counted from here.
+- **smallest_form_m**: what is thinner than this is dropped: specks, and the lines along cornices and window
+  edges where the generated wall sits a little off.
+- **counted_from**: *the wall's plane* counts the height from the flat main wall, so the real wall's own
+  cornices and niches do not show inside the forms: the clean picture. *the real surface* counts from the real
+  model under each pixel, which is what a displacement of the real model needs.
+- **white_at_m**: the height that is white; 0 = the highest point of this model. The report says how many metres
+  white is.
+- **up** (advanced): .glb and .obj files count y as up, the scene counts z; *auto* tries both and says which one
+  lies on the building.
+
+Outputs: the **height** map, **forms** (a mask of where a form stands), **depth** (the real building with the
+forms on it as grey depth, near = white) and a **report** (how much of the building the model lies on, how far
+the forms stand out, how much of the picture they cover; it warns when the model does not lie on the building).
+
+What it is for: the height is a picture, so everything that works on pictures and masks works on it. Brought up
+from black, the forms grow out of the wall; kubakub mask field and mask animate or the sound say where and when;
+in the kubakub director it is a layer or a mask like any other. `depth` goes into the depth presets of kubakub
+shader (hard shadow, sheet of light, contour lines) and into kubakub motion guide as the moving clip, and both
+pictures are displacement maps for the real model in Houdini or Blender.
+
+The model is drawn on the graphics card from the scene's camera (the GL that comes with ComfyUI, no Blender run of
+its own): a model of 350,000 faces at 2048x1536 takes about 2 s. On a real one (the Trellis 2 model of a 30 m
+station facade): at `wall_m` 0.3 parts of the cornice still showed, at 0.6 only the forms were left, standing up
+to 4 m out. Example: `example_workflows/form_height.json`.
+
+### Letting the height grow
+
+**kubakub height animate** (menu **2d / motion**) takes a height map and gives one per frame: the forms come out of
+the wall. It is not bound to form height: any grey picture where white stands out works, so a depth map from
+Depth Anything or Marigold grows the same way.
+
+- **height**: the grey picture. Black = the wall, white = furthest out. Nothing connected = a sample.
+- **wall**: the grey that counts as the wall. 0 for form height; for a depth map of a whole picture raise it to
+  the grey of the wall, so only what stands in front of it grows.
+- **grow**: *all together* (every form rises at once), *peaks first* (the forms are pushed out through the wall,
+  the highest points come first), *built up in layers* (from the wall up, cut flat at the level reached), *along
+  the field* (the forms rise where a field from kubakub mask field has been passed: a direction, from a point,
+  region by region; `soft` is the width of the rising edge; without a field left to right).
+- **curve**, **cycle**, **value_from**, **value_to**, **easing**: as on kubakub mask animate. A ramp grows once
+  and stays, sine breathes, beats and hits come up with the sound on `audio`, sound level follows its loudness.
+  0 is the bare wall, 1 the whole height.
+- **image**, **light_angle**, **relief**: for the `lit` output: the picture on the relief (the facade, the clay,
+  the picture the depth map came from; empty = clay grey), where the light comes from and how deep it reads.
+- **fps**, **seconds**, **scale**: the clip. 100 frames at 1920x1080 take about 6 GB of RAM; `scale` makes them
+  smaller.
+
+Outputs: **height** (the grey frames: the depth input of the kubakub shader presets such as hard shadow, or a
+displacement sequence), **lit** (the growth as a clip, lit from the side with no thrown shadows; it is also a
+guide clip for kubakub motion guide), **masks** (the same as masks), fps, the sound and a report. 100 frames at
+1024x768 take about 5 s. Example: `example_workflows/height_animate.json`.

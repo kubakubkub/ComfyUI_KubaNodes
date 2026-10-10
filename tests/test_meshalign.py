@@ -192,6 +192,48 @@ try:
           out[0].faces.shape[1] < hm.faces.shape[1] and hm.faces.shape[1] == len(house.faces) and out[0].vertices.shape == hm.vertices.shape)
     out = na.KUBA_AlignModel.execute(model_file=c, template_file=b, fit="the whole model").result
     check("node: 'the whole model' still does the old fit", "fitted on the facade front" not in out[3] and "cut_the_back" not in out[3])
+    # textures: a textured file written as .obj, and a textured MESH from the wire
+    from PIL import Image
+    tex = Image.fromarray((np.random.default_rng(5).random((64, 64, 3)) * 255).astype(np.uint8))
+    uv = (TV[:, :2] - TV[:, :2].min(0)) / np.ptp(TV[:, :2], axis=0)
+    vis = trimesh.visual.TextureVisuals(uv=uv, material=trimesh.visual.material.PBRMaterial(baseColorTexture=tex, normalTexture=tex))
+    t_ = os.path.join(TMP, "textured.glb")
+    trimesh.Trimesh(vertices=lost, faces=TF, visual=vis, process=False).export(t_)
+    out = na.KUBA_AlignModel.execute(model_file=t_, template_file=b, scale="one scale", save_name="tex", file_format=".obj").result
+    base = out[1][:-4]
+    got = trimesh.load(out[1], force="mesh", process=False)
+    check("node, .obj: the .obj, its .mtl, the colour texture and the normal map are written and named after it",
+          out[1].endswith("tex_00001.obj") and all(os.path.isfile(base + e) for e in (".mtl", ".png", "_normal.png"))
+          and "with: tex_00001.png" in out[3] and "tex_00001.png" in open(base + ".mtl").read(), f"{os.listdir(os.path.dirname(base))}\n{out[3]}")
+    check("node, .obj: it lies on the template and still has its UVs and texture",
+          float(np.abs(np.asarray(got.bounds) - np.array([TV.min(0), TV.max(0)])).max()) < 0.01 * SIZE
+          and getattr(got.visual, "uv", None) is not None and got.visual.material.image is not None, str(got.bounds))
+    out = na.KUBA_AlignModel.execute(model_file=t_, template_file=b, scale="one scale", save_name="tex").result
+    check("node: a .glb after an .obj of the same name takes the next number", out[1].endswith("tex_00002.glb"), out[1])
+    open(os.path.join(os.path.dirname(base), "left_00001_normal.png"), "wb").close()      # what a deleted .obj left behind
+    out = na.KUBA_AlignModel.execute(model_file=t_, template_file=b, scale="one scale", save_name="left", file_format=".obj").result
+    check("node: a number that any file still carries is not used again", out[1].endswith("left_00002.obj") and "with: left_00002.png" in out[3], out[3])
+    two = trimesh.Scene()
+    for k in range(2):
+        two.add_geometry(trimesh.Trimesh(vertices=lost + np.array([0.0, 0.0, 0.001 * k]), faces=TF, visual=vis.copy(), process=False))
+    t2 = os.path.join(TMP, "two_parts.glb")
+    two.export(t2)
+    out = na.KUBA_AlignModel.execute(model_file=t2, template_file=b, scale="one scale", save_name="two", file_format=".obj").result
+    check("node, .obj of two parts with one material: its maps are written once", out[3].count("_normal.png") == 1, out[3])
+    facing = np.tile(np.array([0.0, 0.0, 1.0]) @ rot("y", 50).T, (len(TV), 1))
+    tm = na.io.Mesh.Type(torch.from_numpy(lost.astype(np.float32))[None], torch.from_numpy(TF)[None],
+                         uvs=torch.from_numpy(uv.astype(np.float32))[None], texture=torch.rand(1, 32, 32, 3),
+                         normals=torch.from_numpy(facing.astype(np.float32))[None])
+    for fmt in (".glb", ".obj"):
+        out = na.KUBA_AlignModel.execute(model=tm, template=real, scale="one scale", save_name="wire", file_format=fmt).result
+        got = trimesh.load(out[1], force="mesh", process=False)
+        mat = got.visual.material
+        check(f"node, a textured MESH from the wire as {fmt}: the file lies on the template with UVs and texture",
+              float(np.abs(np.asarray(got.bounds) - np.array([TV.min(0), TV.max(0)])).max()) < 0.01 * SIZE
+              and getattr(got.visual, "uv", None) is not None
+              and (getattr(mat, "baseColorTexture", None) is not None or getattr(mat, "image", None) is not None), f"{got.bounds} {type(mat).__name__}")
+    check("node: the normals of the MESH turn with it", float(np.abs(out[0].normals[0].numpy() - np.array([0, 0, 1.0])).max()) < 0.02
+          and torch.allclose(tm.normals[0], torch.from_numpy(facing.astype(np.float32))), str(out[0].normals[0][0]))
     check("node: a missing template is said", "real model is missing" in raises(lambda: na.KUBA_AlignModel.execute(model_file=a)))
     check("node: a format it cannot read says what to export", "Export it from Blender" in raises(lambda: na.KUBA_AlignModel.execute(model_file=a, template_file=__file__)))
     check("node: a path that is no file is said", "is not a file" in raises(lambda: na.KUBA_AlignModel.execute(model_file=a, template_file=os.path.join(TMP, "none.glb"))))

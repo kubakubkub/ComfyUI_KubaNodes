@@ -39,11 +39,14 @@ LAYER_NAMES = ("deep_recess", "recess", "facade", "relief", "projection")
 # loading
 # --------------------------------------------------------------------------
 
-def load(folder):
+def load(folder, mesh=True):
+    """A scene export as a dict. mesh=False leaves the per-face data out (it is the slow part to read)."""
     info = json.load(open(os.path.join(folder, "scene.json"), encoding="utf-8"))
-    m = np.load(os.path.join(folder, "mesh.npz"))
-    mesh = {k: m[k] for k in m.files}
-    return {"info": info, "mesh": mesh, "faceid": np.load(os.path.join(folder, "faceid.npy")),
+    faces = None
+    if mesh:
+        m = np.load(os.path.join(folder, "mesh.npz"))
+        faces = {k: m[k] for k in m.files}
+    return {"info": info, "mesh": faces, "faceid": np.load(os.path.join(folder, "faceid.npy")),
             "position": np.load(os.path.join(folder, "position.npy")),
             "normal": np.load(os.path.join(folder, "normal.npy")).astype(np.float32)}
 
@@ -53,6 +56,15 @@ def camera_frame(info):
     M = np.array(info["camera"]["matrix_world"], float)
     R = M[:3, :3] / np.linalg.norm(M[:3, :3], axis=0)
     return M[:3, 3], -R[:, 2], R[:, 1], R[:, 0]
+
+
+def grey_depth(depth, there):
+    """Depth as grey [H, W]: near = 1, far = 0, linear over the depths where `there`, 0 elsewhere."""
+    g = np.zeros(depth.shape, np.float32)
+    if there.any():
+        lo, hi = float(depth[there].min()), float(depth[there].max())
+        g[there] = 1.0 - (depth[there] - lo) / max(hi - lo, 1e-6)
+    return g
 
 
 def depth_maps(scene):

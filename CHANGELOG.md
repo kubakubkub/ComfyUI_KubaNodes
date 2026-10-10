@@ -39,8 +39,26 @@ may have changed since.
   and the report names it. A model made from a picture of a facade comes back as a whole invented building:
   `fit` = *the facade front* (chosen by *auto* when the template is a thin relief) fits only what is seen from the
   front and keeps the depth of what stands in front of the wall, and `cut_the_back` removes the invented back
-  wall, sides and roof. Takes MESH inputs or files (.glb, .obj, .ply, .stl), writes the aligned .glb and gives
-  the matrix. Example `align_3d_model.json`, section in [docs/scene3d.md](docs/scene3d.md).
+  wall, sides and roof. Takes MESH inputs or files (.glb, .obj, .ply, .stl) and gives the matrix. `file_format`
+  writes the aligned model as .glb (textures inside) or as .obj with its .mtl and textures beside it, in the
+  template's coordinates and size, so it imports in place in Blender, Houdini or any other 3D software; a model
+  from the wire keeps its texture or colours in the file. Example `align_3d_model.json`, section in [docs/scene3d.md](docs/scene3d.md).
+- **kubakub form height.** New node in **3d / scene**: how far a generated model stands out of the real wall,
+  as a height map in the projection view. Give the scene of your real building (kubakub scene render) and the
+  model after kubakub align 3d model: black is the wall, white is where a form stands furthest out, and the wall
+  stays your real one. A generated model is one merged mesh that cannot be taken apart; as a height map its forms
+  can grow out of the wall, follow a mask field or the sound, throw shadows in the depth shaders, or displace the
+  real model in Houdini or Blender. `wall_m` says what still counts as wall, `smallest_form_m` drops thin lines
+  and specks, `counted_from` chooses the flat wall or the real surface. Also gives the forms as a mask and the
+  depth of the building with the forms on it. Drawn on the graphics card in about 2 s, no extra packages. No
+  model connected runs a sample. Example `form_height.json`, section in [docs/scene3d.md](docs/scene3d.md).
+- **kubakub height animate.** New node in **2d / motion**: a height map that grows, so forms come out of the
+  wall frame by frame. It takes the height of kubakub form height or any depth map (Depth Anything, Marigold;
+  `wall` sets the grey that counts as the wall). `grow` = all together, peaks first, built up in layers, or
+  along a field from kubakub mask field; the curve is the one of kubakub mask animate (ramp, sine, beats, hits,
+  sound level). Gives the height per frame (for the depth presets of kubakub shader, or as displacement), the
+  same as a relief lit from the side on your picture, and it as masks. Nothing connected runs a sample. Example
+  `height_animate.json`.
 - **kubakub shader mix.** New node in **2d / shader**: two shaders and one mix value, 0 = shader A, 1 = shader
   B. In between they meet in the shaders, not as two pictures laid over each other: **b works on a** (B is an
   effect on A's picture), **a bends b** (A pushes the places B draws at, B melts out of A), **a cuts b** (a wipe

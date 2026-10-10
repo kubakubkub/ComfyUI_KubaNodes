@@ -3,7 +3,7 @@ nodes_align3d.py
 
 kubakub align 3d model: a model from an image-to-3D workflow (Trellis, Hunyuan3D ...) is moved, turned and scaled onto
 the real model of the building, so it sits where the projector and the camera expect it when it is opened in Blender
-or Houdini. A scale per axis corrects a length the generator misread (mostly the depth). A model made from a picture
+or Houdini. It is written as .glb or as .obj with its textures, in the template's coordinates and size. A scale per axis corrects a length the generator misread (mostly the depth). A model made from a picture
 of a facade is a whole invented building; it is fitted by its front alone and the invented back can be cut away. The
 fit is in kubakub/meshalign.py (numpy + scipy); files are read and written with trimesh, which ComfyUI's own 3D nodes
 use.
@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
+from io import BytesIO
 
 import numpy as np
 import torch
@@ -30,21 +31,24 @@ from ...kubakub.scene3d.bridge import clean_path
 log = logging.getLogger("KUBA.scene3d")
 NAME = "kubakub align 3d model"
 READS = (".glb", ".gltf", ".obj", ".ply", ".stl", ".off")
+FORMATS = (".glb", ".obj")
+MAPS = (("metallicRoughnessTexture", "roughness_metal"), ("normalTexture", "normal"), ("emissiveTexture", "emissive"))
 
 
-def _load(path, what):
-    """A model file as (trimesh scene, vertices [V, 3], faces [F, 3]) with every part where the file puts it."""
-    trimesh = optional.need("trimesh", "align 3d model")
+def _load(path, what, name=NAME):
+    """A model file as (trimesh scene, vertices [V, 3], faces [F, 3]) with every part where the file puts it. name: the
+    node that asks (kubakub form height reads its model here too)."""
+    trimesh = optional.need("trimesh", name.replace("kubakub ", ""))
     if not os.path.isfile(path):
-        raise ValueError(f"{NAME}: {what} '{path}' is not a file.")
+        raise ValueError(f"{name}: {what} '{path}' is not a file.")
     ext = os.path.splitext(path)[1].lower()
     if ext not in READS:
-        raise ValueError(f"{NAME}: {what} is a {ext or 'file without an ending'}; this node reads {', '.join(READS)}. "
+        raise ValueError(f"{name}: {what} is a {ext or 'file without an ending'}; this node reads {', '.join(READS)}. "
                          "Export it from Blender or Houdini as .glb (or .obj) and give that file.")
     scene = trimesh.load(path, force="scene", process=False)
     parts = [g for g in scene.dump(concatenate=False) if hasattr(g, "faces") and len(g.vertices)]
     if not parts:
-        raise ValueError(f"{NAME}: {what} '{os.path.basename(path)}' holds no surface (no triangles).")
+        raise ValueError(f"{name}: {what} '{os.path.basename(path)}' holds no surface (no triangles).")
     v, f, at = [], [], 0
     for g in parts:
         v.append(np.asarray(g.vertices, np.float64))
@@ -78,6 +82,77 @@ def _sample():
     return (v, f), (lost, f)
 
 
+def _carries(mesh):
+    """Does a MESH hold more than its shape (UVs with a texture, or colours on its points)?"""
+    return mesh.vertices.dim() == 3 and (getattr(mesh, "vertex_colors", None) is not None
+                                         or (getattr(mesh, "uvs", None) is not None and getattr(mesh, "texture", None) is not None))
+
+
+def _turn_normals(mesh, M):
+    """The normals and tangents of a MESH follow the fit (they are directions: no move, and a scale per axis bends them)."""
+    lin = torch.from_numpy(M[:3, :3].astype(np.float64))
+    n, t = getattr(mesh, "normals", None), getattr(mesh, "tangents", None)
+    if n is not None:
+        mesh.normals = torch.nn.functional.normalize(n.cpu().double() @ torch.linalg.inv(lin), dim=-1).to(n.dtype).to(n.device)
+    if t is not None:
+        xyz = torch.nn.functional.normalize(t[..., :3].cpu().double() @ lin.T, dim=-1)
+        side = t[..., 3:].cpu().double() * (1.0 if torch.linalg.det(lin) > 0 else -1.0)
+        mesh.tangents = torch.cat([xyz, side], -1).to(t.dtype).to(t.device)
+
+
+def _cut_faces(mesh, faces, cut):
+    """mesh keeps only the faces of `faces` ([F, 3] or [1, F, 3]) that `cut` marks; its points stay (colours and UVs
+    hang on them)."""
+    keep = torch.from_numpy(cut).to(faces.device)
+    mesh.faces = faces[..., :len(cut), :][..., keep, :]
+    if getattr(mesh, "face_counts", None) is not None:
+        mesh.face_counts = torch.tensor([int(cut.sum())], dtype=mesh.face_counts.dtype)
+
+
+def _glb_of(mesh, notes):
+    """The first model of a MESH as the bytes of a .glb with all it carries (UVs, colours, the texture and its maps),
+    from ComfyUI's own writer. None when that writer cannot be had; `notes` then says so."""
+    try:
+        from comfy_extras.nodes_save_3d import mesh_item_to_glb_bytes
+        return mesh_item_to_glb_bytes(mesh, 0)
+    except Exception as e:                                # the writer is ComfyUI's and may change: the shape is still written
+        notes.append(f"the model's texture and colours could not be read ({e}): the file holds the shape only")
+        return None
+
+
+def _write(model, path):
+    """model (a trimesh mesh or scene) -> path. A .glb is one file. An .obj gets its .mtl and its colour texture beside
+    it, named after it; the maps an .obj material cannot name (roughness / metal, normal, glow) are written beside it as
+    PNGs. Returns every file written."""
+    if not path.lower().endswith(".obj"):
+        model.export(path)
+        return [path]
+    folder, base = os.path.split(path[:-4])
+    before = set(os.listdir(folder))
+    parts = list(model.geometry.values()) if hasattr(model, "geometry") else [model]
+    seen = {}
+    for part in parts:
+        mat = getattr(getattr(part, "visual", None), "material", None)
+        if mat is None or getattr(part.visual, "uv", None) is None:
+            continue
+        try:
+            key = hash(mat)                               # parts are copies: the same material comes as several objects
+        except Exception:  # noqa: BLE001
+            key = id(mat)
+        if key not in seen:
+            name = base if not seen else f"{base}_{len(seen) + 1}"
+            for attr, word in MAPS:
+                img = getattr(mat, attr, None)
+                if img is not None:
+                    img.save(os.path.join(folder, f"{name}_{word}.png"))
+            plain = mat.to_simple() if hasattr(mat, "to_simple") else mat      # what an .mtl can say; its name names the texture
+            plain.name = name
+            seen[key] = plain
+        part.visual.material = seen[key]
+    model.export(path, mtl_name=base + ".mtl")
+    return [path] + sorted(os.path.join(folder, f) for f in set(os.listdir(folder)) - before if f != os.path.basename(path))
+
+
 class KUBA_AlignModel(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -93,11 +168,12 @@ class KUBA_AlignModel(io.ComfyNode):
                 "or Houdini exactly where the projector and the camera expect it. 'per axis' also corrects a "
                 "length the generator misread (mostly the depth). A model made from a picture of a facade comes "
                 "back as a whole invented building: it is fitted by its front, and the invented back, sides and "
-                "roof are cut away. Writes the aligned model as .glb and gives the matrix. Nothing connected = a "
-                "sample."),
+                "roof are cut away. Writes the aligned model as .glb or as .obj with its textures, in the "
+                "template's coordinates and size, and gives the matrix. Nothing connected = a sample."),
             inputs=[
                 io.Mesh.Input("model", optional=True,
-                              tooltip="The generated model, from an image-to-3D node. Or give a file in model_file."),
+                              tooltip="The generated model, from an image-to-3D node, with its texture or colours. Or give "
+                                      "a file in model_file."),
                 io.Mesh.Input("template", optional=True,
                               tooltip="The real model it should lie on. Or give a file in template_file."),
                 io.String.Input("model_file", default="", optional=True,
@@ -126,16 +202,23 @@ class KUBA_AlignModel(io.ComfyNode):
                                          "invented back wall, sides and roof). The facade and what stands in front of "
                                          "it stay. Off = the whole generated model is kept."),
                 io.String.Input("save_name", default="aligned_model", optional=True,
-                                tooltip="Name of the .glb written to the output folder (3d/<name>_00001.glb)."),
+                                tooltip="Name of the file written to the output folder (3d/<name>_00001.glb or .obj)."),
                 io.Int.Input("points", default=40000, min=2000, max=200000, step=1000, optional=True, advanced=True,
                              tooltip="Points taken from the generated model for the fit (five times as many from the "
                                      "template). More = slower and more exact; 40000 takes a few seconds."),
                 io.Int.Input("seed", default=0, min=0, max=2 ** 31 - 1, optional=True, advanced=True,
                              control_after_generate=False, tooltip="Which points are taken."),
+                io.Combo.Input("file_format", options=list(FORMATS), default=FORMATS[0], optional=True,
+                               tooltip=".glb: one file with the textures inside, for Blender (File > Import > glTF) and "
+                                       "Houdini (File > Import > glTF Scene, or a glTF Hierarchy node). .obj: the .obj, "
+                                       "its .mtl and the colour texture as a PNG beside it, for any 3D software; the "
+                                       "roughness / metal and normal maps are written beside it too. Both hold the model "
+                                       "in the template's coordinates and size: import it without a transform."),
             ],
             outputs=[
                 io.Mesh.Output("model", tooltip="The generated model, lying on the template."),
-                io.String.Output("file", tooltip="The aligned .glb: open it in Blender or Houdini, it is in place."),
+                io.String.Output("file", tooltip="The aligned file (.glb or .obj): import it in Blender or Houdini, it is "
+                                                 "in place."),
                 io.String.Output("matrix", tooltip="The 4x4 matrix that takes the generated model to the template, row "
                                                    "by row, for a transform node of your own."),
                 io.String.Output("report", tooltip="How far off it was, what was done, how close it is now, and which "
@@ -145,7 +228,8 @@ class KUBA_AlignModel(io.ComfyNode):
 
     @classmethod
     def execute(cls, model=None, template=None, model_file="", template_file="", fit=ma.FITS[0], scale=ma.SCALES[0],
-                mirror=False, cut_the_back=True, save_name="aligned_model", points=40000, seed=0) -> io.NodeOutput:
+                mirror=False, cut_the_back=True, save_name="aligned_model", points=40000, seed=0,
+                file_format=FORMATS[0]) -> io.NodeOutput:
         notes, scene = [], None
         mf_, tf_ = clean_path(model_file), clean_path(template_file)
         if model is None and not mf_ and template is None and not tf_:
@@ -171,6 +255,7 @@ class KUBA_AlignModel(io.ComfyNode):
                 raise ValueError(f"{NAME}: the real model is missing. Connect it to 'template' or give its file in "
                                  "template_file (export it from Blender or Houdini as .glb).")
         scale = scale if scale in ma.SCALES else ma.SCALES[0]
+        ext = file_format if file_format in FORMATS else FORMATS[0]
         fit = fit if fit in ma.FITS else ma.FITS[0]
         try:
             pair = ma.sample_pair((mv, mfc), (tv, tfc), points, seed)
@@ -196,15 +281,46 @@ class KUBA_AlignModel(io.ComfyNode):
             notes.append("cut_the_back would have cut everything away, so nothing was cut: check the fit")
         elif cut is not None:
             notes.append(f"cut_the_back: {int((~cut).sum())} of {len(cut)} faces behind the template's back were cut away")
+        kept = mfc if cut is None else mfc[cut]
+        mirrored = float(np.linalg.det(M[:3, :3])) < 0     # a mirrored fit turns every face inside out: turn them back
+        if mirrored:
+            kept = kept[:, ::-1]
+
+        first = None                                   # the model the file is written from, when the MESH carries colours
+        if model is not None:                          # every model of a batch, with whatever else the MESH carries
+            out = copy.copy(model)
+            v = model.vertices
+            several = v.dim() == 3 and v.shape[0] > 1
+            flat = v.reshape(-1, 3).detach().cpu().numpy().astype(np.float64)
+            out.vertices = torch.from_numpy(ma.apply(M, flat).astype(np.float32)).reshape(v.shape).to(v.device)
+            _turn_normals(out, M)
+            if cut is not None and not several:
+                _cut_faces(out, model.faces, cut)
+            elif cut is not None:
+                notes.append("the MESH output holds several models, so it is not cut; the written file is")
+            if mirrored:
+                out.faces = out.faces.flip(-1)
+            if v.dim() != 3 and (getattr(model, "texture", None) is not None or getattr(model, "vertex_colors", None) is not None):
+                notes.append("the MESH is not a batch as ComfyUI's 3D nodes make it: the file holds the shape only")
+            if _carries(model):
+                first = out
+                if cut is not None and several:
+                    first = copy.copy(out)
+                    _cut_faces(first, model.faces[:1], cut)
+                    if mirrored:
+                        first.faces = first.faces.flip(-1)
+        else:
+            out = io.Mesh.Type(torch.from_numpy(moved.astype(np.float32))[None], torch.from_numpy(kept.astype(np.int64))[None])
 
         trimesh = optional.need("trimesh", "align 3d model")
         folder = os.path.join(folder_paths.get_output_directory(), "3d")
         os.makedirs(folder, exist_ok=True)
         stem = sp.file_stem(save_name, "aligned_model")
-        n = 1
-        while os.path.exists(os.path.join(folder, f"{stem}_{n:05d}.glb")):
+        taken, n = os.listdir(folder), 1                  # a number is free when no file of any kind carries it (an
+        while any(f.startswith((f"{stem}_{n:05d}.", f"{stem}_{n:05d}_")) for f in taken):      # .obj writes several)
             n += 1
-        out_path = os.path.join(folder, f"{stem}_{n:05d}.glb")
+        out_path = os.path.join(folder, f"{stem}_{n:05d}{ext}")
+        baked = files = None
         if scene is not None:
             # the file's own parts, materials and textures, each with the fit written into its points: a scale per axis
             # after a turn is a shear, which a .glb's part cannot carry as its own move / turn / scale
@@ -219,32 +335,27 @@ class KUBA_AlignModel(io.ComfyNode):
                     if not len(part.faces):
                         continue
                 baked.add_geometry(part, node_name=name, geom_name=key if key not in baked.geometry else None)
-            baked.export(out_path)
-        else:
-            whole = trimesh.Trimesh(vertices=moved, faces=mfc if cut is None else mfc[cut], process=False)
-            if cut is not None:
-                whole.remove_unreferenced_vertices()
-            whole.export(out_path)
+        elif first is not None:
+            data = _glb_of(first, notes)
+            if data is not None and ext == ".glb" and cut is None:      # ComfyUI's .glb is the file as it is
+                with open(out_path, "wb") as fh_:
+                    fh_.write(data)
+                files = [out_path]
+            elif data is not None:
+                baked = trimesh.load(BytesIO(data), file_type="glb", force="scene", process=False)
+                for part in baked.geometry.values():      # the points of cut faces are still in the MESH
+                    if hasattr(part, "faces"):
+                        part.remove_unreferenced_vertices()
+        if files is None:
+            if baked is None:
+                baked = trimesh.Trimesh(vertices=moved, faces=kept, process=False)
+                if cut is not None:
+                    baked.remove_unreferenced_vertices()
+            files = _write(baked, out_path)
 
-        if model is not None:                          # every model of a batch, with whatever else the MESH carries
-            out = copy.copy(model)
-            v = model.vertices
-            flat = v.reshape(-1, 3).detach().cpu().numpy().astype(np.float64)
-            out.vertices = torch.from_numpy(ma.apply(M, flat).astype(np.float32)).reshape(v.shape).to(v.device)
-            if cut is not None and (v.dim() == 2 or v.shape[0] == 1):      # the points stay (colours and UVs hang on them)
-                keep = torch.from_numpy(cut).to(model.faces.device)
-                f = model.faces if model.faces.dim() == 3 else model.faces[None]
-                out.faces = f[:, :len(cut)][:, keep] if model.faces.dim() == 3 else f[0, :len(cut)][keep]
-                if getattr(model, "face_counts", None) is not None:
-                    out.face_counts = torch.tensor([int(cut.sum())], dtype=model.face_counts.dtype)
-            elif cut is not None:
-                notes.append("the MESH output holds several models, so it is not cut; the written file is")
-        else:
-            kept = mfc if cut is None else mfc[cut]
-            out = io.Mesh.Type(torch.from_numpy(moved.astype(np.float32))[None], torch.from_numpy(kept.astype(np.int64))[None])
         rows = "\n".join(", ".join(f"{x:.8g}" for x in row) for row in M)
         report = "\n".join([f"model {len(mv)} vertices, template {len(tv)} vertices, scale = {scale}"] + ma.describe(res)
-                           + [f"written: {out_path}"] + notes)
+                           + [f"written: {out_path}"] + [f"   with: {os.path.basename(f)}" for f in files[1:]] + notes)
         log.info("[KUBA align 3d] %s", report.replace("\n", "\n    "))
         return io.NodeOutput(out, out_path, rows, report)
 
