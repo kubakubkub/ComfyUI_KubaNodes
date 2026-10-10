@@ -7,13 +7,15 @@ may have changed since.
 ## Next (not released yet)
 
 - **kubakub shader.** New menu group **2d / shader** with one node: moving pictures and masks drawn by a shader on
-  the graphics card, with no AI model. 51 presets, all looping: clouds, fire, plasma, starfield, aurora, rings,
+  the graphics card, with no AI model. 53 presets, all looping: clouds, fire, plasma, starfield, aurora, rings,
   a brick wave, sound bars; for mapping a line-up grid, contours that follow your regions, and the building's own
   shapes as contour lines, a wire mesh, a blueprint, a point cloud or a sheet of light through its depth (from
   a render and its depth pass); endless travel (tunnel, grid flight, endless zoom, corridor); pixels (eight bit
   with old console palettes, characters, halftone, mosaic, old screen, pixel smear); analog video (a worn VHS tape
   with bleeding colours, snow, a tracking band and the head switch at the bottom, a composite cable with crawling
-  colour fringes, scan lines pushed by the brightness; *wear* turns the whole tape up or down); and slit scan, datamosh and
+  colour fringes, scan lines pushed by the brightness; *wear* turns the whole tape up or down); high contrast for
+  architecture (*cartoon*: flat tones, ink outlines, drifting hatching; *hard shadow*: a circling light and
+  everything that stands out throws a shadow, from a depth pass); and slit scan, datamosh and
   trails, which build each frame on the one before. **pick a preset by its picture** on the node shows them all as small
   pictures. Or paste a shader from shadertoy.com (click into its code, Ctrl+A, Ctrl+C, paste) or your own GLSL
   fragment shader. You do not need to understand the code: a shader that expects a noise picture gets a built-in
@@ -34,7 +36,10 @@ may have changed since.
 - **kubakub align 3d model.** New node in **3d / scene**: a model from an image-to-3D workflow (Trellis,
   Hunyuan3D ...) is moved, turned and scaled onto the real model of the building, so it opens in Blender or
   Houdini where the projector and the camera expect it. `per axis` also corrects a length the generator misread
-  and the report names it. Takes MESH inputs or files (.glb, .obj, .ply, .stl), writes the aligned .glb and gives
+  and the report names it. A model made from a picture of a facade comes back as a whole invented building:
+  `fit` = *the facade front* (chosen by *auto* when the template is a thin relief) fits only what is seen from the
+  front and keeps the depth of what stands in front of the wall, and `cut_the_back` removes the invented back
+  wall, sides and roof. Takes MESH inputs or files (.glb, .obj, .ply, .stl), writes the aligned .glb and gives
   the matrix. Example `align_3d_model.json`, section in [docs/scene3d.md](docs/scene3d.md).
 - **kubakub shader mix.** New node in **2d / shader**: two shaders and one mix value, 0 = shader A, 1 = shader
   B. In between they meet in the shaders, not as two pictures laid over each other: **b works on a** (B is an

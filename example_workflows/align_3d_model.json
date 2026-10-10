@@ -62,8 +62,10 @@
     "Node name for S&R": "KUBA_AlignModel"
    },
    "widgets_values": [
+    "auto",
     "per axis",
     false,
+    true,
     "",
     "",
     "aligned_model",

@@ -3,8 +3,10 @@ nodes_align3d.py
 
 kubakub align 3d model: a model from an image-to-3D workflow (Trellis, Hunyuan3D ...) is moved, turned and scaled onto
 the real model of the building, so it sits where the projector and the camera expect it when it is opened in Blender
-or Houdini. A scale per axis corrects a length the generator misread (mostly the depth). The fit is in
-kubakub/meshalign.py (numpy + scipy); files are read and written with trimesh, which ComfyUI's own 3D nodes use.
+or Houdini. A scale per axis corrects a length the generator misread (mostly the depth). A model made from a picture
+of a facade is a whole invented building; it is fitted by its front alone and the invented back can be cut away. The
+fit is in kubakub/meshalign.py (numpy + scipy); files are read and written with trimesh, which ComfyUI's own 3D nodes
+use.
 V3 node schema, registered via ../__init__.py.
 """
 
@@ -89,8 +91,10 @@ class KUBA_AlignModel(io.ComfyNode):
                 "somewhere in space, at some size, often turned. Give the real model of the building as the "
                 "template and the generated one is moved, turned and scaled to lie on it, so it opens in Blender "
                 "or Houdini exactly where the projector and the camera expect it. 'per axis' also corrects a "
-                "length the generator misread (mostly the depth). Writes the aligned model as .glb and gives the "
-                "matrix. Nothing connected = a sample."),
+                "length the generator misread (mostly the depth). A model made from a picture of a facade comes "
+                "back as a whole invented building: it is fitted by its front, and the invented back, sides and "
+                "roof are cut away. Writes the aligned model as .glb and gives the matrix. Nothing connected = a "
+                "sample."),
             inputs=[
                 io.Mesh.Input("model", optional=True,
                               tooltip="The generated model, from an image-to-3D node. Or give a file in model_file."),
@@ -102,13 +106,25 @@ class KUBA_AlignModel(io.ComfyNode):
                 io.String.Input("template_file", default="", optional=True,
                                 tooltip="The real model as a file (.glb, .gltf, .obj, .ply, .stl), in the place and at "
                                         "the size your scene uses. From Blender or Houdini: export as .glb."),
+                io.Combo.Input("fit", options=list(ma.FITS), default=ma.FITS[0],
+                               tooltip="the facade front: for a model made from a picture of a facade. Only what is "
+                                       "seen from the front is laid onto the template (the outline, then the wall), "
+                                       "so an invented back wall and roof do not pull, and what stands in front of "
+                                       "the wall keeps its depth. The model must be upright and seen from the front, "
+                                       "as image to 3D writes it. the whole model: surface onto surface, for a model "
+                                       "that shows the same as the template, turned any way. auto: the facade front "
+                                       "when the template is a thin relief and the model is far deeper."),
                 io.Combo.Input("scale", options=list(ma.SCALES), default=ma.SCALES[0],
                                tooltip="per axis: a scale for each of the template's axes, so a misread depth or "
                                        "height is corrected. one scale: the model keeps its proportions. keep the "
                                        "size: only moved and turned."),
                 io.Boolean.Input("mirror", default=False,
                                  tooltip="Also try mirrored fits. Turn it on when the result sits right but left and "
-                                         "right are swapped."),
+                                         "right are swapped. Not used with the facade front."),
+                io.Boolean.Input("cut_the_back", default=True,
+                                 tooltip="With the facade front: everything behind the template's back is cut away (the "
+                                         "invented back wall, sides and roof). The facade and what stands in front of "
+                                         "it stay. Off = the whole generated model is kept."),
                 io.String.Input("save_name", default="aligned_model", optional=True,
                                 tooltip="Name of the .glb written to the output folder (3d/<name>_00001.glb)."),
                 io.Int.Input("points", default=40000, min=2000, max=200000, step=1000, optional=True, advanced=True,
@@ -128,8 +144,8 @@ class KUBA_AlignModel(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model=None, template=None, model_file="", template_file="", scale=ma.SCALES[0], mirror=False,
-                save_name="aligned_model", points=40000, seed=0) -> io.NodeOutput:
+    def execute(cls, model=None, template=None, model_file="", template_file="", fit=ma.FITS[0], scale=ma.SCALES[0],
+                mirror=False, cut_the_back=True, save_name="aligned_model", points=40000, seed=0) -> io.NodeOutput:
         notes, scene = [], None
         mf_, tf_ = clean_path(model_file), clean_path(template_file)
         if model is None and not mf_ and template is None and not tf_:
@@ -155,12 +171,31 @@ class KUBA_AlignModel(io.ComfyNode):
                 raise ValueError(f"{NAME}: the real model is missing. Connect it to 'template' or give its file in "
                                  "template_file (export it from Blender or Houdini as .glb).")
         scale = scale if scale in ma.SCALES else ma.SCALES[0]
+        fit = fit if fit in ma.FITS else ma.FITS[0]
         try:
-            res = ma.align(*ma.sample_pair((mv, mfc), (tv, tfc), points, seed), scale, bool(mirror), seed=int(seed))
+            pair = ma.sample_pair((mv, mfc), (tv, tfc), points, seed)
+            front = fit == ma.FITS[1] or (fit == ma.FITS[0] and ma.looks_like_a_front(*pair))
+            if front:
+                if fit == ma.FITS[0]:
+                    notes.append("fit = auto: the template is a thin relief and the model is far deeper, so the facade "
+                                 "front is fitted")
+                if mirror:
+                    notes.append("mirror is not used with the facade front")
+                dense = ma.FRONT_DENSITY * int(points)
+                res = ma.align_front(ma.sample_surface(mv, mfc, dense, int(seed)),
+                                     ma.sample_surface(tv, tfc, dense * 3 // 2, int(seed) + 1), scale, seed=int(seed))
+            else:
+                res = ma.align(*pair, scale, bool(mirror), seed=int(seed))
         except ValueError as e:
             raise ValueError(f"{NAME}: {e}") from e
         M = res["matrix"]
         moved = ma.apply(M, mv)
+        cut = ma.front_faces(moved, mfc, res["front"]) if front and cut_the_back else None
+        if cut is not None and not cut.any():                 # nothing would be left: the fit is off, keep the model
+            cut = None
+            notes.append("cut_the_back would have cut everything away, so nothing was cut: check the fit")
+        elif cut is not None:
+            notes.append(f"cut_the_back: {int((~cut).sum())} of {len(cut)} faces behind the template's back were cut away")
 
         trimesh = optional.need("trimesh", "align 3d model")
         folder = os.path.join(folder_paths.get_output_directory(), "3d")
@@ -178,18 +213,35 @@ class KUBA_AlignModel(io.ComfyNode):
                 world, key = scene.graph[name]
                 part = scene.geometry[key].copy()
                 part.apply_transform(M @ world)
+                if cut is not None and hasattr(part, "faces"):
+                    part.update_faces(ma.front_faces(part.vertices, part.faces, res["front"]))
+                    part.remove_unreferenced_vertices()
+                    if not len(part.faces):
+                        continue
                 baked.add_geometry(part, node_name=name, geom_name=key if key not in baked.geometry else None)
             baked.export(out_path)
         else:
-            trimesh.Trimesh(vertices=moved, faces=mfc, process=False).export(out_path)
+            whole = trimesh.Trimesh(vertices=moved, faces=mfc if cut is None else mfc[cut], process=False)
+            if cut is not None:
+                whole.remove_unreferenced_vertices()
+            whole.export(out_path)
 
         if model is not None:                          # every model of a batch, with whatever else the MESH carries
             out = copy.copy(model)
             v = model.vertices
             flat = v.reshape(-1, 3).detach().cpu().numpy().astype(np.float64)
             out.vertices = torch.from_numpy(ma.apply(M, flat).astype(np.float32)).reshape(v.shape).to(v.device)
+            if cut is not None and (v.dim() == 2 or v.shape[0] == 1):      # the points stay (colours and UVs hang on them)
+                keep = torch.from_numpy(cut).to(model.faces.device)
+                f = model.faces if model.faces.dim() == 3 else model.faces[None]
+                out.faces = f[:, :len(cut)][:, keep] if model.faces.dim() == 3 else f[0, :len(cut)][keep]
+                if getattr(model, "face_counts", None) is not None:
+                    out.face_counts = torch.tensor([int(cut.sum())], dtype=model.face_counts.dtype)
+            elif cut is not None:
+                notes.append("the MESH output holds several models, so it is not cut; the written file is")
         else:
-            out = io.Mesh.Type(torch.from_numpy(moved.astype(np.float32))[None], torch.from_numpy(mfc.astype(np.int64))[None])
+            kept = mfc if cut is None else mfc[cut]
+            out = io.Mesh.Type(torch.from_numpy(moved.astype(np.float32))[None], torch.from_numpy(kept.astype(np.int64))[None])
         rows = "\n".join(", ".join(f"{x:.8g}" for x in row) for row in M)
         report = "\n".join([f"model {len(mv)} vertices, template {len(tv)} vertices, scale = {scale}"] + ma.describe(res)
                            + [f"written: {out_path}"] + notes)

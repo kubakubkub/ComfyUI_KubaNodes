@@ -352,10 +352,21 @@ scales it onto the real model of the building (the template), so it is where you
   .stl; a file keeps its materials and textures).
 - **template** / **template_file**: the real model, at the place and size your scene uses. From Blender or Houdini
   export it as .glb.
+- **fit**: *the facade front* is for a model made from a picture of a facade. Image to 3D does not give a
+  relief then: it invents a whole building (back wall, sides, roof), and what the picture shows in front of the
+  wall stands in front of it. Laid surface on surface, that building is pressed flat into the template. So only
+  what is seen from the front is fitted, the outline first and then the wall, and the depth is scaled like width
+  and height, so the things in front of the wall keep their depth. The model must be upright and seen from the
+  front, as image to 3D writes it; the template may face any way. *the whole model* lays surface onto surface, for
+  a model that shows the same as the template, turned any way. *auto* takes the facade front when the template is
+  a thin relief and the model is far deeper, and says so in the report.
+- **cut_the_back** (with the facade front): everything behind the template's back is cut away, so the file holds
+  the facade and what stands in front of it, not the invented building. Off keeps the whole model.
 - **scale**: *per axis* also corrects a length the generator misread (a model made from one picture is often too
   deep or too high) and the report names it ("z was 24 % too long"); *one scale* keeps the proportions; *keep the
   size* only moves and turns.
-- **mirror**: also tries mirrored fits, for a result that sits right but has left and right swapped.
+- **mirror**: also tries mirrored fits, for a result that sits right but has left and right swapped (the whole
+  model only).
 
 Outputs: the aligned **model**, the **file** it wrote (output/3d/<save_name>_00001.glb), the 4x4 **matrix** and a
 **report**: how far off it was, how close it is now, what was turned and scaled.
@@ -365,5 +376,9 @@ vertex came back within 0.02 % of the building's size; with a floor read a third
 depending on how it was turned (6 to 30 cm on a 24 m facade), so check a model that needed a correction per axis. A real generated model differs in shape from the template, so it will sit less tightly: read the
 report (it says so when more than 2 % stays off) and look at it in the viewer. A building that looks the same from
 left and right can be fitted either way round; `mirror` and the textures tell them apart, the shape alone cannot.
-`points` (advanced) trades time for exactness. Nothing connected runs a sample. Example:
+On a real one (a Trellis 2 model made from a picture of a 30 m station facade with forms on it, 688,000 faces,
+4 s): the whole-model fit pressed the depth to an eleventh and turned the model round, and its report says to use
+the facade front; the front fit put the outline within about 10 cm and the wall 0.2 m off (median), with some
+windows visibly beside the template's, because the generator draws them where it likes. Half the faces were the
+invented back and were cut. `points` (advanced) trades time for exactness. Nothing connected runs a sample. Example:
 `example_workflows/align_3d_model.json`.

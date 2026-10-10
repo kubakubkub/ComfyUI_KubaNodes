@@ -90,6 +90,8 @@ Outputs: `images`, `masks` (how bright the picture is; the alpha of a plain frag
 | vhs tape | the picture on image0 as a worn VHS tape: soft, colours bleeding sideways, a wobbling edge, snow, a noisy band and the torn lines of the head switch at the bottom | a picture | wear, bleed, wave, snow, tracking, head, ring, grain, lines |
 | composite video | the picture on image0 sent through a composite video cable: colour fringes and rainbows crawling along fine detail, dots on colour edges, soft colour | a picture | carrier, fringe, dots, crawl, colour, lines |
 | scan modulation | the picture on image0 as scan lines that the brightness pushes out of place, like a signal on a tube; the lines drift | a picture | rate, depth, steps, drift, soften, tint, light |
+| cartoon | the picture on image0 as a cartoon: a few flat tones, black ink outlines and hatching in the dark parts that drifts. High contrast, made for architecture | a picture | tones, contrast, ink, thick, detail, hatch, lines, drift, two_colours |
+| hard shadow | a light circles the picture on image0 and everything that stands out throws a hard shadow (a depth pass on image1, else its brightness). A fake shadow, no 3D needed. Loops without a jump | a picture | sun, reach, turns, angle, dark, soft, shade, tint |
 
 All of them loop without a jump and stay inside the mask. `sound` and `beat` are 0 in most presets: raise them in
 `controls` to make the picture follow the music (sound bars follows it by itself).
@@ -209,6 +211,11 @@ Things to try:
 - **A band per beat along the windows**: preset scan band, `controls` = `beat = 1`, a field from kubakub mask field
   (`edge distance`), your music on `audio`.
 - **Glass over a render**: kubakub render passes, `beauty` into `image0`, `normal` into `image1`, preset glass.
+- **A fake shadow on the building**: `beauty` into `image0`, `depth` into `image1`, preset *hard shadow*. A light
+  circles once per loop and cornices, window frames and anything else that stands out throw shadows across the
+  wall; `sun` low gives long shadows, `turns` 0 holds the light at `angle`. Without a depth pass the brightness
+  of the picture is taken as height, which reads as an embossed print rather than a real shadow. A depth pass
+  saved in 8 bit shows its steps as fine stripes on slanted faces: raise `soft` or `sun`.
 - **The building as a wire mesh or a point cloud**: `beauty` into `image0`, `depth` into `image1`, preset
   wireframe, point cloud or depth scan.
 - **Slit scan or datamosh of a clip**: Load Video into `image0`, preset slit scan or datamosh, `seconds` = the
@@ -232,7 +239,7 @@ left out: they build on their last frame, which only the node can do).
 **An arrow instead of numbers.** A shader that can follow a direction has an **arrow** row: press **draw** and drag on the layer. Presets that run along the field (scan band, region contours ...) then run from the arrow's start to its end; stripes, rain and pixel smear take its direction; rings, ripples and radar start at its start. The arrow belongs to the layer and moves with it. **clear** removes it.
 
 **A shader as an effect.** A preset that works on a picture (eight bit, characters, mosaic, halftone, old
-screen, pixel smear, vhs tape, composite video, scan modulation, contour lines, wireframe, blueprint, edge glow, depth scan, point cloud, chromatic split,
+screen, pixel smear, vhs tape, composite video, scan modulation, cartoon, hard shadow, contour lines, wireframe, blueprint, edge glow, depth scan, point cloud, chromatic split,
 glass) works here on **everything under the layer**: put a solid with fill = eight bit on top and the whole
 composition below turns 8 bit; make it an ellipse with a feather, or clip it to the windows, and only that part
 does. Stack two for two effects. Your own code has a `picture` choice for this: *the layers below*, or the
