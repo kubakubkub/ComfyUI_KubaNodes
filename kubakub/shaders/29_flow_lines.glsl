@@ -1,5 +1,6 @@
 // about: fine lines flowing like wood grain or a topographic map. Loops without a jump.
 // type: pattern
+// arrow: right
 uniform float lines;      // 18 2 120    how many lines
 uniform float scale;      // 1.6 0.2 8   how large the bends are (more = smaller)
 uniform float thin;       // 0.25 0.03 0.9 how thin the lines are

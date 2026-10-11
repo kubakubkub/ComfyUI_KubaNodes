@@ -1,10 +1,13 @@
 // about: cells with glowing borders that slowly trade places. Loops without a jump.
 // type: pattern
+// arrow: right
 uniform float cells;      // 8 2 60     cells across the picture height
 uniform float border;     // 0.06 0.005 0.5  how thick the glowing borders are
 uniform float move;       // 0.35 0 0.5 how far the cell centres wander
 uniform float fill;       // 0.25 0 1   how bright the inside of a cell is
 uniform float sound;      // 0 0 2      a kick lights the borders
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 
 vec2 hash2(vec2 p) {
     vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
@@ -28,7 +31,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     }
     float edge = 1.0 - smoothstep(0.0, border, d2 - d1);
     float tone = hash2(id).x;
-    vec3 inside = mix(vec3(0.63, 0.53, 0.72), vec3(0.95, 0.54, 0.35), tone) * fill * (0.4 + 0.6 * tone);
+    vec3 inside = mix(colour_a, colour_b, tone) * fill * (0.4 + 0.6 * tone);
     vec3 col = inside + vec3(1.0, 0.9, 0.8) * edge * (1.0 + sound * kLow);
     fragColor = vec4(col * kMask(kUV), 1.0);
 }

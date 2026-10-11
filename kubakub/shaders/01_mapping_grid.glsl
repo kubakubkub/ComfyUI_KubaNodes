@@ -3,6 +3,8 @@
 uniform float cells;      // 12 2 64   squares across the picture
 uniform float line;       // 2 0.5 12  line width in pixels
 uniform float scan;       // 1 0 1     the running scan line, 0 = off
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 
 float stroke(float d, float w) { return 1.0 - smoothstep(w * 0.5, w * 0.5 + 1.0, abs(d)); }
 
@@ -20,8 +22,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 e = min(fragCoord, res - fragCoord);
     float border = 1.0 - step(line * 2.0, min(e.x, e.y));
     vec3 col = vec3(0.35) * grid;
-    col = max(col, vec3(0.63, 0.53, 0.72) * max(rings, diag));
-    col = max(col, vec3(0.95, 0.54, 0.35) * centre);
+    col = max(col, colour_a * max(rings, diag));
+    col = max(col, colour_b * centre);
     col = max(col, vec3(1.0) * border);
     float sweep = stroke(fragCoord.x - kLoop * res.x, line * 3.0) * scan;
     col = max(col, vec3(1.0) * sweep);

@@ -1,4 +1,4 @@
-// about: rays of light fanning out from a point above, slowly shifting. Loops without a jump.
+// about: rays of light fanning out from a point above, slowly shifting; a drawn arrow's start is the light. Loops without a jump.
 // type: pattern
 uniform float rays;       // 14 2 80     how many rays
 uniform float cx;         // 0.5 -0.5 1.5 where the light is, 0 = left edge, 1 = right edge
@@ -27,7 +27,7 @@ float fbm(vec3 p) {
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 asp = vec2(iResolution.x / iResolution.y, 1.0);
-    vec2 p = (kUV - vec2(cx, cy)) * asp;
+    vec2 p = (kUV - (kVector > 0.5 ? kFrom : vec2(cx, cy))) * asp;      // a drawn arrow's start is the light
     float r = length(p), th = atan(p.y, p.x);
     float a = TAU * kLoop;
     float v = 0.0;

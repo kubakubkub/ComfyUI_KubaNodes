@@ -1,5 +1,6 @@
 // about: stars flying towards you. Loops without a jump.
 // type: space
+// arrow: centre
 uniform float stars;      // 1 0.2 4     how many stars
 uniform float speed;      // 1 1 6       how many layers pass in one loop
 uniform float streak;     // 0.4 0 1     how long their tails are

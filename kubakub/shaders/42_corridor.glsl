@@ -1,5 +1,6 @@
 // about: an endless walk down a corridor of lit panels. Loops without a jump; the low end of a sound brightens the lights.
 // type: space
+// arrow: centre
 uniform float panels;     // 2 1 12      pairs of panels you pass in one loop
 uniform float width;      // 1.3 0.5 3   how wide the corridor is against its height
 uniform float lights;     // 0.6 0 1     strips of light on the ceiling and floor

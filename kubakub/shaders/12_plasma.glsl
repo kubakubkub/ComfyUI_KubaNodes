@@ -1,5 +1,6 @@
 // about: the classic plasma: soft colour waves folding through each other. Loops without a jump.
 // type: pattern
+// arrow: right
 uniform float scale;      // 4 0.5 20    how many waves across
 uniform float speed;      // 1 1 6       whole turns in one loop
 uniform float warm;       // 0.5 0 1     0 = violet and blue, 1 = orange and gold

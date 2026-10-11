@@ -1,5 +1,6 @@
 // about: a turning spiral, hypnotic. Loops without a jump.
 // type: pattern
+// arrow: centre
 uniform float arms;       // 3 1 16      arms of the spiral
 uniform float tight;      // 6 0 30      how tightly it winds
 uniform float width;      // 0.5 0.05 0.95

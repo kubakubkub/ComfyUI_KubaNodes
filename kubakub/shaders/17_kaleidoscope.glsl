@@ -1,5 +1,6 @@
 // about: a turning kaleidoscope of coloured shards. Loops without a jump.
 // type: pattern
+// arrow: centre
 uniform float mirrors;    // 8 2 24      how many mirror segments
 uniform float detail;     // 3 1 12      how busy the pattern is
 uniform float turn;       // 1 0 4       whole turns in one loop

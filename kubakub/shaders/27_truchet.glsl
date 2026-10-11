@@ -1,5 +1,6 @@
 // about: a maze of quarter circles that rearranges itself, with light running along the paths. Loops without a jump.
 // type: pattern
+// arrow: right
 uniform float tiles;      // 8 2 40      tiles across the picture height
 uniform float line;       // 0.12 0.02 0.4 how thick the paths are
 uniform float flow;       // 2 1 8       how fast the light runs along

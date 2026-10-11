@@ -1,5 +1,6 @@
 // about: soft blobs of light that melt into each other, like a lava lamp. Loops without a jump.
 // type: pattern
+// arrow: right
 uniform float blobs;      // 6 1 12      how many blobs
 uniform float size;       // 0.16 0.03 0.5
 uniform float edge;       // 0.15 0.01 1  0 = hard blobs, 1 = a soft glow

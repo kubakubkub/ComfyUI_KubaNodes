@@ -1,5 +1,6 @@
 // about: soft 3D forms that melt into each other and out of a wall, lit from the side with real shadows. Raymarched. Loops without a jump; the low end of a sound makes them swell. Writes a depth.
 // type: space
+// arrow: centre
 uniform float forms;      // 5 1 8       how many forms
 uniform float size;       // 0.4 0.1 0.9
 uniform float melt;       // 0.4 0 1     how far they flow into each other and into the wall

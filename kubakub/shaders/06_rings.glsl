@@ -7,6 +7,8 @@ uniform float cx;         // 0.5 0 1    the point, 0 = left edge, 1 = right edge
 uniform float cy;         // 0.5 0 1    0 = bottom, 1 = top
 uniform float inward;     // 0 0 1      1 = the rings run towards the point
 uniform float beat;       // 0 0 1      how much brighter on a beat
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 p = (fragCoord - (kVector > 0.5 ? kFrom : vec2(cx, cy)) * iResolution.xy) / iResolution.y;
@@ -16,6 +18,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float d = abs(x - 0.5) * 2.0;                         // 0 in the middle of a ring, 1 between two
     float v = 1.0 - smoothstep(width * (1.0 - soft), width + 1e-4, d);
     v *= 1.0 + beat * kBeat;
-    vec3 col = mix(vec3(0.63, 0.53, 0.72), vec3(0.95, 0.54, 0.35), clamp(length(p), 0.0, 1.0)) * v;
+    vec3 col = mix(colour_a, colour_b, clamp(length(p), 0.0, 1.0)) * v;
     fragColor = vec4(col * kMask(kUV), 1.0);
 }

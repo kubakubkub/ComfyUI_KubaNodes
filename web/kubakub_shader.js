@@ -150,7 +150,7 @@ async function adjustShader(node, anchor) {
   const paper = dark ? "#141414" : "#ffffff", ink = dark ? "rgba(255,255,255,.88)" : "rgba(0,0,0,.85)", line = dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.12)";
   const el = (tag, css, text) => { const q = document.createElement(tag); if (css) q.style.cssText = css; if (text != null) q.textContent = text; return q; };
   const pillCss = `all:unset;cursor:pointer;padding:4px 12px;border-radius:999px;border:1px solid ${line};white-space:nowrap`;
-  const box = el("div", `position:fixed;z-index:10040;background:${paper};color:${ink};border:1px solid ${line};border-radius:14px;
+  const box = el("div", `position:fixed;z-index:10047;background:${paper};color:${ink};border:1px solid ${line};border-radius:14px;
     box-shadow:0 18px 50px rgba(0,0,0,.35);box-sizing:border-box;width:min(94vw,520px);max-height:90vh;display:flex;flex-direction:column;
     font:400 12px/1.35 ${FONT}`);
   box.className = "kks-adjust";
@@ -238,7 +238,7 @@ async function adjustShader(node, anchor) {
     sub.textContent = s.code.trim() ? "your code" : s.preset + (info.about ? " · " + info.about : "");
     code.textContent = s.code.trim() ? "back to the preset" : "show the code";
     code.title = s.code.trim() ? "Empties 'code': the node draws the preset again. Your changes to the code are lost unless you saved them as a preset."
-      : "Puts the preset's code into 'code', where you can change it: colours, shapes, anything. The sliders keep working.";
+      : "Puts the preset's code into 'code' and opens it in a big window, where you can change it: colours, shapes, anything. The sliders keep working.";
     del.style.display = info.mine && !s.code.trim() ? "inline-block" : "none";
     name.value = info.mine && !s.code.trim() ? s.preset : "";
     build(); draw(true);
@@ -249,8 +249,10 @@ async function adjustShader(node, anchor) {
   const code = el("button", pillCss, "show the code");
   code.onclick = async () => {
     const c = w("code"); if (!c) return;
-    c.value = String(c.value || "").trim() ? "" : (info?.text || ""); c.callback?.(c.value);
+    const show = !String(c.value || "").trim();
+    c.value = show ? (info?.text || "") : ""; c.callback?.(c.value);
     node.setDirtyCanvas(true, true); await load();
+    if (show) editCode(node);                          // in a window big enough to read it
   };
   const name = el("input", `all:unset;box-sizing:border-box;flex:1 1 110px;min-width:90px;padding:4px 10px;border:1px solid ${line};border-radius:999px;font:inherit`);
   name.placeholder = "a name for it"; name.spellcheck = false; name.maxLength = 40;
@@ -299,7 +301,7 @@ async function adjustShader(node, anchor) {
     const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
     addEventListener("pointermove", move); addEventListener("pointerup", up);
   };
-  const key = e => { if (!box.isConnected) return; if (e.key === "Escape" && !document.querySelector(".kks-pick")) { e.stopPropagation(); close(); } else if (box.contains(e.target)) e.stopPropagation(); };
+  const key = e => { if (!box.isConnected) return; if (e.key === "Escape" && !document.querySelector(".kks-pick")) { e.stopPropagation(); e.stopImmediatePropagation(); close(); } else if (box.contains(e.target)) e.stopPropagation(); };
   const watch = setInterval(() => {                    // another preset was picked, or the code changed: other controls
     if (!box.isConnected || !node.graph) return close();
     const s = state();
@@ -309,6 +311,98 @@ async function adjustShader(node, anchor) {
   shut.onclick = close;
   document.addEventListener("keydown", key, true);
   await load();
+}
+
+// The code in a big window: the node's `code` field is a few lines high, which is no place to read or change a shader.
+// What is typed here goes into that field (it stays the truth); a picture drawn by the node and the line that says
+// what is wrong follow the typing. Tab indents, Esc closes.
+function editCode(node) {
+  document.querySelector(".kks-code")?.remove();
+  const w = name => node.widgets?.find(q => q.name === name), field = w("code");
+  if (!field) return;
+  const post = (path, body) => api.fetchApi(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const state = () => ({ preset: String(w("preset")?.value || ""), code: String(field.value || ""), controls: String(w("controls")?.value || "") });
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const paper = dark ? "#141414" : "#ffffff", ink = dark ? "rgba(255,255,255,.88)" : "rgba(0,0,0,.85)", line = dark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.12)";
+  const el = (tag, css, text) => { const q = document.createElement(tag); if (css) q.style.cssText = css; if (text != null) q.textContent = text; return q; };
+  const pillCss = `all:unset;cursor:pointer;padding:4px 12px;border-radius:999px;border:1px solid ${line};white-space:nowrap;text-transform:lowercase`;
+  const box = el("div", `position:fixed;z-index:10045;left:4vw;top:6vh;width:92vw;height:86vh;min-width:520px;min-height:320px;max-width:98vw;max-height:96vh;resize:both;overflow:hidden;
+    background:${paper};color:${ink};border:1px solid ${line};border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.4);box-sizing:border-box;display:flex;flex-direction:column;font:400 12px/1.35 ${FONT}`);
+  box.className = "kks-code";
+  const head = el("div", "display:flex;gap:8px;align-items:baseline;padding:12px 14px 8px;cursor:move;user-select:none");
+  const sub = el("span", "opacity:.55;flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
+  const shut = el("button", "all:unset;cursor:pointer;opacity:.6;padding:0 4px;font-size:16px;line-height:1", "×"); shut.title = "Close (Esc). The code stays in the node.";
+  head.append(el("b", "font-weight:600;font-size:13px;text-transform:lowercase", "the code"), sub, shut);
+  const mid = el("div", "display:flex;gap:12px;flex:1 1 auto;min-height:0;padding:0 14px");
+  const nums = el("pre", `margin:0;padding:10px 6px 10px 0;width:38px;flex:0 0 auto;text-align:right;opacity:.35;overflow:hidden;font:12px/1.5 ui-monospace,Consolas,monospace;user-select:none`);
+  const area = el("textarea", `all:unset;box-sizing:border-box;flex:1 1 auto;min-width:0;height:100%;padding:10px;border:1px solid ${line};border-radius:10px;white-space:pre;overflow:auto;
+    font:12px/1.5 ui-monospace,Consolas,monospace;tab-size:4;background:${dark ? "#1b1b1d" : "#faf9f8"};color:inherit`);
+  area.spellcheck = false; area.wrap = "off"; area.value = String(field.value || "");
+  area.placeholder = "A shader from shadertoy.com (click into its code, Ctrl+A, Ctrl+C, paste here), or your own. Empty = the preset is used.";
+  const side = el("div", "flex:0 0 340px;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:auto");
+  const pic = el("img", `display:block;width:100%;aspect-ratio:16/9;border-radius:10px;background:${dark ? "#2c2c2e" : "#e9e6e3"};object-fit:cover`); pic.alt = "";
+  const says = el("div", "white-space:pre-wrap;overflow-wrap:anywhere");
+  const names = el("div", "opacity:.55;white-space:pre-wrap;margin-top:auto",
+    "names a shader can use here\nkUV  the place, 0-1 · kLoop  0-1 over the clip\niChannel0-3  your pictures · kMask(uv) · kField(uv)\nkLevel kLow kMid kHigh kBeat  the sound\nuniform float glow; // 0.5 0 1   a slider\nuniform vec3 ink; // #f18a58   a colour");
+  side.append(pic, says, names);
+  mid.append(nums, area, side);
+  const foot = el("div", `display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 14px 12px`);
+  const fromPreset = el("button", pillCss, "start from the preset"); fromPreset.title = "Replaces what is here with the code of the preset that is picked on the node.";
+  const clear = el("button", pillCss, "empty (use the preset)"); clear.title = "Empties the code: the node draws the preset again.";
+  const tune = el("button", pillCss, "adjust"); tune.title = "The sliders and colours of this code, and 'save as my preset'.";
+  const done = el("button", pillCss + `;background:${ORANGE};border-color:${ORANGE};color:#fff;margin-left:auto`, "done");
+  foot.append(fromPreset, clear, tune, done);
+  box.append(head, mid, foot);
+
+  let seq = 0, timer = null, url = null;
+  const lines = () => { nums.textContent = Array.from({ length: area.value.split("\n").length }, (_, i) => i + 1).join("\n"); nums.scrollTop = area.scrollTop; };
+  async function look() {                              // what the node makes of it: a picture, or what is wrong and on which line
+    const mine = ++seq, s = state();
+    try {
+      const j = await (await post("/kubakub/shader/translate", s)).json();
+      if (mine !== seq || !box.isConnected) return;
+      sub.textContent = s.code.trim() ? "your code" : `empty: the node draws the preset '${s.preset}'`;
+      if (j.error) { says.style.color = ORANGE; says.textContent = "cannot run: " + j.error; return; }
+      const r = await post("/kubakub/shader/look", { ...s, moving: true });
+      if (mine !== seq || !box.isConnected) return;
+      if (!r.ok) { says.style.color = ORANGE; says.textContent = "cannot run:\n" + (await r.text()); return; }
+      const next = URL.createObjectURL(await r.blob()); pic.src = next; if (url) URL.revokeObjectURL(url); url = next;
+      const reads = (j.channels || []).map(i => "image" + i).join(", "), cs = [...new Set((j.controls || []).map(c => c.colour || c.name.replace(/_$/, "")))];
+      says.style.color = "inherit";
+      says.textContent = "it runs" + (reads ? " · reads " + reads : "") + (cs.length ? "\ncontrols: " + cs.join(", ") : "") + ((j.notes || []).length ? "\n" + j.notes.join("\n") : "");
+    } catch (e) { if (mine === seq) { says.style.color = ORANGE; says.textContent = "the server did not answer"; } }
+  }
+  const put = v => { field.value = v; field.callback?.(v); node.setDirtyCanvas(true, true); };
+  const typed = () => { lines(); put(area.value); clearTimeout(timer); timer = setTimeout(look, 500); };
+  area.oninput = typed;
+  area.onscroll = () => { nums.scrollTop = area.scrollTop; };
+  area.onkeydown = e => {
+    if (e.key === "Tab") { e.preventDefault(); const a = area.selectionStart, b = area.selectionEnd; area.setRangeText("    ", a, b, "end"); typed(); }
+  };
+  fromPreset.onclick = async () => {
+    try { const j = await (await post("/kubakub/shader/translate", { preset: state().preset })).json(); if (j.text) { area.value = j.text; typed(); area.focus(); } } catch (e) { /* the line on the right says it */ }
+  };
+  clear.onclick = () => { area.value = ""; typed(); };
+  tune.onclick = () => adjustShader(node, { getBoundingClientRect: () => ({ left: innerWidth - 560, bottom: 60, top: 60 }) });
+
+  document.body.append(box);
+  head.onpointerdown = e => {
+    if (e.target === shut) return;
+    const x0 = e.clientX - box.offsetLeft, y0 = e.clientY - box.offsetTop;
+    const move = q => { box.style.left = Math.max(0, Math.min(innerWidth - 80, q.clientX - x0)) + "px"; box.style.top = Math.max(0, Math.min(innerHeight - 40, q.clientY - y0)) + "px"; };
+    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  };
+  const key = e => { if (!box.isConnected) return; if (e.key === "Escape" && !document.querySelector(".kks-pick") && !document.querySelector(".kks-adjust")) { e.stopPropagation(); close(); } else if (box.contains(e.target)) e.stopPropagation(); };
+  const watch = setInterval(() => {                    // the field changed elsewhere (show the code, save as my preset): show that
+    if (!box.isConnected || !node.graph) return close();
+    const v = String(field.value || "");
+    if (v !== area.value && document.activeElement !== area) { area.value = v; lines(); look(); }
+  }, 500);
+  function close() { clearInterval(watch); clearTimeout(timer); box.remove(); document.removeEventListener("keydown", key, true); if (url) URL.revokeObjectURL(url); }
+  shut.onclick = close; done.onclick = close;
+  document.addEventListener("keydown", key, true);
+  lines(); look(); area.focus();
 }
 
 // A read-only text widget shows its label and no value, so the sentence is the label; all of it is in the tooltip.
@@ -373,6 +467,11 @@ app.registerExtension({
       line.serialize = false; line.disabled = true;
       line.tooltip = DRAWS_TIP;
       // neither is saved (serialize = false), so saved workflows keep their values; they sit right under `preset`
+      const big = this.addWidget("button", "big code", null, () => editCode(node), { serialize: false });
+      big.label = "open the code in a big window";
+      big.tooltip = "The code field is small: this opens it in a large window you can resize, with line numbers, a picture of what it draws and the line that says what is wrong. Empty code = the preset is used.";
+      big.serialize = false;
+      { const c = this.widgets.find(q => q.name === "code"); this.widgets.splice(this.widgets.indexOf(big), 1); this.widgets.splice(this.widgets.indexOf(c) + 1, 0, big); }
       for (const w of [line, adjust, button]) { this.widgets.splice(this.widgets.indexOf(w), 1); this.widgets.splice(this.widgets.indexOf(preset) + 1, 0, w); }
       for (const name of ["preset", "code"]) { const w = this.widgets.find(q => q.name === name); if (!w) continue;
         const cb = w.callback; w.callback = function () { const r = cb?.apply(this, arguments); check(node); return r; };

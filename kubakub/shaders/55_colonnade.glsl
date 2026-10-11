@@ -1,5 +1,6 @@
 // about: an endless walk between two rows of columns under an open sky; the sun lays their shadows across the floor. Raymarched. Loops without a jump. Writes a depth.
 // type: space
+// arrow: centre
 uniform float bays;       // 2 1 8       columns you pass in one loop
 uniform float width;      // 1.5 0.8 4   how far the rows stand apart
 uniform float thick;      // 0.22 0.08 0.45 how thick a column is

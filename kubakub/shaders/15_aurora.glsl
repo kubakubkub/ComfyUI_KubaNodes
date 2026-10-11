@@ -1,9 +1,11 @@
 // about: curtains of northern light swaying across the top. Loops without a jump.
 // type: pattern
+// arrow: up
 uniform float height;     // 0.6 0.1 1    how far down the curtains hang
 uniform float folds;      // 3 0.5 12     how many folds across
 uniform float sway;       // 1.2 0 6      how far they move in one loop
 uniform float green;      // 0.6 0 1      0 = violet, 1 = green
+uniform vec3 colour_b;    // #f18a58   the warm colour
 float hash(vec3 p) {
     p = fract(p * vec3(0.1031, 0.1030, 0.0973));
     p += dot(p, p.yxz + 33.33);
@@ -34,7 +36,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float t = kLoop * sway;
     float v = mix(curtain(uv, t), curtain(uv, t - sway), kLoop);
     vec3 a = mix(vec3(0.63, 0.35, 0.95), vec3(0.2, 1.0, 0.55), green);
-    vec3 b = mix(vec3(0.95, 0.54, 0.35), vec3(0.5, 0.4, 1.0), green);
+    vec3 b = mix(colour_b, vec3(0.5, 0.4, 1.0), green);
     vec3 col = vec3(0.01, 0.015, 0.04) + mix(b, a, smoothstep(0.3, 1.0, uv.y)) * v * 1.6;
     fragColor = vec4(col * kMask(uv), 1.0);
 }

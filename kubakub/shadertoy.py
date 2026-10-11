@@ -78,6 +78,8 @@ uniform float kDepthOut;                          // 1 when the node asks for th
 layout(location = 0) out vec4 kOut;
 float kDepth = 0.0;                               // how near this pixel is, 0 far to 1 near: a shader that knows writes it
 vec2 kShift = vec2(0.0);                          // pixels this pixel draws away from itself (set before the shader runs)
+#define K_ARROW 0
+bool kFree = false;                               // the shader draws in a frame of its own (see kStart): masks stay where they are
 #define kUV ((gl_FragCoord.xy + kShift) / iResolution.xy)
 #define kFrom vec2(kAx, kAy)
 #define kTo vec2(kBx, kBy)
@@ -93,10 +95,20 @@ float kField(vec2 uv) {                           // 0 at the arrow's start, 1 a
     }
     return texture(kFieldTex, uv).r;
 }
-float kMask(vec2 uv) { return texture(kFieldTex, uv).g; }
+float kMask(vec2 uv) { return texture(kFieldTex, kFree ? gl_FragCoord.xy / iResolution.xy : uv).g; }
 vec4 kPrev(vec2 uv) { return texture(kPrevTex, uv); }
 void kStart() {                                   // red pushes sideways, green up and down; mid grey pushes nowhere
     if (kBend != 0.0) kShift = (texture(kMixTex, gl_FragCoord.xy / iResolution.xy).rg - 0.5) * 2.0 * kBend * iResolution.y;
+    if (K_ARROW > 0 && kVector > 0.5) {           // a preset with an '// arrow:' line: a drawn arrow moves or turns its whole frame
+        vec2 p = gl_FragCoord.xy, c = 0.5 * iResolution.xy, r = p - c, q = p;
+        if (K_ARROW == 1) q = p - (kFrom * iResolution.xy - c);      // centre: its middle sits at the arrow's start
+        else {                                    // up / right: what rose now runs along the arrow, or what ran to the right does
+            vec2 d = kDir, e = K_ARROW == 2 ? vec2(d.y, -d.x) : d;
+            q = c + vec2(dot(r, e), dot(r, vec2(-e.y, e.x)));
+        }
+        kShift += q - p;
+        kFree = true;
+    }
 }
 void kFinish() {                                  // on the GPU: 0-1, and the picture cut to the mask when the node asks
     kOut = min(max(kOut, 0.0), 1.0);
@@ -541,12 +553,17 @@ def translate(code: str) -> Translated:
         at = _MAIN.search(_no_comments(body))          # the real one, not a 'void main(' in a comment
         body = body[:at.start()] + "void kUserMain(" + body[at.end():]
     body, picked = _colours(body)
+    turns = arrow_mode(code)
+    if turns:
+        head = head.replace("#define K_ARROW 0", f"#define K_ARROW {turns}")
     source = head + picked + helpers(body) + "#line 1\n" + body + "\n" + (FOOTER_TOY if kind == "shadertoy" else FOOTER_GLSL)
 
     used = _no_comments(body)
     channels = [i for i in range(CHANNELS) if re.search(rf"\b(?:iChannel|u_image){i}\b", used)]
     uses = {n for n in ("iMouse", "iDate", "kLoop", "kLevel", "kLow", "kMid", "kHigh", "kBeat", "kBeats", "kField", "kMask", "kPrev", "kDepth", *VECTOR)
             if re.search(rf"\b{n}\b", used)}
+    if turns:
+        uses.add("kVector")                           # it follows a drawn arrow, with its whole frame
     if "iMouse" in uses:
         notes.append("iMouse is used: there is no mouse here, it reads as never pressed (0, 0, 0, 0)")
     optional = {int(n) for n in re.findall(r"image(\d)", " ".join(re.findall(r"^//\s*optional:(.*)$", code, flags=re.M)))}
@@ -732,6 +749,17 @@ def preset_code(name: str) -> str:
 def shader_text(preset="", code="") -> str:
     """Pasted code when there is any, else the preset's."""
     return code if (code or "").strip() else preset_code(preset)
+
+
+ARROW_MODES = {"centre": 1, "up": 2, "right": 3}
+
+
+def arrow_mode(code: str) -> int:
+    """The '// arrow: centre | up | right' line of a shader that has no use of its own for a drawn arrow: the arrow
+    then moves its middle to the arrow's start (centre), or turns the whole picture so that what rises (up) or what
+    runs to the right (right) runs along the arrow. 0 = no such line."""
+    m = re.search(r"^//\s*arrow:\s*(\w+)", code, flags=re.M)
+    return ARROW_MODES.get(m.group(1), 0) if m else 0
 
 
 def sample_field(code: str) -> bool:

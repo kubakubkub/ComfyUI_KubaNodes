@@ -329,6 +329,24 @@ if gpu:
     check("colour: a picked colour is what the node draws, and the report names it", float(_red[0][..., 1].max()) < 0.02 and float(_red[0][..., 0].max()) > 0.5
           and float(_alone[0][..., 1].max()) > 0.3 and "colour_a = #ff0000" in _red[5] and "colour_a_r" not in _red[5])
 
+    # ---- a drawn arrow and the presets that have no direction of their own
+    _still = lambda n, **kw: ns.KUBA_Shader.execute(n, width=64, height=48, fps=5.0, seconds=0.2, **kw).result      # noqa: E731
+    _f0, _fr, _fu = _still("fire"), _still("fire", vector="0.2, 0.5, 0.8, 0.5"), _still("fire", vector="0.5, 0.9, 0.5, 0.1")
+    check("arrow: fire burns along a drawn arrow (to the right: bright on the left), upwards it is as without one",
+          float(_fr[0][0, :, :8].mean()) > 0.6 and float(_fr[0][0, :, -8:].mean()) < 0.1 and float(_f0[0][0, -6:].mean()) > 0.6 and float(_f0[0][0, :6].mean()) < 0.1
+          and torch.allclose(_fu[0], _f0[0], atol=2e-2) and "the shader follows it" in _fr[5])
+    _s0, _s1 = _still("starfield"), _still("starfield", vector="0.5, 0.5, 0.9, 0.5")
+    _s2 = _still("starfield", vector="0.25, 0.5, 0.9, 0.5")
+    check("arrow: the stars fly out of the arrow's start (its middle moves there)", torch.allclose(_s1[0], _s0[0], atol=1e-4)
+          and torch.allclose(_s2[0][0, :, :48], _s0[0][0, :, 16:], atol=1e-4) and not torch.allclose(_s2[0], _s0[0], atol=1e-2))
+    _mk0 = torch.zeros((1, 48, 64)); _mk0[:, :, :20] = 1.0
+    _fm = _still("fire", vector="0.2, 0.5, 0.8, 0.5", mask=_mk0)
+    check("arrow: a mask stays where it is while the picture turns", float(_fm[0][0, :, 20:].max()) == 0.0 and torch.allclose(_fm[0][0, :, :20], _fr[0][0, :, :20], atol=1e-4))
+    _marked = {n: st.arrow_mode(st.preset_code(n)) for n in names}
+    check("arrow: every pattern and 3D scene does something with an arrow", all(st.translate(st.preset_code(n)).follows for n in names if by[n] in ("pattern", "space"))
+          and _marked["fire"] == 2 and _marked["starfield"] == 1 and _marked["clouds"] == 3 and _marked["stripes"] == 0
+          and st.arrow_mode("// arrow: sideways") == 0 and "#define K_ARROW 0" in st.translate(TOY).source and "kVector" not in st.translate(TOY).uses)
+
     check("what a preset reads and gives, in words for the picker", ns.preset_tags("cartoon") == ["your picture"] and ns.preset_tags("plasma") == []
           and ns.preset_tags("slit scan") == ["a clip", "node only"] and "gives a depth" in ns.preset_tags("melting forms")
           and ns.preset_tags("facade relief") == ["your picture", "a depth pass", "gives a depth"] and "a normal pass" in ns.preset_tags("glass")

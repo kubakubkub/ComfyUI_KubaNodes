@@ -1,5 +1,6 @@
 // about: a honeycomb whose cells light up one after another. Loops without a jump; a beat can flash them.
 // type: pattern
+// arrow: right
 uniform float cells;      // 10 2 60     cells across the picture height
 uniform float gap;        // 0.08 0 0.5  the dark line between cells
 uniform float lit;        // 0.35 0.05 1 how many cells are lit at once

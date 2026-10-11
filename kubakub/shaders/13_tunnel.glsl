@@ -1,5 +1,6 @@
 // about: a flight through a striped tunnel. Loops without a jump; a beat can flash the rings.
 // type: space
+// arrow: centre
 uniform float rings;      // 3 1 12      rings passing in one loop
 uniform float segments;   // 12 2 48     stripes around the tunnel
 uniform float twist;      // 0.5 -3 3    how much the stripes spiral

@@ -1,5 +1,6 @@
 // about: bars that jump with the music: lows on the left, highs on the right. Needs a sound (a built-in beat without one).
 // type: pattern
+// arrow: up
 uniform float bars;       // 24 3 120    how many bars
 uniform float gap;        // 0.2 0 0.8   space between bars
 uniform float mirror;     // 1 0 1       1 = bars grow from the middle line, 0 = from the bottom

@@ -5,6 +5,8 @@ uniform float soft;       // 0.5 0 1      0 = hard edges, 1 = a soft glow
 uniform float bands;      // 1 1 12       how many bands run at once
 uniform float beat;       // 0 0 1        how much brighter it gets on a beat
 uniform float warm;       // 0.5 0 1      0 = violet, 1 = orange
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = kUV;
@@ -15,7 +17,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float hw = width * 0.5 / n;
     float v = 1.0 - smoothstep(hw * (1.0 - soft), hw + 1e-4, d);
     v *= 1.0 + beat * kBeat;
-    vec3 col = mix(vec3(0.63, 0.53, 0.72), vec3(0.95, 0.54, 0.35), warm);
+    vec3 col = mix(colour_a, colour_b, warm);
     col = mix(col, vec3(1.0), v * v * 0.6) * v * kMask(uv);
     fragColor = vec4(col, 1.0);
 }

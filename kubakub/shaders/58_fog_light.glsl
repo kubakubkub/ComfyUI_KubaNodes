@@ -1,5 +1,6 @@
 // about: a beam of light swinging through drifting fog, like a projector in a hazy hall. Raymarched through the fog. Loops without a jump; a sound brightens the beam.
 // type: space
+// arrow: centre
 uniform float density;    // 0.6 0.05 1.5 how thick the fog is
 uniform float scale;      // 1.4 0.4 5   bigger = finer banks of fog
 uniform float beam;       // 1 0 3       how bright the beam is

@@ -1,10 +1,13 @@
 // about: slow folding smoke: noise warped by noise. Loops without a jump.
 // type: pattern
+// arrow: right
 uniform float scale;      // 3 0.5 20   how many folds across the picture
 uniform float warp;       // 1.2 0 4    how strongly it folds
 uniform float drift;      // 1.5 0 8    how far it moves in one loop
 uniform float contrast;   // 1.4 0.5 4
 uniform float sound;      // 0 0 2      the low end of the sound pushes the folds
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 
 float hash(vec3 p) {
     p = fract(p * vec3(0.1031, 0.1030, 0.0973));
@@ -37,7 +40,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float t = kLoop * drift;
     float v = mix(smoke(p, t), smoke(p, t - drift), kLoop);      // the end fades into the start: a loop
     v = pow(clamp(v * 1.3, 0.0, 1.0), contrast);
-    vec3 col = mix(vec3(0.05, 0.03, 0.09), vec3(0.63, 0.53, 0.72), smoothstep(0.1, 0.6, v));
-    col = mix(col, vec3(0.95, 0.54, 0.35), smoothstep(0.5, 0.9, v));
+    vec3 col = mix(vec3(0.05, 0.03, 0.09), colour_a, smoothstep(0.1, 0.6, v));
+    col = mix(col, colour_b, smoothstep(0.5, 0.9, v));
     fragColor = vec4(col * kMask(kUV), 1.0);
 }

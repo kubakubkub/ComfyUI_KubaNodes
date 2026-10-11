@@ -1,5 +1,6 @@
 // about: an endless flight over a glowing grid towards a striped sun. Loops without a jump; a beat can flash the lines.
 // type: space
+// arrow: centre
 uniform float horizon;    // 0.5 0.1 0.9  where the horizon sits, 0 = bottom, 1 = top
 uniform float lanes;      // 1.5 0.3 8    how wide the squares are (more = smaller)
 uniform float speed;      // 4 1 24       squares that pass in one loop

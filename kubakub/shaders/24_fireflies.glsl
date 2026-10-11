@@ -1,5 +1,6 @@
 // about: small lights wandering in the dark, each on its own path. Loops without a jump.
 // type: pattern
+// arrow: right
 uniform float count;      // 40 1 120    how many lights
 uniform float size;       // 0.02 0.002 0.1
 uniform float wander;     // 0.12 0 0.5  how far each one roams

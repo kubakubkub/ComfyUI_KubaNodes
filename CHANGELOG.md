@@ -61,7 +61,7 @@ may have changed since.
   same as a relief lit from the side on your picture, and it as masks. With a picture of the bare wall on
   `wall_image` the forms bring their colours with them as they come out. Nothing connected runs a sample.
   Example `height_animate.json`.
-- **The same in the kubakub director.** An image layer can be read as a height map: inspector → **height** →
+- **The same in the kubakub director.** An image layer can be read as a height map: inspector â†’ **height** â†’
   grows all together, peaks first or built up in layers. *grown* takes keyframes and behaviours, so the forms
   come out of the wall on the timeline or with the sound. Look: the height as grey, a relief lit from the side,
   or shading (white on the flat wall, for blend multiply over the picture under it). The window and the render
@@ -102,8 +102,16 @@ may have changed since.
   what a preset reads (picture, clip) or gives (depth), and the line at the bottom says what it draws. The names
   are the same, so saved workflows and compositions open as before. A preset file names its type in a
   `// type:` line.
+- **A drawn arrow works on every pattern and 3d scene.** On kubakub shader (and on a shader fill in the director)
+  an arrow used to do nothing with fire, starfield, clouds and 22 other presets. Now what rises runs along the
+  arrow (fire, aurora, sound bars), what drifts or lies sideways turns to it (clouds, warped noise, flow lines ...),
+  and what has a middle moves it to the arrow's start (starfield, tunnel, spiral, the 3d scenes); light rays start
+  at its start. A mask stays where it is. Your own code can say `// arrow: up`, `right` or `centre`.
+- **The code in a big window.** `open the code in a big window` under the `code` field of kubakub shader (and
+  **show the code** in adjust): a large, resizable editor with line numbers, a picture of what the code draws as
+  you type, and the line that says what is wrong.
 - **Colours to pick.** A shader can have colours as controls: `uniform vec3 ink; // #f18a58`. In **adjust** and in
-  the director's inspector a colour is a swatch; in `controls` it is `ink = #2040ff`. 37 presets that were drawn
+  the director's inspector a colour is a swatch; in `controls` it is `ink = #2040ff`. 43 presets that were drawn
   in the pack's lavender and orange now have these two as `colour_a` and `colour_b`, so their look is yours.
 - **Twelve new presets, type "grade and lens"** (71 in all): blur, motion blur, zoom blur, grade (exposure,
   contrast, saturation, warmth, black and white point), duotone (two colours of your choice), vignette (with film
@@ -374,7 +382,7 @@ Security, after a review of the published code:
 - **Publish action:** pinned to a commit, read-only permissions.
 
 Fixes:
-- Folders with characters outside the Windows code page (a user name like Zażółć): scene render stopped, the
+- Folders with characters outside the Windows code page (a user name like ZaÅ¼Ã³Å‚Ä‡): scene render stopped, the
   director showed no pictures, ID passes were not written. All image files go through `kubakub/imio.py` now.
 - The director's `regions` output keeps the scope of the regions it got.
 - regions from sam3: an object under `min_area` no longer removes every other object with the same name.
@@ -700,7 +708,7 @@ Fixes:
   and holes are text fields with suggestions (names, group:NAME, wildcards) instead of dropdowns.
 - kubakub director window: autosave (a draft 2.5 s after each change, paint layers uploaded, in ComfyUI's user data
   user/default/kubakub_director/drafts and in the node); on opening a newer, unapplied draft is offered
-  ("continue where you left off?"); apply clears it. 'file' menu: save as… (Ctrl S) / open… named compositions
+  ("continue where you left off?"); apply clears it. 'file' menu: save asâ€¦ (Ctrl S) / openâ€¦ named compositions
   (user/default/kubakub_director/compositions), export / import as a .kubakub.json file.
 - Robustness: kubakub scene render and kubakub director run again when their cache in ComfyUI/temp is gone (every
   ComfyUI start empties temp - a second instance started on the same install deleted a running session's scene
@@ -708,7 +716,7 @@ Fixes:
 - Director: clip to / holes use an own region picker. The browser suggestion list only offered entries matching the
   current value, so once a region was set no other could be chosen. The picker lists every group and region (current
   one highlighted), filters as you type, arrow keys + Enter pick, Escape restores; typed patterns (W_F1_*) still work.
-- kubakub director: light layers (+ layer → light, Shift L). A Cycles relight of the connected scene as a layer:
+- kubakub director: light layers (+ layer â†’ light, Shift L). A Cycles relight of the connected scene as a layer:
   HDRI environment, point / area / spot / sun lamps dragged on the facade (double click adds one), glow from layers
   or regions, clay / roughness, outside black / environment / transparent. Previews render in the window through
   POST /kubakub/director/relight (~3 s at 800 px); apply renders at full size. Relight core shared with kubakub scene
@@ -717,7 +725,7 @@ Fixes:
   (large matrices got full-size or oversized canvases); dialogs get their keys (Esc no longer closes the window
   behind them, Enter saves); a paste without an image no longer pastes nodes into the graph; hover highlights no
   longer fill memory; undo shares unchanged paint pixels; drawing coalesced per frame and layer thumbnails cached;
-  duplicated director nodes no longer share a draft; deleted node inputs stay deleted (+ layer → bring back);
+  duplicated director nodes no longer share a draft; deleted node inputs stay deleted (+ layer â†’ bring back);
   late background removal answers are dropped; selectors in the window follow the plan syntax (',' or, space and,
   '!', tag:, region:3-7); region boxes scaled when the regions have another size; pointer cancel ends drags;
   sliders no longer swallow shortcuts; a pending draft is saved on close; the remove_bg route reuses its mask.
@@ -744,13 +752,13 @@ Fixes:
   frames once; frames are read from disk on demand (nodes_scene3d.relight_sequence).
 - Director timeline T4, sound: load / drop an audio file (input/kuba_director), waveform row, playback in sync
   (Web Audio is the clock), beat detection in the window (onset envelope, autocorrelation tempo with octave check,
-  least-squares phase; tested 90-174 bpm within 1.5 bpm / 10 ms), bpm field, ÷2 / ×2, "beat here", bar.beat readout;
+  least-squares phase; tested 90-174 bpm within 1.5 bpm / 10 ms), bpm field, Ã·2 / Ã—2, "beat here", bar.beat readout;
   markers (M, drag, rename, delete); snapping of scrub / keyframes / markers to beats, markers and keys (Ctrl =
   free). New director output 'audio' (core AUDIO, trimmed / padded to the timeline, offset and gain; silence
   without a sound), appended after frames / fps.
 - Timeline T3, LTX in the director: layers get 'video' (on, prompt, t_start, t_end, motion) -> plan rules
   animate / video_prompt / t_start / t_end / motion (render.rules_text; tests). Window: 'animate (ltx)' section with
-  from / to (here = playhead), motion, the range drawn in the timeline, ' · ltx' in the layer list.
+  from / to (here = playhead), motion, the range drawn in the timeline, ' Â· ltx' in the layer list.
 - kubakub region video sampler: 12 GB safe - stage1_mp default 0.2, new stage2_max_mp (0.6) caps the x2 second
   stage, VRAM freed between stages / before decoding; new optional 'background' video (e.g. the director's frames):
   each clip covers its t_start..t_end, starts from that background frame, is pasted into those frames only.
@@ -758,7 +766,7 @@ Fixes:
   director sequence + LTX 215 s.
 - Example workflow example_workflows/director_video_ltx.json (director timeline -> plan -> LTX sampler -> Create Video + sound -> Save).
 - Scene render: architecture passes elements (windows, window_frames, columns, cornices, relief, wall, roof),
-  sections (left / centre / right at the wall steps) and floors (ground_floor, floor_1 …, roof), from the pixels'
+  sections (left / centre / right at the wall steps) and floors (ground_floor, floor_1 â€¦, roof), from the pixels'
   3D data (scene3d/architecture.py, synthetic test in test_scene3d). Default passes start with them. 3200x2160 test facade: 27
   windows (arcade split per arch), left / centre / right exactly at the avant-corps, 3 floors + roof.
 - Director: the clip to / holes picker lists groups, tags (sections, floors, other tag passes) and combinations
@@ -882,7 +890,7 @@ Fixes:
   window vs render within 1/255 for blur, sharpen and glow; grain matches in strength and size, seeded per frame).
   scale_doc now also scales effect distances and shape feathers for the smaller sequence render (the feather was not
   scaled before). Tests: tests/test_fx.py (11 checks), ui_test_fx.py (7 checks).
-- Director video: reverse per piece (panel switch, ◀ on the clip bar): plays from out to in (a hold keeps 'in', a loop
+- Director video: reverse per piece (panel switch, â—€ on the clip bar): plays from out to in (a hold keeps 'in', a loop
   replays backwards, the sound backwards too); the window steps frame by frame for backwards pieces (browsers cannot
   play backwards); cutting a backwards piece keeps both halves backwards. media.py source_time / layer_audio,
   window mediaTime twin; test_media +4, ui_test_video_layers 16 checks.
@@ -923,7 +931,7 @@ Fixes:
   (cycle / pingpong / continue); any numeric animatable value plus position (x y) and scale (% about the centre);
   range, fade, on / off, several add up. kuba_regions/director/motion.py and its twin in the window (integer hash
   noise, bit-identical); render.animate applies them per frame, the still render at the playhead. Window: inspector
-  "behaviours" section with presets (wiggle, breathe, orbit, sway, spin, drift, flicker, pulse …), timeline rows
+  "behaviours" section with presets (wiggle, breathe, orbit, sway, spin, drift, flicker, pulse â€¦), timeline rows
   with a wave over each behaviour's range, dashed loops; the saved document keeps the rest values (a drag moves the
   rest), undo / duplicate copy them. tests/test_motion.py runs the same 56 cases through Python and the window's
   code (node.js); ui_test_motion.py (11 checks, node render = window within 1.5 px).
@@ -975,7 +983,7 @@ Fixes:
   is wider on big screens and can be dragged wider / narrower; the timeline can be dragged taller (double click a
   handle resets it; sizes are kept per browser); undo / redo are icons and the draft stamp hides below 1440 px, so
   the top bar fits one line at 1280; effects show only the ones in use, "+ effect" adds blur / sharpen / glow /
-  grain as groups with clear labels (strength, radius, threshold …) and × removes one; behaviour fields accept 0,5
+  grain as groups with clear labels (strength, radius, threshold â€¦) and Ã— removes one; behaviour fields accept 0,5
   and 0.5; only "behind" layers get a tag; the projection mask is one line until opened; no hover helper over an
   open menu; lighter slider tracks with an orange fill, lavender checkboxes; the layer drop line is right in a
   scrolled list.

@@ -1,5 +1,6 @@
 // about: light on the floor of a pool: bright moving ridges. Loops without a jump.
 // type: pattern
+// arrow: right
 uniform float scale;      // 5 1 30     how small the ripples are
 uniform float sharp;      // 6 1 20     how thin the bright lines are
 uniform float speed;      // 1 1 6      whole turns of the water in one loop

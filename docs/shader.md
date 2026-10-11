@@ -49,8 +49,15 @@ do not have to read code or type into `controls`:
   double-click the name to reset it, **reset** for all.
 - The picture is drawn by the node with nothing connected (the sample facade for presets that work on a picture),
   so it is what a queue gives.
-- **show the code** puts the preset's code into `code`, where you can change anything: colours, shapes, counts.
-  The sliders keep working on your changed code. **back to the preset** empties it again.
+- **show the code** puts the preset's code into `code` and opens it in **the big code window**, where you can
+  change anything: colours, shapes, counts. The sliders keep working on your changed code. **back to the preset**
+  empties it again.
+
+**The big code window.** The `code` field on the node is only a few lines high. **open the code in a big window**
+(the button under it) shows the code large, with line numbers; drag its corner to resize it, its head to move it.
+What you type goes into the node's `code` field. On the right the node draws what the code gives as you type, or
+says what is wrong and on which line, and lists the names a shader can use. **start from the preset** loads the
+picked preset's code, **adjust** opens the sliders for it, Tab indents, Esc or **done** closes.
 - **save as my preset**: type a name and the shader, with the sliders as they stand as its new defaults, is saved
   as a preset of your own. It appears first in the `preset` list and in the picker under **my presets**, with its
   own moving picture. Saving under the same name again replaces it; **delete** removes it. A built-in preset
@@ -319,9 +326,16 @@ Setting a direction or a point in numbers is guesswork, so the node takes an **a
 
 - presets that run along the field (scan band, region contours and others that read `kField`) run from the arrow's start to its end, when no field is connected
 - **stripes**, **rain** and **pixel smear** take its direction
-- **rings**, **ripples** and **radar** start at its start
+- **rings**, **ripples**, **radar** and **light rays** start at its start; so do swirl, zoom blur, under water and mirrors
+- every other pattern and 3d scene follows it with its whole picture: what rises runs along the arrow (**fire**,
+  aurora, sound bars), what drifts or lies sideways turns to it (**clouds**, warped noise, flow lines, glitch bars
+  and the rest), and what has a middle moves its middle to the arrow's start (**starfield**: the stars fly out of
+  that point; tunnel, spiral, kaleidoscope, grid flight, corridor, colonnade, melting forms, fog light). A mask stays
+  where it is
+- the presets that redraw a picture have no use for an arrow unless listed above (the report says so)
 
-The report says whether the shader used it. Your own code reads `kFrom`, `kTo`, `kDir` and `kVector`. **kubakub mask field** takes the same arrow for its direction and radial fields, and the kubakub director has it on shader fills and on field behaviours.
+The report says whether the shader used it. Your own code reads `kFrom`, `kTo`, `kDir` and `kVector`; or it says
+in a line `// arrow: up` (or `right`, or `centre`) which way it runs by itself, and the node turns or moves it. **kubakub mask field** takes the same arrow for its direction and radial fields, and the kubakub director has it on shader fills and on field behaviours.
 
 ## Pasting a Shadertoy
 

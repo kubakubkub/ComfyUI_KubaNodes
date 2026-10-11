@@ -1,5 +1,6 @@
 // about: jumping digital bars and blocks, a broken signal. Loops; the highs of a sound add more.
 // type: pattern
+// arrow: right
 uniform float rows;       // 24 2 200    rows of bars
 uniform float amount;     // 0.35 0 1    how many bars are lit
 uniform float steps;      // 16 1 120    how many times the picture changes in one loop

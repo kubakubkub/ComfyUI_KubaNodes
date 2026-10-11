@@ -1,5 +1,6 @@
 // about: frames within frames within frames: an endless zoom into the wall. Loops without a jump.
 // type: pattern
+// arrow: centre
 uniform float depth;      // 2 1 6       frames you pass in one loop (whole numbers, x 2)
 uniform float gap;        // 1.6 1.15 4  how much bigger each frame is than the one inside it
 uniform float border;     // 0.18 0.02 0.6 how thick a frame is
