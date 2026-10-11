@@ -61,7 +61,7 @@ Masks that move: *mask field* turns the windows into a grey ramp, *mask animate*
 
 ![masks running over the windows of a facade, and the same on the facade](docs/images/masks.gif)
 
-*kubakub shader* draws moving pictures on the graphics card: 53 presets picked by their picture, or a shader pasted
+*kubakub shader* draws moving pictures on the graphics card: 59 presets picked by their picture, or a shader pasted
 from shadertoy.com (workflow shader, no AI model):
 
 ![six shader presets: clouds, grid flight, endless zoom, a facade as a wire mesh and in 8 bit, datamosh](docs/images/shader.gif)
@@ -135,7 +135,7 @@ The menu is split into **2d** (images, masks, video) and **3d** (anything that n
 | **project** | project settings (matrix size, fps, name, audience: link them into the other nodes), sample facade, sample model (the same facade as a 3D file) |
 | **2d / regions** | regions from matrix / masks (colours, line drawing, After Effects mask folders), regions from masks, regions from sam3, regions from illustrator (.ai / .pdf layers), regions to mask, regions to svg / pdf / dxf; canvas plan / to work / restore |
 | **2d / masks** | mask field (regions as a grey ramp: distance from the edge, a direction, from a point, one step per region, noise; the direction can be drawn as an arrow on the node), mask animate (a mask per frame: reveal, band, rings along a field, or move, rotate, scale, strobe, with a trail; on a ramp, sine, saw, square, random, noise or a sound; the curve is drawn on the node) |
-| **2d / shader** | shader (moving pictures and masks drawn on the graphics card: 53 presets picked by their picture: contours, wire mesh and point cloud of the building, endless travel, 8 bit and pixels, VHS tape and composite video, slit scan and datamosh, clouds, fire, a mapping grid; or paste a shader from shadertoy.com; follows a loop, a field, a mask and the sound), shader mix (two shaders and one mix value: B works on A's picture, A bends B, A cuts B in, or a fade; on a curve or with the sound) |
+| **2d / shader** | shader (moving pictures and masks drawn on the graphics card: 59 presets picked by their picture: contours, wire mesh and point cloud of the building, raymarched 3D scenes with a depth output (melting forms, a colonnade, the facade as a relief, regions extruded, light in fog), endless travel, 8 bit and pixels, VHS tape and composite video, slit scan and datamosh, clouds, fire, a mapping grid; or paste a shader from shadertoy.com; follows a loop, a field, a mask and the sound), shader mix (two shaders and one mix value: B works on A's picture, A bends B, A cuts B in, or a fade; on a curve or with the sound) |
 | **2d / sketch** | scan to line (a phone photo of a drawing, straightened and cleaned), regions from sketch (closed shapes, coloured dots as names), line overlay (your line back on the render) |
 | **2d / generate** | region plan (rules: a prompt and settings per region), region sampler (Klein, Qwen Image 2.1), seam pass, versions (a sheet of looks, ideas per region, prompt rotation, LoRAs and style images: fast numbered drafts, then the picks at full size), audience viewpoint, frame in frame (rooms and worlds behind windows) |
 | **2d / director** | kubakub director (the window), director sequence (every frame, sound), director diffuse |
@@ -209,7 +209,7 @@ One page per menu group, with every input, the rule syntax, speeds and tests:
 |---|---|
 | [regions](docs/regions.md) | regions from a matrix, a line drawing, mask folders, any masks, SAM 3, Illustrator; regions to SVG / PDF / DXF; canvas plan / to work / restore |
 | [masks](docs/masks.md) | mask field, mask animate: effects, curves, things to try |
-| [shader](docs/shader.md) | shader: the 53 presets, pasting a shader from shadertoy.com step by step, the names a shader can use, speed |
+| [shader](docs/shader.md) | shader: the 59 presets, pasting a shader from shadertoy.com step by step (also with Buffer tabs), 3D scenes (raymarching) and the depth output, the names a shader can use, speed |
 | [sketch](docs/sketch.md) | scan to line, regions from sketch, line overlay |
 | [generate](docs/generate.md) | region plan (the rule text), region sampler (Klein, Qwen Image 2.1 and its LoRAs), seam pass, audience viewpoint, frame in frame |
 | [director](docs/director.md) | the director window: layers, timeline, sound, LTX and H3 clips, diffuse, light layers, video mapping, behaviours, export |
@@ -247,6 +247,8 @@ Every group has a model-free test in `tests/`, e.g. `python_embeded\python.exe C
   signal chain of ntsc-rs (github.com/valadaptive/ntsc-rs, valadaptive), found through olegchomp's TouchDesigner
   version (github.com/olegchomp/ntsc-td). *scan modulation*: the idea of olegchomp's td-modulation
   (github.com/olegchomp/td-rnd). All three are written new as single shader passes.
+- The distance functions and smooth joins a kubakub shader can use for a 3D scene (`kubakub/shadertoy.py`, SDF):
+  Inigo Quilez, iquilezles.org/articles/distfunctions.
 - MKL colour transfer: Pitie & Kokaram 2007, as in the color-matcher library
   (github.com/hahnec/color-matcher); reimplemented in torch in `kubakub/ops.py`.
 

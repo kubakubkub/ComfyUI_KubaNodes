@@ -111,7 +111,7 @@ class KUBA_SoundMaskSwap(io.ComfyNode):
         sample_sound = audio is None
         if sample_sound:
             sr = 44100
-            wave = torch.from_numpy(so.sample_sound(8.0, sw.SAMPLE_BPM, sr))[None, None]
+            wave = torch.from_numpy(so.sample_sound(max(8.0, float(start) + float(seconds)), sw.SAMPLE_BPM, sr))[None, None]
             notes.append("no sound connected: the built-in beat is used (connect yours to 'audio')")
         else:
             wave, sr = audio["waveform"], int(audio["sample_rate"])

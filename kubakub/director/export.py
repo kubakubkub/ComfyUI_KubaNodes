@@ -134,7 +134,8 @@ class Writer:
         if wav:
             args += ["-i", wav]
         args += ["-vf", vf] + self.f["v"] + TAGS
-        args += (self.f["a"] + ["-shortest"]) if wav else ["-an"]
+        # the picture sets the length: a shorter sound is filled up with silence, a longer one is cut
+        args += (self.f["a"] + ["-af", "apad", "-shortest"]) if wav else ["-an"]
         args += [out]
         self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stderr=subprocess.PIPE,
                                      creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)

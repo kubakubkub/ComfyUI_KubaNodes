@@ -267,7 +267,7 @@ function fieldProgress(b, t, dur, ctx) {              // where the move is at t:
     if (!k) v = 0;
     else {
       const run = mEase((tt - ts[k - 1]) / cyc, easing), steps = Math.max(1, Math.trunc(mNum(b, "steps", 1)));
-      if (steps <= 1) v = run; else { const pos = (k - 1 + run) / steps, fr = pos - Math.floor(pos); v = fr < 1e-9 ? 1 : fr; }
+      if (steps <= 1) v = run; else { const pos = (k - 1 + run) / steps, fr = pos - Math.floor(pos); v = fr < 1e-9 && pos > 0 ? 1 : fr; }
     }
   } else v = curveShape(curve, (tt - s) / cyc + Math.max(0, mNum(b, "phase", 0)), easing, mNum(b, "duty", 0.5), Math.trunc(mNum(b, "seed", 1)));
   return lo + v * (hi - lo);
@@ -649,7 +649,7 @@ const CSS = `
 .kkd-tl{grid-column:2/3;grid-row:3;display:flex;flex-direction:column;gap:4px;min-width:0}
 .kkd-tlbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted)}
 .kkd-tlbar input{width:52px!important;padding:2px 6px!important}
-.kkd-tlc{width:100%;display:block;cursor:ew-resize}
+.kkd-tlc{width:100%;display:block;cursor:ew-resize;touch-action:none}
 .kkd-tlwrap{max-height:var(--kkd-th,140px);overflow-y:auto;overflow-x:hidden}
 .kkd-split{position:relative;flex:0 0 auto;touch-action:none}.kkd-split::after{content:"";position:absolute;border-radius:2px;background:var(--line);transition:background .12s}
 .kkd-split:hover::after,.kkd-split.drag::after{background:var(--lav)}
@@ -802,9 +802,9 @@ void main() { vec2 v[3] = vec2[](vec2(-1, -1), vec2(3, -1), vec2(-1, 3)); v_texC
 const SHADER_ARROW = ["kFrom", "kTo", "kDir", "kVector", "kField"];      // a shader that reads one of these follows a drawn arrow
 const SHADER_NEW = "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    vec2 uv = fragCoord / iResolution.xy;\n    float v = 0.5 + 0.5 * sin(uv.x * 20.0 + 6.2831853 * kLoop);\n    fragColor = vec4(vec3(v), 1.0);\n}\n";
 const shaderGL = {
-  gl: null, cv: null, progs: new Map(), noise: [], black: null, pic: null,
+  gl: null, cv: null, progs: new Map(), noise: [], black: null, pic: null, ramp: null, fld: null, fldId: 0,
   init() {
-    if (this.gl && this.gl.isContextLost()) { this.gl = null; this.progs.clear(); this.noise = []; this.black = this.pic = null; }   // after a GPU reset: a new one
+    if (this.gl && this.gl.isContextLost()) { this.gl = null; this.progs.clear(); this.noise = []; this.black = this.pic = this.ramp = this.fld = null; this.fldId = 0; }   // after a GPU reset: a new one
     if (this.gl !== null) return this.gl;
     this.cv = mkCanvas(2, 2);
     const gl = this.gl = this.cv.getContext("webgl2", { premultipliedAlpha: false, preserveDrawingBuffer: true, antialias: false }) || false;
@@ -822,8 +822,8 @@ const shaderGL = {
     this.black = tex(1, 1, new Uint8Array([0, 0, 0, 255]), gl.CLAMP_TO_EDGE);   // a picture nothing is connected to
     this.pic = tex(1, 1, new Uint8Array([0, 0, 0, 255]), gl.CLAMP_TO_EDGE);     // the layers below, uploaded per draw
     const ramp = new Uint8Array(256 * 4); for (let i = 0; i < 256; i++) ramp.set([i, 255, 0, 255], i * 4);   // kField = left to right, kMask = 1
-    const field = tex(256, 1, ramp, gl.CLAMP_TO_EDGE);
-    gl.activeTexture(gl.TEXTURE0 + 4); gl.bindTexture(gl.TEXTURE_2D, field);
+    this.ramp = tex(256, 1, ramp, gl.CLAMP_TO_EDGE);
+    this.fld = tex(1, 1, new Uint8Array([0, 255, 0, 255]), gl.CLAMP_TO_EDGE);   // a fill's own field (the shape's edges), uploaded when it changes
     gl.activeTexture(gl.TEXTURE0 + 5); gl.bindTexture(gl.TEXTURE_2D, this.black);              // kPrev: node only
     return gl;
   },
@@ -839,8 +839,9 @@ const shaderGL = {
     this.progs.set(src, p); return p;
   },
   // -> its canvas (use it before the next draw) or { error }. pictures[n] for iChannel n: a canvas (the layers below),
-  // "noise" or null (nothing there), as render.shader_source binds them
-  draw(src, w, h, values, pictures = []) {
+  // "noise" or null (nothing there), as render.shader_source binds them. field: { id, w, h, data } (shaderField) or
+  // null = kField runs left to right and kMask is 1
+  draw(src, w, h, values, pictures = [], field = null) {
     const gl = this.init(); if (!gl) return { error: "this browser has no WebGL 2" };
     const p = this.program(src); if (p.error) return p;
     if (this.cv.width !== w || this.cv.height !== h) { this.cv.width = w; this.cv.height = h; }
@@ -852,6 +853,10 @@ const shaderGL = {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, q); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); res.set([q.width, q.height, 1], i * 3); }
       else gl.bindTexture(gl.TEXTURE_2D, this.black);
     }
+    gl.activeTexture(gl.TEXTURE0 + 4);
+    if (field) { gl.bindTexture(gl.TEXTURE_2D, this.fld);
+      if (this.fldId !== field.id) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, field.w, field.h, 0, gl.RGBA, gl.FLOAT, field.data); this.fldId = field.id; } }
+    else gl.bindTexture(gl.TEXTURE_2D, this.ramp);
     gl.viewport(0, 0, w, h); gl.useProgram(p.prog); gl.disable(gl.BLEND);
     for (const u of p.uni) {
       const m = /^iChannel(\d)$/.exec(u.name), v = values[u.name];
@@ -1655,6 +1660,7 @@ class Director {
       body: JSON.stringify({ source: L.source }) });
     const j = await r.json().catch(() => ({ error: "no answer (" + r.status + ")" }));
     if (!r.ok || j.error) throw new Error(j.error || r.status);
+    if (this.closed) throw new Error("closed");      // the window went while the copy was made: no video is left behind
     const v = document.createElement("video");
     Object.assign(v, { muted: true, playsInline: true, preload: "auto", crossOrigin: "anonymous", loop: false });
     (this.videos ||= new Set()).add(v);              // every element this window made: paused when orphaned, released on close
@@ -2174,8 +2180,46 @@ class Director {
   shaderInput(L) {                                   // = render._shape: what the shader reads as its picture (image0)
     const sh = L.shape; return sh.input === "below" || sh.input === "noise" ? sh.input : (sh.code || "").trim() ? "noise" : "below";
   }
+  shaderFieldMode(L, info) {                         // = render._shape: what the shader reads as its field (kField, kMask)
+    const f = L.shape.field; return f === "edge" || f === "ramp" ? f : !(L.shape.code || "").trim() && info.wants_field ? "edge" : "ramp";
+  }
+  // = render.shader_field: the way from the shape's outline inwards (0 on the edge, 1 at the deepest point of every
+  // separate piece) and the shape as a mask, in the layer's box; a layer clipped to regions has those regions as pieces
+  shaderField(L, info) {
+    if (this.shaderFieldMode(L, info) !== "edge" || !(info.uses || []).some(u => u === "kField" || u === "kMask")) return null;
+    const sh = L.shape, bw = Math.max(1, Math.abs(L.w)), bh = Math.max(1, Math.abs(L.h)), s = Math.min(1, 512 / Math.max(bw, bh));
+    const fw = Math.max(2, Math.round(bw * s)), fh = Math.max(2, Math.round(bh * s)), m = L.clip && this.labels ? this.regionMask(L.clip) : null;
+    const key = JSON.stringify([sh.type, sh.type === "poly" ? sh.points : 0, fw, fh, m ? [L.clip, L.x, L.y, L.w, L.h, L.rotation, !!L.flip_h, !!L.flip_v] : 0]), e = L._fld;
+    if (e && e.key === key && e.m === m) return e;
+    const c = mkCanvas(fw, fh), g = c.getContext("2d", { willReadFrequently: true });
+    g.fillStyle = "#fff"; g.beginPath();
+    if (sh.type === "ellipse") g.ellipse(fw / 2, fh / 2, fw / 2, fh / 2, 0, 0, Math.PI * 2);
+    else if (sh.type === "poly" && (sh.points || []).length >= 3) sh.points.forEach(([u, v], i) => (i ? g.lineTo : g.moveTo).call(g, u * fw, v * fh));
+    else g.rect(0, 0, fw, fh);
+    g.fill();
+    if (m) { const k = this.k, sx = bw * k / fw * (L.flip_h ? -1 : 1), sy = bh * k / fh * (L.flip_v ? -1 : 1);   // the regions, brought into the box
+      g.globalCompositeOperation = "destination-in"; g.imageSmoothingEnabled = false;
+      g.translate(fw / 2, fh / 2); g.scale(1 / sx, 1 / sy); g.rotate(-(L.rotation || 0) * Math.PI / 180); g.translate(-(L.x + L.w / 2) * k, -(L.y + L.h / 2) * k);
+      g.drawImage(m, 0, 0); g.setTransform(1, 0, 0, 1, 0, 0); }
+    const a = g.getImageData(0, 0, fw, fh).data, n = fw * fh, seen = new Uint8Array(n), rp = [], stack = [];
+    for (let p = 0; p < n; p++) {                    // every separate piece is a region of its own
+      if (seen[p] || a[p * 4 + 3] < 128) continue;
+      const pos = []; let x0 = fw, y0 = fh, x1 = 0, y1 = 0; seen[p] = 1; stack.push(p);
+      while (stack.length) { const q = stack.pop(), x = q % fw, y = (q - x) / fw; pos.push(q);
+        if (x < x0) x0 = x; if (y < y0) y0 = y; if (x >= x1) x1 = x + 1; if (y >= y1) y1 = y + 1;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= fw || yy >= fh) continue;
+          const r = yy * fw + xx; if (!seen[r] && a[r * 4 + 3] >= 128) { seen[r] = 1; stack.push(r); } } }
+      rp.push({ id: rp.length, pos, box: [x0, y0, x1, y1] });
+    }
+    const F = fieldRamp(rp, fw, fh, { field: "edge distance", per: "each region" }, 1), data = new Float32Array(n * 4);
+    for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) { const q = y * fw + x, o = ((fh - 1 - y) * fw + x) * 4;   // GL reads rows bottom first
+      data[o] = F[q]; data[o + 1] = a[q * 4 + 3] >= 128 ? 1 : 0; data[o + 3] = 1; }
+    return (L._fld = { key, m, id: (this._fldN = (this._fldN || 0) + 1), w: fw, h: fh, data });
+  }
   shaderFill(L) {                                    // the shader at the layer's box size, or null (the colour shows)
     const info = this.shaderInfo(L); if (!info.source) return null;
+    if ((info.buffers || []).length) { if (!info.glError) { info.glError = "a Shadertoy with buffer tabs builds on its own last frames: it runs on the kubakub shader node only (bring its frames in as a video layer)";
+        note("shader: " + info.glError); setTimeout(() => { if (!this.closed) this.renderInspector(); }, 0); } return null; }
     this.shaderDefaults(L, info);
     const k = this.k, s = Math.min(1, 4096 / Math.max(1, Math.abs(L.w) * k, Math.abs(L.h) * k));
     const w = Math.max(1, Math.round(Math.abs(L.w) * k * s)), h = Math.max(1, Math.round(Math.abs(L.h) * k * s)), u = this.shaderNow(L.shape);
@@ -2193,7 +2237,7 @@ class Director {
         pictures[0] = c;
       } else if (!(info.optional || []).includes(i)) pictures[i] = "noise";
     }
-    const out = shaderGL.draw(info.source, w, h, u, pictures);
+    const out = shaderGL.draw(info.source, w, h, u, pictures, this.shaderField(L, info));
     if (out.error) { if (!info.glError) { const lines = out.error.split("\n").map(l => /ERROR:\s*\d+:(\d+):\s*(.*)/.exec(l)).filter(Boolean).map(m => `line ${m[1]}: ${m[2].trim()}`);
         info.glError = "the shader does not compile.\n" + (lines.slice(0, 6).join("\n") || out.error.trim()); note("shader: " + info.glError.split("\n").slice(0, 2).join(" "));
         setTimeout(() => { if (!this.closed) this.renderInspector(); }, 0); } return null; }
@@ -2793,6 +2837,7 @@ class Director {
       + `<div class="kkd-field" data-tip="How many times the shader runs through on the timeline (presets loop without a jump)"><span>loops</span><input type="number" data-id="sh-loops" min="1" max="1000" step="1" value="${Math.max(1, Math.round(+sh.loops || 1))}"><span></span></div>`
       + ((info.channels || []).includes(0) ? `<div class="kkd-field" data-tip="What the shader works on (its image0): the layers below this one, so it is an effect on them · or the built-in noise, which most pasted Shadertoys expect"><span>picture</span><select data-id="sh-input"><option value="below" ${this.shaderInput(L) === "below" ? "selected" : ""}>the layers below</option><option value="noise" ${this.shaderInput(L) === "noise" ? "selected" : ""}>built-in noise</option></select><span></span></div>` : "")
       + ((info.uses || []).some(u => SHADER_ARROW.includes(u)) ? `<div class="kkd-field" data-tip="Drag an arrow on the layer: the shader runs from its start to its end, takes its direction, or starts at its start (what this shader does with it is in the line above)"><span>arrow</span><span style="display:flex;gap:4px"><button class="kkd-pill" data-id="sh-vec" aria-pressed="${this.armed()?.sh === true}">${arrowOf(sh.vec) ? "redraw" : "draw"}</button>${arrowOf(sh.vec) ? `<button class="kkd-pill" data-id="sh-vecx" data-tip="Remove the arrow">clear</button>` : ""}</span><span></span></div>` : "")
+      + ((info.uses || []).includes("kField") ? `<div class="kkd-field" data-tip="The ramp the shader runs along (its field): left to right · or from the outline of the shape inwards, every separate piece for itself; a layer clipped to regions then has every region as a piece (extrude and region contours need this)"><span>field</span><select data-id="sh-fieldsrc"><option value="ramp" ${this.shaderFieldMode(L, info) === "ramp" ? "selected" : ""}>left to right</option><option value="edge" ${this.shaderFieldMode(L, info) === "edge" ? "selected" : ""}>the shape's edges</option></select><span></span></div>` : "")
       + (own ? `<div class="kkd-field" data-tip="How fast the shader's clock (iTime) runs"><span>speed</span><input type="number" data-id="sh-speed" step="0.1" value="${Number.isFinite(+sh.speed) ? +sh.speed : 1}"><span></span></div>` : "")
       + (info.controls || []).map(c => `<div class="kkd-field" data-tip="${esc(c.about || c.name)} · ${c.min} to ${c.max}, ${c.default} at the start"><span>${esc(c.name.replace(/_$/, ""))}</span><input type="range" data-shc="${esc(c.name)}" min="${c.min}" max="${c.max}" step="any" value="${num(c.name, c.default)}"><span class="v" data-shcv="${esc(c.name)}">${+num(c.name, c.default).toFixed(3)}</span></div>`).join("");
   }
@@ -2973,7 +3018,7 @@ class Director {
       ${range("exposure", "exposure", -5, 5, 0.1, R.exposure, "")}
       <div class="kkd-sub">lamps <span class="kkd-grow"></span>${["point", "area", "spot", "sun"].map(t => `<button class="kkd-pill" style="padding:2px 8px;font-size:12px" data-ladd="${t}" data-tip="Add a ${t} light${t === "sun" ? "" : " · or double click the facade for a point light"}">+ ${t}</button>`).join("")}</div>
       <div class="kkd-lights">${R.lights.map((z, i) => `<div class="kkd-lrow${z.on === false ? " off" : ""}" data-li="${i}" aria-selected="${i === this.lsel}">
-        <span class="kkd-dot" style="background:${esc(z.color || "#fff")}"></span>
+        <span class="kkd-dot" style="background:${isHex(z.color) ? z.color : "#fff"}"></span>
         <span>${esc(z.type)} <small style="color:var(--muted)">${z.type === "sun" ? `${Math.round(+z.azimuth || 0)}° / ${Math.round(+z.elevation || 0)}°` : `${(+z.x || 0).toFixed(1)} · ${(+z.height || 0).toFixed(1)} · ${(+z.distance || 0).toFixed(1)} m`}</small></span>
         <button class="kkd-eye ${z.on === false ? "" : "on"}" data-lon="${i}" data-tip="Lamp on / off"></button>
         <button class="kkd-x" data-lx="lamp" data-tip="Remove this lamp">×</button></div>`).join("") || `<div class="kkd-lstatus">no lamps: environment light only</div>`}</div>
@@ -3364,7 +3409,7 @@ class Director {
       <div class="kkd-field"><span>size</span><select data-ex="scale">${[1, 0.75, 0.5, 0.25].map(v => `<option value="${v}" ${v === x.scale ? "selected" : ""}>${v === 1 ? "delivery (matrix)" : Math.round(v * 100) + " %"}</option>`).join("")}</select><span style="color:var(--muted);font-size:12px">${x.format === "preview" ? "half of it" : W + " × " + H}</span></div>
       <div class="kkd-field"><span>alpha</span><label style="font-size:13px"><input type="checkbox" data-ex="alpha" ${x.alpha ? "checked" : ""} ${withAlpha ? "" : "disabled"}> layers only, transparent outside ${withAlpha ? "" : "(png / prores 4444)"}</label><span></span></div>
       <div class="kkd-field"><span>name</span><input type="text" data-ex="name" value="${esc(x.name)}"><span></span></div>
-      <div class="kkd-lstatus">${dur.toFixed(2)} s at ${fps} fps = ${Math.max(1, Math.round(dur * fps) + 1)} frames, Rec.709, with the timeline sound. Only this node runs (not the H3 / LTX nodes after it); the composition is saved into the node first. Into output/kubakub_director/&lt;name&gt;_&lt;time&gt;/.</div>
+      <div class="kkd-lstatus">${dur.toFixed(2)} s at ${fps} fps = ${Math.max(1, Math.round(dur * fps))} frames, Rec.709, with the timeline sound. Only this node runs (not the H3 / LTX nodes after it); the composition is saved into the node first. Into output/kubakub_director/&lt;name&gt;_&lt;time&gt;/.</div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:10px"><button class="kkd-pill accent" data-ex-go ${this.exportJob ? "disabled" : ""}>render and export</button>
       <span data-id="ex-status" class="kkd-lstatus" style="margin:0">${esc(this.exportMsg || "")}</span></div>`;
   }
@@ -3649,6 +3694,7 @@ class Director {
       else if (id === "sh-vecx") { this.snap(); const { vec, ...rest } = q.shape; q.shape = rest; this.vecDraw = null; this.renderInspector(); this.draw(); } });
     $("sh-box").addEventListener("change", e => { const q = L(), id = e.target.dataset.id; if (!q?.shape) return;
       if (id === "sh-input") { this.snap(); q.shape = { ...q.shape, input: e.target.value === "noise" ? "noise" : "below" }; this.draw(); }
+      else if (id === "sh-fieldsrc") { this.snap(); q.shape = { ...q.shape, field: e.target.value === "edge" ? "edge" : "ramp" }; this.draw(); }
       else if (id === "sh-code" && e.target.value !== q.shape.code) { this.snap(); q.shape = { ...q.shape, code: e.target.value }; this.renderInspector(); this.draw(); } });
     $("i-size").oninput = e => { L().size = +e.target.value; $("i-size-v").textContent = L().size + " px"; };
     $("i-clear").onclick = () => { this.snap(); const q = L(); q.canvas.getContext("2d").clearRect(0, 0, this.PW, this.PH); q.dirty = true; q.ver = (q.ver || 0) + 1; this.refresh();
@@ -3737,8 +3783,8 @@ class Director {
     $("tl-play").onclick = () => this.togglePlay();
     $("tl-rec").onclick = () => { this.autokey = !this.autokey; $("tl-rec").setAttribute("aria-pressed", String(this.autokey)); this.drawTimeline(); };
     $("tl-key").onclick = () => this.keyNow();
-    $("tl-dur").onchange = e => { const v = Math.min(3600, parseFloat(e.target.value)); if (v > 0 && v !== this.tl.duration) { this.snap(); this.tl.duration = v; this.setTime(this.tl.time); this.scheduleDraft(); } fillTl(); };
-    $("tl-fps").onchange = e => { const v = Math.min(120, parseInt(e.target.value, 10)); if (v > 0 && v !== this.tl.fps) { this.snap(); this.tl.fps = v; this.scheduleDraft(); } fillTl(); };
+    $("tl-dur").onchange = e => { const v = Math.max(0.5, Math.min(3600, parseFloat(e.target.value))); if (v > 0 && v !== this.tl.duration) { this.snap(); this.tl.duration = v; this.setTime(this.tl.time); this.scheduleDraft(); } fillTl(); };
+    $("tl-fps").onchange = e => { const v = Math.min(120, Math.round(parseFloat(e.target.value))); if (v > 0 && v !== this.tl.fps) { this.snap(); this.tl.fps = v; this.scheduleDraft(); } fillTl(); };
     const tlc = this.tlc; let td = null;
     const hitAt = e => {                               // a ◆ or a marker under the pointer
       const r = tlc.getBoundingClientRect(), g = this.tlGeom(), x = (e.clientX - r.left) * g.dpr, y = (e.clientY - r.top) * g.dpr;
@@ -3895,6 +3941,7 @@ class Director {
       if (eye) { this.snap(); const q = this.layers[+eye.dataset.eye]; q.visible = !q.visible; this.refresh(); return; }
       const row = e.target.closest(".kkd-layer"); if (!row) return;
       if (this.sel !== +row.dataset.i) this.segSel = null;
+      this.commitReg?.();                              // text typed into clip to / holes belongs to the layer that is left
       this.sel = +row.dataset.i; this.renderInspector(); this.draw();
       list.querySelectorAll(".kkd-layer").forEach(r => r.setAttribute("aria-selected", String(r === row)));
       ld = { from: this.sel, y0: e.clientY, row, active: false }; list.setPointerCapture(e.pointerId);
@@ -4068,8 +4115,13 @@ class Director {
         return;
       }
       if (!this.ready) { e.stopPropagation(); if (e.key === "Escape") this.close(); return; }     // still loading
-      const typing = e.target.matches?.("textarea, select, input:not([type=range]):not([type=color]):not([type=checkbox]):not([type=file])");
+      const typing = e.target.matches?.("textarea, input:not([type=range]):not([type=color]):not([type=checkbox]):not([type=file])");
       const k = e.key, ctrl = e.ctrlKey || e.metaKey;
+      if (k === "Escape" && document.querySelector(".kks-pick")) return;      // the shader pictures are open: Esc closes them, not the window
+      if (e.target.matches?.("select")) {              // a dropdown that still has the focus: its own keys are its own, any other is a shortcut again
+        if (k.startsWith("Arrow") || ["Home", "End", "PageUp", "PageDown", " ", "Enter"].includes(k)) { e.stopPropagation(); return; }
+        if (k !== "Escape" && k !== "Tab") e.target.blur();
+      }
       if (e.target.matches?.("input[type=range]") && (k.startsWith("Arrow") || ["Home", "End", "PageUp", "PageDown"].includes(k))) { e.stopPropagation(); return; }   // the slider moves
       if (typing && /^i-(clip|holes)$/.test(e.target.dataset?.id || "") && this.regKey?.(e.target, e)) { e.stopPropagation(); return; }
       if (this.tool === "poly" && (k === "Escape" || k === "Enter")) { e.stopPropagation(); e.preventDefault();
@@ -4077,9 +4129,12 @@ class Director {
       if (typing && k === "Escape") { e.stopPropagation(); e.preventDefault(); this.fillTl?.(); e.target.blur(); this.root.focus?.(); return; }   // leave the field, keep the window
       if (k === "Escape" && this.vecDraw) { e.stopPropagation(); e.preventDefault(); this.vecAbort?.(); this.vecDraw = null; this.renderInspector(); this.draw(); return; }
       if (k === "Escape") { e.stopPropagation(); const open = [this.menu, this.filemenu, this.keypop, this.outpop, this.diffpop, this.exportpop, this.clipPop].filter(Boolean).find(p => !p.hidden); if (open) open.hidden = true; else this.close(); return; }
-      if (typing) { e.stopPropagation(); if (ctrl && k === "Enter") { e.preventDefault(); this.apply(); } return; }
+      if (typing) { e.stopPropagation(); if (ctrl && k === "Enter") { e.preventDefault(); this.apply(); }
+        else if (ctrl && ["s", "o", "j"].includes(k.toLowerCase())) e.preventDefault();      // not the browser's save / open / downloads
+        return; }
       e.stopPropagation();
-      if ((k === " " || k === "Enter") && e.target.matches?.("input[type=checkbox],button,select")) return;   // the control's own key
+      if (k === "Enter" && e.target.matches?.("input[type=checkbox],button,select")) return;   // the control's own key
+      if (k === " " && e.target.matches?.("input[type=checkbox],select")) return;              // (Space on a button pans: a clicked tool keeps the focus)
       if (k === " ") { this.space = true; this.cv.style.cursor = "grab"; e.preventDefault(); return; }
       if (ctrl && k.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? this.doRedo() : this.doUndo(); return; }
       if (ctrl && k.toLowerCase() === "y") { e.preventDefault(); this.doRedo(); return; }

@@ -25,7 +25,7 @@ PREVIEW_PX, PREVIEW_FRAMES = 384, 240
 
 def _np(mask):
     m = mask.float().cpu().numpy()
-    return m[None] if m.ndim == 2 else m
+    return m.reshape((-1,) + m.shape[-2:])            # [H, W], [N, H, W] or [N, 1, H, W]
 
 
 class KUBA_MaskField(io.ComfyNode):
@@ -271,7 +271,7 @@ class KUBA_MaskAnimate(io.ComfyNode):
             mono = so.to_mono(wave)
         elif sound_curve:
             sr, sample_sound = 44100, True
-            wave = torch.from_numpy(so.sample_sound(8.0, mf.SAMPLE_BPM, sr))[None, None]
+            wave = torch.from_numpy(so.sample_sound(max(8.0, float(start) + float(seconds)), mf.SAMPLE_BPM, sr))[None, None]
             mono = so.to_mono(wave)
             notes.append("a sound curve without a sound: the built-in beat is used (connect yours to 'audio')")
         total = len(mono) / float(sr) if mono is not None else 0.0

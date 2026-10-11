@@ -194,7 +194,8 @@ def default_field(n=256) -> np.ndarray:
 # render
 # --------------------------------------------------------------------------
 
-def render(source, width, height, frames, static=None, textures=None, on_frame=None, check_interrupt=None):
+def render(source, width, height, frames, static=None, textures=None, on_frame=None, check_interrupt=None,
+           buffers=None, inputs=None):
     """
     Draw the shader once per entry of `frames`.
 
@@ -205,12 +206,17 @@ def render(source, width, height, frames, static=None, textures=None, on_frame=N
     textures   {unit: f(i) -> (key, picture)}: unit 0-3 = iChannel0-3, 4 = field and mask. The picture is uploaded
                again only when its key changes, so a still costs one upload and a clip one per frame.
     on_frame   f(i, rgba float32 [height, width, 4], top row first). The array is reused: copy what you keep.
+    buffers    the Buffer tabs of a Shadertoy (shadertoy.Pass: name, source, inputs), drawn in this order before the
+               picture at every frame. Each keeps its last picture: a tab that reads itself or a later one sees the
+               frame before, one that reads an earlier one sees this frame, as on shadertoy.com.
+    inputs     {channel: "A" - "D" | "noise" | "image0" - "image3"}: what the picture's shader reads on a channel
+               when it is not the node's picture of that number
 
     One GL context serves every thread (the director renders its frames in a pool): a render holds it under a lock
     and lets go of it at the end, so the next thread can take it.
     """
     with held() as g:
-        _render(g, source, width, height, frames, static, textures, on_frame, check_interrupt)
+        _render(g, source, width, height, frames, static, textures, on_frame, check_interrupt, buffers or [], inputs or {})
 
 
 @contextlib.contextmanager
@@ -284,12 +290,13 @@ def _program(g, source):
     return program
 
 
-def _render(g, source, width, height, frames, static, textures, on_frame, check_interrupt):
+def _render(g, source, width, height, frames, static, textures, on_frame, check_interrupt, buffers, inputs):
     gl = g.gl
     width, height = int(width), int(height)
     fbo = target = prev = None
-    tex, keys = {}, {}
+    tex, keys, sizes, extra, fbos = {}, {}, {}, [], []
     try:
+        tabs = [{"name": b.name, "program": _program(g, b.source), "inputs": b.inputs} for b in buffers]
         program = _program(g, source)
         gl.glUseProgram(program)
         feedback = gl.glGetUniformLocation(program, "kPrevTex")
@@ -318,11 +325,17 @@ def _render(g, source, width, height, frames, static, textures, on_frame, check_
             raise RuntimeError(f"kubakub shader: the graphics card refuses a {width}x{height} float picture.")
 
         locs = {}
+        now = [program]                               # the shader that is being fed
 
         def loc(name):
-            if name not in locs:
-                locs[name] = gl.glGetUniformLocation(program, name)
-            return locs[name]
+            k = (now[0], name)
+            if k not in locs:
+                locs[k] = gl.glGetUniformLocation(now[0], name)
+            return locs[k]
+
+        def use(p):
+            now[0] = p
+            gl.glUseProgram(p)
 
         def put(name, v):
             at = loc(name)
@@ -366,17 +379,58 @@ def _render(g, source, width, height, frames, static, textures, on_frame, check_
             # half float: enough for pictures, depth and normals, and every GL ES 3 card filters it
             gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA16F, pic.shape[1], pic.shape[0], 0, gl.GL_RGBA, gl.GL_FLOAT, pic)
             if unit < st.CHANNELS:
-                put(f"iChannelResolution[{unit}]", (pic.shape[1], pic.shape[0], 1.0))
+                sizes[unit] = (pic.shape[1], pic.shape[0], 1.0)
+                put(f"iChannelResolution[{unit}]", sizes[unit])
+
+        def picture(wrap=gl.GL_CLAMP_TO_EDGE, data=None, w=width, h=height):      # a float picture of the frame's size
+            t = gl.glGenTextures(1)
+            extra.append(t)
+            gl.glActiveTexture(gl.GL_TEXTURE0 + MIX_UNIT + 1)
+            gl.glBindTexture(gl.GL_TEXTURE_2D, t)
+            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA32F, w, h, 0, gl.GL_RGBA, gl.GL_FLOAT,
+                            np.zeros((h, w, 4), np.float32) if data is None else data)
+            for name, v in ((gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR), (gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR),
+                            (gl.GL_TEXTURE_WRAP_S, wrap), (gl.GL_TEXTURE_WRAP_T, wrap)):
+                gl.glTexParameteri(gl.GL_TEXTURE_2D, name, v)
+            return t
+
+        noise = []
+
+        def feed(reads):                              # the channels of the shader in use, as its tab wires them
+            for c in range(st.CHANNELS):
+                src = reads.get(c, f"image{c}")
+                if src == "noise":
+                    if not noise:
+                        noise.append(picture(gl.GL_REPEAT, np.ascontiguousarray(noise_picture(7)[::-1]), NOISE, NOISE))
+                    t, size = noise[0], (float(NOISE), float(NOISE), 1.0)
+                elif src.startswith("image"):
+                    n = int(src[5:])
+                    t, size = tex[n], sizes.get(n, (0.0, 0.0, 0.0))
+                else:
+                    t, size = next(b for b in tabs if b["name"] == src)["front"], (float(width), float(height), 1.0)
+                gl.glActiveTexture(gl.GL_TEXTURE0 + c)
+                gl.glBindTexture(gl.GL_TEXTURE_2D, t)
+                put(f"iChannelResolution[{c}]", size)
+
+        for b in tabs:                                # each tab draws into one picture while it reads its other one
+            b["front"], b["back"] = picture(), picture()
+            b["fbo"] = gl.glGenFramebuffers(1)
+            fbos.append(b["fbo"])
 
         # a compiled shader is kept between renders and remembers its uniforms (the arrow, the bend, the sound of the
         # run before): every one the engine knows starts at 0, then the caller's values
-        for name in st.FLOATS + ("kClip", "iFrame"):
-            put(name, 0.0)
-        for unit in range(st.CHANNELS):               # a picture input with nothing on it has no size (presets ask for it)
-            put(f"iChannelResolution[{unit}]", (0.0, 0.0, 0.0))
-        put("iResolution", (width, height, 1.0))
-        for name, v in (static or {}).items():
-            put(name, v)
+        for p in [b["program"] for b in tabs] + [program]:
+            use(p)
+            for name in st.FLOATS + ("kClip", "iFrame"):
+                put(name, 0.0)
+            for unit in range(st.CHANNELS):           # a picture input with nothing on it has no size (presets ask for it)
+                put(f"iChannelResolution[{unit}]", (0.0, 0.0, 0.0))
+            put("iResolution", (width, height, 1.0))
+            for name, v in (static or {}).items():
+                put(name, v)
+            for unit in names:                        # every shader's samplers look at the same units
+                if loc(names[unit]) >= 0:
+                    gl.glUniform1i(loc(names[unit]), unit)
 
         gl.glViewport(0, 0, width, height)
         gl.glDisable(gl.GL_BLEND)
@@ -386,6 +440,21 @@ def _render(g, source, width, height, frames, static, textures, on_frame, check_
                 check_interrupt()
             for unit in textures:
                 upload(unit, i)
+            for b in tabs:
+                use(b["program"])
+                for name, v in values.items():
+                    put(name, v)
+                feed(b["inputs"])
+                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, b["fbo"])
+                gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, b["back"], 0)
+                gl.glDrawBuffers(1, [gl.GL_COLOR_ATTACHMENT0])
+                gl.glClearColor(0, 0, 0, 0)
+                gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+                gl.glDrawArrays(gl.GL_TRIANGLES, 0, 3)
+                b["front"], b["back"] = b["back"], b["front"]
+            use(program)
+            if tabs or inputs:
+                feed(inputs)
             for name, v in values.items():
                 put(name, v)
             gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, fbo)
@@ -403,8 +472,8 @@ def _render(g, source, width, height, frames, static, textures, on_frame, check_
     finally:
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
         gl.glUseProgram(0)
-        ids = list(tex.values()) + [t for t in (target, prev) if t is not None]
+        ids = list(tex.values()) + [t for t in (target, prev) if t is not None] + extra
         if ids:
             gl.glDeleteTextures(len(ids), ids)
-        if fbo is not None:
-            gl.glDeleteFramebuffers(1, [fbo])
+        for f in fbos + [f for f in (fbo,) if f is not None]:
+            gl.glDeleteFramebuffers(1, [f])

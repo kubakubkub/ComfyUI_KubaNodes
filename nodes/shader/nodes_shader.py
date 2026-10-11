@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import time
 
 import numpy as np
 import torch
@@ -23,6 +24,7 @@ from ...kubakub import sound as so
 log = logging.getLogger("KUBA.shader")
 NAME = "kubakub shader"
 PREVIEW_PX, PREVIEW_FRAMES = 384, 240
+SLOW = 0.25                                          # seconds a frame may take before the report says how to make it faster
 MASK_FROM = ("auto", "alpha", "brightness")
 UNCONNECTED = ("auto", "noise", "sample facade", "black")
 LUMA = (0.2126, 0.7152, 0.0722)
@@ -97,13 +99,15 @@ class KUBA_Shader(io.ComfyNode):
             display_name=NAME,
             category="kubakub/2d/shader",
             search_aliases=["shadertoy", "glsl", "procedural", "generator", "noise", "pattern", "caustics", "voronoi",
-                            "grid", "test pattern", "glass", "refraction", "vj", "loop"],
+                            "grid", "test pattern", "glass", "refraction", "vj", "loop", "raymarch", "sdf", "3d", "relief",
+                            "depth", "fog"],
             description=(
                 "Moving pictures and masks drawn by a shader: pick a preset, or paste the code of a Shadertoy (the "
                 "Image tab) or your own GLSL fragment shader. The node gives it the time, a loop, the sound (level, "
                 "low / mid / high, beats), a field and a mask from kubakub mask field, and up to four pictures. Every "
                 "'uniform float name; // default min max' line of the shader is a control you set in 'controls'. "
-                "Nothing connected runs a preset. No AI model."),
+                "A shader can be a 3D scene: distance functions and a raymarcher are built in, and such a "
+                "shader gives its depth. Nothing connected runs a preset. No AI model."),
             inputs=[
                 io.Combo.Input("preset", options=names, default="warped noise" if "warped noise" in names else names[0],
                                tooltip="A built-in shader. Used while 'code' is empty. The report lists its controls."),
@@ -189,6 +193,11 @@ class KUBA_Shader(io.ComfyNode):
                 io.Audio.Output("audio", tooltip="The sound, cut to the frames (silence without one)."),
                 io.Int.Output("frame_count", tooltip="How many frames."),
                 io.String.Output("report", tooltip="Size, length, what the shader uses, its controls and their values."),
+                io.Image.Output("depth", tooltip="How near each pixel is, grey, near = white: from a shader that is a 3D scene "
+                                                 "(the presets melting forms, colonnade, facade relief, extrude, growth; your own "
+                                                 "code writes kDepth). For the depth presets on image1 of another kubakub "
+                                                 "shader, kubakub height animate or a depth ControlNet. One black picture "
+                                                 "from a shader that writes none."),
             ],
         )
 
@@ -209,10 +218,10 @@ class KUBA_Shader(io.ComfyNode):
             values, more = st.parse_values(controls, t.controls)
         except st.ShaderError as e:
             raise ValueError(f"{NAME}: {e}") from e
-        notes += t.notes + more
+        notes += [n for n in t.notes if own or "Wired differently" not in n] + more      # a preset's tabs are its own business
 
         fps = float(min(max(fps, 1.0), 120.0))
-        pics = {i: p.float().cpu().numpy() for i, p in enumerate((image0, image1, image2, image3)) if p is not None}
+        pics = {i: p.float().cpu().numpy() for i, p in enumerate((image0, image1, image2, image3)) if p is not None and len(p)}
         ms = mask.float().cpu().numpy() if mask is not None else None
         fs = field.float().cpu().numpy() if field is not None else None
         ms = ms[None] if ms is not None and ms.ndim == 2 else ms
@@ -234,14 +243,20 @@ class KUBA_Shader(io.ComfyNode):
         else:
             secs = 4.0
         frames = max(1, int(round(secs * fps)))
+        secs = frames / fps                           # the sound and kSeconds are as long as the frames, to the sample
         if mono is None and t.listens:
             (wave, sr_hz, mono), sample_sound = _built_in_beat(secs), True
             notes.append("the shader listens to a sound and none is connected: the built-in beat is used (connect "
                          "yours to 'audio')")
-        feedback = "kPrev" in t.uses                  # it builds on its own last frame: no loop of its own, node only
+        feedback = "kPrev" in t.uses or bool(t.buffers)      # it builds on its own last frame: no loop of its own, node only
         fade = min(frames, int(round(float(loop_fade) * fps))) if loop and (own or feedback) and frames > 1 else 0
+        if fs is None and not arrow and not own and st.sample_field(text):
+            lab, n_regions, _ = mf.sample_regions()
+            fs = mf.field(lab, n_regions, "edge distance", "each region")[0][None]
+            notes.append("the shader works on the regions of a field and none is connected: the windows of the sample "
+                         "facade are used (connect the field of kubakub mask field)")
 
-        _ram_check(NAME, frames, w, h, 16)
+        _ram_check(NAME, frames, w, h, 28 if t.depth else 16)
 
         textures, noisy = {}, []
         empty = unconnected if unconnected in UNCONNECTED[1:] else None      # auto: noise for your code, the sample for a preset
@@ -274,7 +289,15 @@ class KUBA_Shader(io.ComfyNode):
                 return pair
 
             n_f, n_m = (len(fs) if fs is not None else 1), (len(ms) if ms is not None else 1)
-            textures[sr.FIELD_UNIT] = lambda k: ((k % n_f, k % n_m), both(k))
+            held = [None, None]                       # a still field is put together once, not at every frame
+
+            def field_source(k):
+                key = (k % n_f, k % n_m)
+                if held[0] != key:
+                    held[0], held[1] = key, both(k)
+                return key, held[1]
+
+            textures[sr.FIELD_UNIT] = field_source
 
         per_frame = sr.frame_times(frames, fps, float(speed), float(time_offset), fade, int(loops))
         sound_lines = []
@@ -283,7 +306,7 @@ class KUBA_Shader(io.ComfyNode):
                                                  float(release), float(gain))
             for i, d in enumerate(per_frame):
                 d.update({k: v[i % frames] for k, v in heard.items()})
-        static = {"iFrameRate": fps, "iSampleRate": float(sr_hz or 44100), "kSeconds": secs,
+        static = {"iFrameRate": fps, "iSampleRate": float(sr_hz or 44100), "kSeconds": secs, "kDepthOut": 1.0 if t.depth else 0.0,
                   "kClip": 1.0 if clip and ms is not None else 0.0, **sr.vector_values(arrow, as_field=fs is None), **values}
         if arrow:
             reads, as_field = t.uses & st.VECTOR, fs is None and "kField" in t.uses
@@ -299,10 +322,11 @@ class KUBA_Shader(io.ComfyNode):
         img, alp = images.numpy(), alphas.numpy()
         pbar = comfy.utils.ProgressBar(frames + fade)
 
-        bad = [False]
+        bad, clock = [False], []
 
         def on_frame(i, px):                          # 0-1 and cut to the mask already, on the GPU
             j = i % frames
+            clock.append(time.perf_counter()) if i == 0 or i == frames + fade - 1 else None      # the first frame also compiles
             bad[0] = bad[0] or not bool(np.isfinite(px).all())
             if i < frames:
                 img[j], alp[j] = px[..., :3], px[..., 3]
@@ -314,15 +338,28 @@ class KUBA_Shader(io.ComfyNode):
 
         try:
             sr.render(t.source, w, h, per_frame, static, textures, on_frame,
-                      comfy.model_management.throw_exception_if_processing_interrupted)
+                      comfy.model_management.throw_exception_if_processing_interrupted, t.buffers, t.inputs)
         except st.ShaderError as e:
             raise ValueError(f"{NAME}: {e}") from e
+        each = (clock[-1] - clock[0]) / (frames + fade - 1) if frames + fade > 1 else 0.0
+        if each > SLOW:
+            notes.append(f"slow: {each:.2f} s per frame. " + ("Lower 'steps' in controls, or the size."
+                         if any(c.name == "steps" for c in t.controls) else "A smaller size is faster."))
 
         if bad[0]:                                    # a shader that divides by zero
             images.nan_to_num_(nan=0.0, posinf=1.0, neginf=0.0).clamp_(0.0, 1.0)
             alphas.nan_to_num_(nan=0.0, posinf=1.0, neginf=0.0).clamp_(0.0, 1.0)
             notes.append("the shader wrote values that are no numbers (a division by zero?): they are black")
         how = mask_from if mask_from in MASK_FROM else "auto"
+        depth = None
+        if t.depth:                                   # the alpha carried the depth: the mask is the brightness
+            if how == "alpha":
+                notes.append("mask_from = alpha: this shader gives a depth instead of an alpha, so the mask is its brightness")
+            how = "brightness"
+            if clip and ms is not None:
+                for a in range(frames):
+                    alphas[a] *= torch.from_numpy(_fit(ms[a % len(ms)], w, h))
+            depth = alphas[..., None].repeat(1, 1, 1, 3)
         if how == "alpha" and t.kind == "shadertoy":
             how = "brightness"
             notes.append("mask_from = alpha: a Shadertoy (mainImage) has no alpha, as on shadertoy.com, so the mask is "
@@ -340,6 +377,8 @@ class KUBA_Shader(io.ComfyNode):
         sound = _sound_out(wave, sr_hz, secs)
 
         what = ("your " + ("Shadertoy" if t.kind == "shadertoy" else "fragment shader")) if own else f"preset '{preset}'"
+        if t.buffers:
+            what += f" with {len(t.buffers)} buffer tab{'s' if len(t.buffers) > 1 else ''} ({', '.join(b.name for b in t.buffers)})"
         lines = [f"{frames} frames, {w}x{h}, {secs:.2f} s at {fps:g} fps", what + (f": {st.about(text)}" if not own and st.about(text) else "")]
         if loop:
             lines.append("loop: " + (f"the end fades into the start over {fade / fps:.2f} s" if fade else
@@ -347,9 +386,13 @@ class KUBA_Shader(io.ComfyNode):
         if t.controls:
             lines.append("controls: " + _controls_text(t, values))
         lines.append(f"masks: the shader's {how}")
+        if depth is not None:
+            lines.append("depth: near = white")
         report = "\n".join(lines + sound_lines + notes)
         log.info("[KUBA shader] %s", report.replace("\n", "\n    "))
-        return io.NodeOutput(images, masks, fps, sound, frames, report, ui=_preview(img, fps))
+        if depth is None:
+            depth = torch.zeros((1, h, w, 3), dtype=torch.float32)
+        return io.NodeOutput(images, masks, fps, sound, frames, report, depth, ui=_preview(img, fps))
 
 
 def _preview(out, fps):
@@ -380,17 +423,22 @@ def shader_info(preset="", code="") -> dict:
         text = st.shader_text(preset, code)
         t = st.translated(text)
         return {"source": t.source, "about": st.about(text), "notes": t.notes, "channels": t.channels,
-                "optional": sorted(t.optional),
+                "optional": sorted(t.optional), "buffers": [b.name for b in t.buffers], "wants_field": st.sample_field(text),
                 "kind": t.kind, "uses": sorted(t.uses),
                 "controls": [{"name": c.name, "default": c.default, "min": c.lo, "max": c.hi, "about": c.about} for c in t.controls]}
     except st.ShaderError as e:
         return {"error": str(e)}
 
 
+def _builds_up(t) -> bool:
+    """The shader builds every frame on the ones before (kPrev, or the Buffer tabs of a Shadertoy)."""
+    return "kPrev" in t.uses or bool(t.buffers)
+
+
 def node_only() -> list:
     """Presets that need what only the node has: their own last frame (slit scan, datamosh, trails). The director's
     fill menu leaves them out. A preset that works on a picture is an effect on the layers below there."""
-    return [name for name in st.presets() if "kPrev" in st.translated(st.preset_code(name)).uses]
+    return [name for name in st.presets() if _builds_up(st.translated(st.preset_code(name)))]
 
 
 TILE, COLUMNS = (160, 90), 6
@@ -417,10 +465,15 @@ def thumbs_sheet() -> bytes:
                 t = st.translated(text)
                 static = {"kSeconds": 4.0, "iFrameRate": 25.0, **{c.name: c.default for c in t.controls}}
                 pictures = {0: lambda k: (0, facade)} if 0 in t.channels and 0 not in t.optional else None
-                if "kPrev" in t.uses:                 # it builds up over frames: the picture is what it shows after a while
-                    last = []
-                    sr.render(t.source, w, h, [dict(heard, kLoop=k / 100.0, iTime=k / 25.0, iFrame=k) for k in range(40)],
-                              static, pictures, lambda k, p: last.append(p.copy()) if k == 39 else None)
+                if st.sample_field(text):             # it works on regions: the windows of the sample facade, as on the node
+                    lab, n_regions, _ = mf.sample_regions()
+                    pair = np.stack([mf.field(lab, n_regions)[0], np.ones(lab.shape, np.float32)], -1)
+                    pictures = {**(pictures or {}), sr.FIELD_UNIT: lambda k, pair=pair: ("field", pair)}
+                if _builds_up(t):                     # it builds up over frames: the picture is what it shows after a while
+                    last, n = [], 150 if t.buffers else 40
+                    sr.render(t.source, w, h, [dict(heard, kLoop=k / 100.0, iTime=k / 25.0, iFrame=k) for k in range(n)],
+                              static, pictures, lambda k, p: last.append(p.copy()) if k == n - 1 else None,
+                              buffers=t.buffers, inputs=t.inputs)
                     px = last[0]
                 else:
                     px = sr.still(t.source, w, h, heard, static, pictures)
@@ -459,7 +512,9 @@ def _routes():
             body = await request.json()
         except Exception:  # noqa: BLE001
             body = {}
-        return web.json_response(shader_info(str(body.get("preset") or ""), str(body.get("code") or "")))
+        import asyncio                                # off the server's own thread: a long text must not hold up the UI
+        return web.json_response(await asyncio.get_running_loop().run_in_executor(
+            None, shader_info, str(body.get("preset") or ""), str(body.get("code") or "")))
 
     routes.get("/kubakub/shader/presets")(presets)
     routes.get("/kubakub/shader/thumbs")(thumbs)

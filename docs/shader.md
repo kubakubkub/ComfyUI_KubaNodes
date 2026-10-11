@@ -33,7 +33,8 @@ of the sample facade and flash on a built-in beat).
 | advanced | | `time_offset` (the clock at the first frame), `loop_fade` (seconds, 0 = no fade), `mask_from` (auto / alpha / brightness), `clip`, `bpm` (a tempo you know), `gain`, `release` (sound levels), `unconnected` (what a shader reads on a picture input with nothing connected: auto, noise, sample facade, black). |
 
 Outputs: `images`, `masks` (how bright the picture is; the alpha of a plain fragment shader that writes one), `fps`, `audio`,
-`frame_count`, `report`. After a run the node plays the frames.
+`frame_count`, `report`, `depth` (how near each pixel is, near = white, from a shader that is a 3D scene: see
+[3D scenes](#3d-scenes-raymarching); one black picture from any other shader). After a run the node plays the frames.
 
 ## The presets
 
@@ -92,17 +93,31 @@ Outputs: `images`, `masks` (how bright the picture is; the alpha of a plain frag
 | scan modulation | the picture on image0 as scan lines that the brightness pushes out of place, like a signal on a tube; the lines drift | a picture | rate, depth, steps, drift, soften, tint, light |
 | cartoon | the picture on image0 as a cartoon: a few flat tones, black ink outlines and hatching in the dark parts that drifts. High contrast, made for architecture | a picture | tones, contrast, ink, thick, detail, hatch, lines, drift, two_colours |
 | hard shadow | a light circles the picture on image0 and everything that stands out throws a hard shadow (a depth pass on image1, else its brightness). A fake shadow, no 3D needed. Loops without a jump | a picture | sun, reach, turns, angle, dark, soft, shade, tint |
+| melting forms | soft 3D forms that melt into each other and out of a wall, lit from the side with real shadows. Loops without a jump; the low end of a sound makes them swell. Gives a depth |  | forms, size, melt, blocks, light, sound, steps |
+| colonnade | an endless walk between two rows of columns under an open sky; the sun lays their shadows across the floor. Loops without a jump. Gives a depth |  | bays, width, thick, arches, sun, sway, fog, sound, steps |
+| facade relief | the picture on image0 as a real relief: what stands out (a depth pass on image1, else its brightness) rises out of the wall, the view leans from side to side so near parts hide far ones, and a circling light throws true shadows. Loops without a jump. Gives a depth | a picture | height, sway, nod, sun, turns, angle, dark, soft, shade, steps |
+| extrude | the regions rise out of the wall as blocks with sloped edges and throw shadows on it (connect the field of kubakub mask field, edge distance; nothing connected = the windows of the sample facade); a picture on image0 is painted on them. Loops without a jump; a beat can lift them. Gives a depth |  | height, bevel, round, rise, wave, sway, sun, turns, angle, dark, shade, beat, steps |
+| growth | a living pattern that grows from scattered seeds into spots, worms and mazes, like coral or lichen spreading over the wall (reaction and diffusion); stays inside the mask. Gives a depth | its last frames | feed, kill, size, seeds, warm |
+| fog light | a beam of light swinging through drifting fog, like a projector in a hazy hall. Loops without a jump; a sound brightens the beam |  | density, scale, beam, spread, rays, sweep, warm, sound, steps |
 
 All of them loop without a jump and stay inside the mask. `sound` and `beat` are 0 in most presets: raise them in
 `controls` to make the picture follow the music (sound bars follows it by itself).
+
+**3D scenes** (melting forms, colonnade, facade relief, extrude, fog light) are raymarched: for every pixel the
+shader walks a ray through a scene. They cost more than the flat presets; `steps` in `controls` trades clean edges
+for speed, and the report says so when a frame takes long. The first four also give a `depth`. extrude shows the
+wall and the shadows on it, so it is not cut to its own regions: connect only the `field`, or the `mask` as well to
+keep the blocks alone.
 
 **Works on a picture**: connect yours to `image0` (a still or a clip); with none connected the sample facade is
 used. wireframe, depth scan and point cloud read a depth pass on `image1` when there is one (kubakub render
 passes, scene render) and take the brightness of the picture as depth when there is none; glass reads a normal
 pass there.
 
-**Works on its last frame** (slit scan, datamosh, trails): these build every frame on the one before, which is
-what makes a slit scan bend moving things and a datamosh smear. They want a **clip** on `image0` (Load Video, or
+**Works on its last frame** (slit scan, datamosh, trails, growth): these build every frame on the one before, which is
+what makes a slit scan bend moving things, a datamosh smear and a growth spread. growth needs no clip: it starts
+from seeds and grows for as long as the clip is (try 10 s or more, a `mask` to keep it on the windows, and its
+`depth` into facade relief or kubakub height animate); the first three want one. They want a **clip** on `image0` (Load Video, or
 the frames of another kubakub shader); with nothing connected they run on a moving pattern of their own so you
 see what they do. Their loop is closed by a fade (`loop_fade`). They exist on the node only, not as a fill in
 the director.
@@ -112,6 +127,59 @@ your regions (connect kubakub mask field); contour lines, wireframe, blueprint, 
 the building's own shapes from a render of it.
 
 The presets are plain text files in `kubakub/shaders/`, written for this pack. Copy one into `code` to change it.
+
+## 3D scenes (raymarching)
+
+A shader can draw a 3D scene without any 3D software: the scene is a function that says how far the nearest
+surface is from a point (a signed distance function, SDF), and the shader walks along a ray for every pixel until
+it arrives. Most 3D shaders on shadertoy.com work this way, and a single-tab one runs here when pasted.
+
+For your own scene the node brings the usual parts. Write `float map(vec3 p)` (the distance from p to the nearest
+surface) and use these names; a shader gets the ones it uses, and a pasted shader that brings its own `sdBox` keeps
+its own.
+
+| name | what it is |
+|---|---|
+| `sdSphere(p, r)`, `sdBox(p, half)`, `sdRoundBox(p, half, r)`, `sdTorus(p, vec2(R, r))`, `sdCylinder(p, halfHeight, r)`, `sdCapsule(p, a, b, r)`, `sdPlane(p, normal, h)` | the distance from p to a ball, a block, a rounded block, a ring, an upright cylinder, a rod from a to b, a plane |
+| `opSmoothUnion(a, b, k)`, `opSmoothSubtraction(a, b, k)`, `opSmoothIntersection(a, b, k)` | two forms melted together, a cut out of b, or only where both are; k = how soft the join is. Hard joins are `min(a, b)`, `max(-a, b)`, `max(a, b)` |
+| `opRep(p, vec3 cell)` | the space repeated every `cell`: one column becomes an endless row |
+| `kRot(angle)` | a turn, as a mat2: `p.xz *= kRot(a);` |
+| `kCamera(fragCoord, eye, target, zoom)` | the ray through this pixel for a camera at `eye` that looks at `target` (zoom 1 = wide, 2 = a long lens) |
+| `kMarch(eye, ray, far, steps)` | how far along the ray the first surface is; -1 when there is none within `far` |
+| `kNormal(p)` | which way the surface faces at p |
+| `kShadow(p, toLight, far, k)` | 1 = lit, 0 = in shadow; k = how hard the edge is (8 soft, 64 hard) |
+| `kAO(p, normal)` | 1 = open, darker in corners and creases |
+| `kDepth` | write how near this pixel is, 0 far to 1 near: it becomes the node's `depth` output. `kDepthOf(t, near, far)` turns the distance from kMarch into it |
+
+```glsl
+uniform float melt;    // 0.3 0.01 1
+float map(vec3 p) {
+    float ball = sdSphere(p - vec3(sin(6.2831853 * kLoop), 0.0, 0.0), 0.6);
+    float block = sdRoundBox(p, vec3(0.5), 0.1);
+    return opSmoothUnion(opSmoothUnion(ball, block, melt), p.y + 0.6, 0.1);      // ... and a floor
+}
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec3 eye = vec3(0.0, 1.0, 3.5), ray = kCamera(fragCoord, eye, vec3(0.0), 1.5);
+    float t = kMarch(eye, ray, 20.0, 80);
+    vec3 col = vec3(0.0);
+    if (t > 0.0) {
+        vec3 p = eye + ray * t, n = kNormal(p), sun = normalize(vec3(0.6, 0.8, 0.4));
+        col = vec3(0.9, 0.6, 0.45) * (0.15 * kAO(p, n) + max(dot(n, sun), 0.0) * kShadow(p + n * 0.01, sun, 10.0, 16.0));
+    }
+    kDepth = kDepthOf(t, 2.0, 8.0);
+    fragColor = vec4(sqrt(col), 1.0);
+}
+```
+
+**The depth** is a normal grey picture batch, near = white, the same way round as the depth of kubakub form height.
+It goes into `image1` of another kubakub shader (wireframe, point cloud, depth scan, hard shadow, facade relief),
+into kubakub height animate, or into a depth ControlNet. Example: `example_workflows/shader_3d.json` (melting forms,
+and sheets of light through its depth).
+
+**A relief of your building.** facade relief is the preset for a render of the real facade: `beauty` into `image0`
+and `depth` into `image1` (kubakub render passes, scene render, or the height of kubakub form height). Unlike hard
+shadow it moves the view, so a cornice really covers what is behind it. Without a depth pass the brightness is
+taken as height.
 
 ## Mixing two shaders
 
@@ -154,6 +222,27 @@ You do not need to read or understand the code.
 If the shader has a **Common** tab next to **Image**, paste Common first and Image below it. Pasting the link does
 not work (the node downloads nothing, and says so).
 
+**A Shadertoy with Buffer tabs** (Buffer A - D: simulations, trails, feedback) works too, on the node. Paste every
+tab under a line that names it:
+
+```glsl
+// Common
+(the Common tab, if there is one)
+// Buffer A
+(the Buffer A tab)
+// Image
+(the Image tab)
+```
+
+On shadertoy.com each tab's `iChannel0` - `iChannel3` are set by clicking, not in the code, so the node cannot see
+them. It assumes the usual wiring: `iChannel0` is Buffer A, `iChannel1` is Buffer B and so on, and a channel
+without a buffer of that letter is the node's picture of that number (the built-in noise when nothing is
+connected). Where the Shadertoy is wired differently, say it on the tab's line: `// Buffer A: 0 = A, 1 = noise`,
+`// Image: 0 = B, 1 = image0`. The report lists what every tab reads. A tab that reads itself sees the frame
+before, as on shadertoy.com; the first frame starts from black, and `loop` closes the clip with a fade. Such a
+shader builds on its own last frames, so it does not run as a fill in the director or in kubakub shader mix:
+render it with the node and bring the frames in.
+
 The report then tells you in plain words what the shader uses. The most common case: a Shadertoy expects a noise
 picture on one of its channels. When nothing is connected to `image0` - `image3` the node puts its own **built-in
 noise** there, laid out the way those shaders expect, so most of them simply run. If a shader looks wrong, it may
@@ -161,9 +250,8 @@ expect a photo or another picture: connect one to the input the report names.
 
 What cannot work, and the node says so instead of showing a graphics error:
 
-- **Buffer A - D tabs** (each one is a shader of its own that feeds the next)
 - **cubemaps** and 3D textures
-- **sound shaders**, the keyboard and the webcam
+- **sound shaders**, the keyboard and the webcam; a text longer than 400 000 characters
 - the mouse: `iMouse` reads as never pressed
 
 A Shadertoy's alpha is ignored, as on shadertoy.com (many write 0 there and would be invisible otherwise): its mask
@@ -203,6 +291,7 @@ director the layer is see-through there. The language is GLSL ES 3.00, the same 
 | `kUV` | this pixel, 0 to 1 across the picture (0, 0 is bottom left, as on Shadertoy) |
 | `kPrev(uv)` | the frame before this one (black at the first frame): trails, slit scan, datamosh, anything that builds up. Node only |
 | `kField(uv)`, `kMask(uv)` | the grey ramp and the mask connected to the node |
+| `kDepth`, `sdBox` ..., `kMarch` ... | for a 3D scene: see [3D scenes](#3d-scenes-raymarching) |
 | `kFrom`, `kTo`, `kDir`, `kVector` | the drawn arrow: its start and its end (0 to 1, as `kUV`), the way it points (length 1), and 1 when one is drawn. Without a connected field `kField` runs from 0 at its start to 1 at its end |
 | `uniform float name; // default min max` | a control of your own, set in `controls` |
 
@@ -233,13 +322,20 @@ node renders the same picture (measured on two shader layers at 1920x1088: the w
 effects and behaviours work as on any shape. The sliders are the shader's controls and take keyframes and
 behaviours. `loops` is counted over the timeline's length.
 
-The **pictures** button next to `fill` shows the presets as small pictures (slit scan, datamosh and trails are
-left out: they build on their last frame, which only the node can do).
+The **pictures** button next to `fill` shows the presets as small pictures (slit scan, datamosh, trails and growth
+are left out: they build on their last frames, which only the node can do).
+
+**The shape as the field.** A shader that runs along a field (scan band, region contours, brick wave, extrude)
+has a **field** row: *left to right*, or *the shape's edges*. With the edges the field runs from the outline of
+the shape inwards, and when the layer is clipped to regions every region is a piece of its own: region contours
+then draws its lines around every window, and extrude lifts every window as a block (it paints the layers below
+on them). extrude starts with the edges; the others keep left to right until you choose, so saved compositions
+look as before. A drawn arrow still comes first.
 
 **An arrow instead of numbers.** A shader that can follow a direction has an **arrow** row: press **draw** and drag on the layer. Presets that run along the field (scan band, region contours ...) then run from the arrow's start to its end; stripes, rain and pixel smear take its direction; rings, ripples and radar start at its start. The arrow belongs to the layer and moves with it. **clear** removes it.
 
 **A shader as an effect.** A preset that works on a picture (eight bit, characters, mosaic, halftone, old
-screen, pixel smear, vhs tape, composite video, scan modulation, cartoon, hard shadow, contour lines, wireframe, blueprint, edge glow, depth scan, point cloud, chromatic split,
+screen, pixel smear, vhs tape, composite video, scan modulation, cartoon, hard shadow, facade relief, contour lines, wireframe, blueprint, edge glow, depth scan, point cloud, chromatic split,
 glass) works here on **everything under the layer**: put a solid with fill = eight bit on top and the whole
 composition below turns 8 bit; make it an ellipse with a feather, or clip it to the windows, and only that part
 does. Stack two for two effects. Your own code has a `picture` choice for this: *the layers below*, or the
@@ -247,7 +343,12 @@ does. Stack two for two effects. Your own code has a `picture` choice for this: 
 depth scan and point cloud take the brightness of the picture as depth. A pasted Shadertoy works here too
 (own code): the built-in noise sits on its channels, in the window and in the render alike.
 
-Not in the window: pictures on `image1` - `image3` (a depth or normal pass) and a field (left to right there).
+The 3D presets play in the window too (melting forms, colonnade, fog light as a fill; facade relief on the
+layers below, with their brightness as height). They are heavier than the flat ones: lower `steps` if scrubbing
+stutters.
+
+Not in the window: pictures on `image1` - `image3` (a depth or normal pass), a field from kubakub mask field
+(the window has its own: left to right, or the shape's edges) and the depth output.
 Use the node for those and bring its frames in as a video layer. A broken shader shows its mistake under the
 code, with the line, and the layer shows its colour until it is fixed. Every control has a hover text that says
 what it does.
@@ -257,9 +358,11 @@ what it does.
 The shader compiles once per run and pictures that do not change are uploaded once. On an RTX 5070 Ti a simple
 preset takes about 14 ms per frame at 1920x1080 and 57 ms at 3840x2160; warped noise 32 ms and 112 ms. Most of
 what is left is copying the frames into memory, so RAM is the limit: 250 frames at 3840x2160 are 33 GB (the node
-refuses a clip that does not fit and says how much it needs).
+refuses a clip that does not fit and says how much it needs). The 3D presets take about 100 ms per frame at
+1920x1080 and 400 ms at 3840x2160 with their default `steps`; a clip with a depth needs about twice the RAM. When a
+frame takes longer than a quarter of a second the report says so.
 
-Limits: one pass only. The mask and field are shared by the whole picture, there is no value per region. On the
+Limits: a shader with Buffer tabs runs on the node only. The mask and field are shared by the whole picture, there is no value per region. On the
 node the controls are fixed for a run and what moves is the loop, the clock and the sound; in the director the
 controls can be keyframed.
 

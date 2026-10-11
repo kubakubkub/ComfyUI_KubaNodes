@@ -131,6 +131,8 @@ function build(node) {
     asked = key;
     const mine = ++token;
     if (!path) { layers = []; note = "no folder: the node runs on its sample passes (png files, no exr)"; render(); return; }
+    // a workflow from someone else must not make this computer call a network share just by being opened
+    if (!force && /^["']?(\\\\|\/\/)|[%$]/.test(path)) { layers = []; note = "a network path, or one with a %VARIABLE%: click here to read its layers"; render(); return; }
     note = "reading…"; hint.textContent = note;
     try {
       const r = await api.fetchApi("/kubakub/render_passes/layers", { method: "POST", headers: { "Content-Type": "application/json" },

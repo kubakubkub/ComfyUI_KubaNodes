@@ -784,7 +784,9 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
         opts = dict(bridge.scene_opts(scene), width=width, height=height)
         pbar = comfy.utils.ProgressBar(n)
         out, shadows, shadow_share, chunk, rendered = [], [], [], 25, 0
+        import comfy.model_management
         for c0 in range(0, n, chunk):
+            comfy.model_management.throw_exception_if_processing_interrupted()
             views = [{"location": [round(float(v), 4) for v in loc], "look_at": [round(float(v), 4) for v in look],
                       "lens": float(lens_mm)} for loc, look in cams[c0:c0 + chunk]]
             dirs = [bridge.cache_folder(scene["file"], walk, views=[v], **opts) for v in views]

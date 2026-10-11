@@ -24,7 +24,11 @@ CATEGORY = "kubakub/3d/from renders"
 
 
 def _clean(path):
-    return os.path.expandvars(os.path.expanduser((path or "").strip().strip('"').strip("'")))
+    raw = (path or "").strip().strip('"').strip("'")
+    out = os.path.expandvars(os.path.expanduser(raw))
+    if ("%" in raw or "$" in raw) and out.replace("/", "\\").startswith("\\\\"):
+        raise ValueError("a path with %VARIABLES% must not lead to a network share (\\\\server\\...): type the share's path itself.")
+    return out
 
 
 class KUBA_RenderPasses(io.ComfyNode):

@@ -85,7 +85,7 @@ async function check(node) {
     if (mine !== node._kksCheck) return;                // a newer check is on its way
     const reads = (j.channels || []).map(i => "image" + i).join(", ");
     const text = j.error ? "cannot run: " + j.error
-      : code.trim() ? `your code (the preset is not used)${reads ? " · reads " + reads : ""}${(j.uses || []).includes("kPrev") ? " · builds on its last frame" : ""}`
+      : code.trim() ? `your code (the preset is not used)${reads ? " · reads " + reads : ""}${(j.uses || []).includes("kPrev") ? " · builds on its last frame" : ""}${(j.uses || []).includes("kDepth") ? " · gives a depth" : ""}`
         : `${preset}: ${j.about || ""}`;
     say(line, text);
   } catch (e) { if (mine === node._kksCheck) say(line, ""); }

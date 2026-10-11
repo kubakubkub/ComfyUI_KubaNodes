@@ -102,6 +102,77 @@ check("presets are found, the first ones in their old order", len(names) >= 30 a
       "caustics", "voronoi cells", "rings", "chromatic split", "glass"] and len(set(names)) == len(names), str(names))
 check("every preset has an about line and translates", all(st.about(st.preset_code(n)) and st.translate(st.preset_code(n)).kind == "shadertoy" for n in names))
 
+# ---- 3D: distance functions and a raymarcher for a shader that uses their names
+SCENE = """float map(vec3 p) { return opSmoothUnion(sdSphere(p, 0.8), p.z + 1.0, 0.2); }
+void mainImage(out vec4 c, in vec2 f) {
+    vec3 ro = vec3(0.0, 0.0, 3.0), rd = kCamera(f, ro, vec3(0.0), 2.0);
+    float t = kMarch(ro, rd, 10.0, 64);
+    kDepth = kDepthOf(t, 2.0, 4.2);
+    c = vec4(t > 0.0 ? 0.5 + 0.5 * kNormal(ro + rd * t) : vec3(0.0), 1.0);
+}
+"""
+sc = st.translate(SCENE)
+head = sc.source.split("#line 1")[0]
+check("3D: a shader gets the helpers it names, and only those", all(f" {n}(" in head for n in ("sdSphere", "opSmoothUnion", "kCamera", "kMarch", "kNormal", "kDepthOf"))
+      and "float map(vec3 p);" in head and "sdBox" not in head and "kShadow" not in head and sc.depth and "kDepth" in sc.uses)
+check("3D: a shader that names none gets none", "sdSphere" not in t.source and "float map(vec3 p);" not in t.source and not t.depth)
+mine = st.translate("float sdBox(vec3 p, vec3 b) { return length(p) - b.x; }\n#define opRep(p, c) (mod(p, c))\n"
+                    "void mainImage(out vec4 c, in vec2 f){ c = vec4(sdBox(opRep(vec3(f, 0.0), vec3(1.0)), vec3(0.5)) + sdTorus(vec3(f, 0.0), vec2(1.0, 0.2))); }")
+check("3D: a pasted shader keeps the functions it brings itself", mine.source.count("float sdBox(") == 1 and "vec3 opRep(" not in mine.source
+      and mine.source.count("float sdTorus(") == 1)
+check("3D: the march without a scene says what is missing", raises(lambda: st.translate("void mainImage(out vec4 c, in vec2 f){ c = vec4(kMarch(vec3(0.0), vec3(0.0, 0.0, 1.0), 9.0, 8)); }"),
+                                                               "kMarch", "float map(vec3 p)")[0])
+check("3D: line numbers stay those of the pasted code", "#line 1\nfloat map(vec3 p) {" in sc.source)
+SOLID = ("melting forms", "colonnade", "facade relief", "extrude", "growth")
+check("3D: the presets that are a scene write a depth, the others do not", [n for n in names if st.translate(st.preset_code(n)).depth] == list(SOLID),
+      str([n for n in names if st.translate(st.preset_code(n)).depth]))
+check("3D: extrude asks for the sample field, no other preset does", [n for n in names if st.sample_field(st.preset_code(n))] == ["extrude"])
+
+# ---- review 2026-10-11: text that used to trip the translation
+cm = st.translate("out vec4 o;\n// void main() is below\n/* old: void main() {} */\nvoid main(){ o = vec4(1.0); }")
+check("review: a 'void main(' in a comment is left alone, the real one is renamed", cm.source.count("void kUserMain(") == 1 and "// void main() is below" in cm.source)
+ext = st.translate("#extension GL_OES_standard_derivatives : enable\nuniform highp float iTime;\nvoid mainImage(out vec4 c, in vec2 f){ c = vec4(fwidth(f.x) + iTime); }")
+check("review: #extension lines and built-in uniforms with a precision are dropped", "#extension" not in ext.source and ext.source.count("float iTime;") == 1)
+check("review: map(const in vec3 p) is a scene, map(vec3, float) is not", "float map(vec3 p);" in st.translate(
+      "float map(const in vec3 p) { return length(p) - 1.0; }\nvoid mainImage(out vec4 c, in vec2 f){ c = vec4(kMarch(vec3(0.0), vec3(0.0, 0.0, 1.0), 9.0, 8)); }").source
+      and raises(lambda: st.translate("float map(vec3 p, float t) { return 1.0; }\nvoid mainImage(out vec4 c, in vec2 f){ c = vec4(kMarch(vec3(0.0), vec3(0.0, 0.0, 1.0), 9.0, 8)); }"), "float map(vec3 p)")[0])
+import time as _time  # noqa: E402
+_t0 = _time.perf_counter()
+_nc = st._no_comments("/* " * 100000 + "\nvoid x; // y\n")
+check("review: comments are found in one walk (a long broken text does not hold up the server), and a text has a limit",
+      _time.perf_counter() - _t0 < 1.0 and st._no_comments("a // b\n/* c\nd */ e") == "a     \n    \n     e" and raises(lambda: st.translate("x" * (st.MAX_CODE + 1)), "limit")[0])
+check("review: a compile message with a line break in it stays one line", st.explain("ERROR: 0:1: '\n' : extension directive must occur\nERROR: 0:9: bad")
+      == "line 1: ' ' : extension directive must occur\nline 9: bad")
+
+# ---- a Shadertoy with Buffer tabs
+COUNT = """float gain() { return 0.25; }
+// ---- Buffer A ----
+void mainImage(out vec4 c, in vec2 f) { c = vec4(texture(iChannel0, f / iResolution.xy).r + gain(), 0.0, 0.0, 1.0); }
+// Buffer B: 0 = A, 1 = noise
+void mainImage(out vec4 c, in vec2 f) { c = vec4(texture(iChannel0, f / iResolution.xy).r * 2.0, texture(iChannel1, f / 256.0).r, 0.0, 1.0); }
+// Image
+void mainImage(out vec4 c, in vec2 f) {
+    vec2 uv = f / iResolution.xy;
+    c = vec4(texture(iChannel0, uv).r / 4.0, texture(iChannel1, uv).r / 8.0, texture(iChannel2, uv).r, 1.0);
+}
+"""
+tb = st.translate(COUNT)
+check("tabs: every Buffer tab is a shader of its own, with the text above the first tab in each",
+      [b.name for b in tb.buffers] == ["A", "B"] and all("float gain()" in b.source and b.source.count("void mainImage") == 1 for b in tb.buffers)
+      and tb.source.count("void mainImage") == 1 and "kFinish" in tb.source and "kFinish();\n}" not in tb.buffers[0].source.split("#line")[-1])
+check("tabs: a channel reads the buffer of its letter, the tab's line can say otherwise, the rest are the node's pictures",
+      tb.buffers[0].inputs == {0: "A"} and tb.buffers[1].inputs == {0: "A", 1: "noise"} and tb.inputs == {0: "A", 1: "B", 2: "image2"}
+      and tb.channels == [2] and "Buffer B reads iChannel0 = Buffer A, iChannel1 = noise" in tb.notes[0], f"{tb.inputs} {tb.channels} {tb.notes}")
+check("tabs: line numbers are those of the pasted text", "#line 3\nvoid mainImage(out vec4 c, in vec2 f) { c = vec4(texture(iChannel0, f / iResolution.xy).r + gain()" in tb.buffers[0].source
+      and "#line 1\nfloat gain()" in tb.source and "#line 7\n" in tb.source)
+check("tabs: only a line that is a tab's name counts", st._tab("// image plane distance") is None and st._tab("// Buffer A is the simulation") is None
+      and st._tab("// Image") == ("image", {}) and st._tab("// === buffer b: iChannel0 = Buffer A, 2=image1 ===") == ("B", {0: "A", 2: "image1"})
+      and st.tabs("// Common\nfloat f(){return 1.0;}\n// Image\nvoid mainImage(out vec4 c, in vec2 f){c=vec4(1.0);}") is None)
+check("tabs: what is missing is said", raises(lambda: st.translate("// Buffer A\nvoid mainImage(out vec4 c, in vec2 f){c=vec4(1.0);}"), "no Image tab")[0]
+      and raises(lambda: st.translate("// Buffer A: 0 = C\nvoid mainImage(out vec4 c, in vec2 f){c=texture(iChannel0, f);}\n// Image\nvoid mainImage(out vec4 c, in vec2 f){c=vec4(1.0);}"), "no tab '// Buffer C'")[0]
+      and raises(lambda: st.translate(two), "// Buffer A", "// Image")[0])
+check("tabs: a preset can have them (growth), and such a shader builds on its last frames", [b.name for b in st.translate(st.preset_code("growth")).buffers] == ["A", "B", "C", "D"])
+
 # ---- time and sound
 ft = sr.frame_times(50, 25.0, 2.0, 1.0, extra=5)
 check("frame times: clock, loop phase, the tail goes on", len(ft) == 55 and ft[0]["iTime"] == 1.0 and abs(ft[25]["iTime"] - 3.0) < 1e-9
@@ -151,7 +222,7 @@ if gpu:
     worst, pictures, feedback = [], [], []
     for n in names:
         tr = st.translate(st.preset_code(n))
-        if "kPrev" in tr.uses:                                                            # checked below: they build on their last frame
+        if "kPrev" in tr.uses or tr.buffers:                                              # checked below: they build on their last frames
             feedback.append(n)
             continue
         if tr.channels:                                                                   # these work on a picture
@@ -164,7 +235,7 @@ if gpu:
             worst.append(f"{n}: max {a.max():.3f}, loop gap {np.abs(a - b).max():.4f}, move {np.abs(a - c).max():.3f}")
     check(f"all {len(names)} presets draw, close their loop and move", len(names) >= 48 and not worst, "; ".join(worst))
     check("which presets work on a picture, which on their own last frame", {"contour lines", "wireframe", "point cloud", "eight bit", "characters"} <= set(pictures)
-          and feedback == ["slit scan", "datamosh", "trails"] and ns.node_only() == feedback, f"{pictures} {feedback}")
+          and feedback == ["slit scan", "datamosh", "trails", "growth"] and ns.node_only() == feedback, f"{pictures} {feedback}")
 
     # ---- feedback: a shader that reads the frame before
     grow = "void mainImage(out vec4 c, in vec2 f){ c = vec4(kPrev(kUV).r + 0.25, float(iFrame) * 0.1, 0.0, 1.0); }"
@@ -173,11 +244,11 @@ if gpu:
     clip = torch.zeros((12, 36, 64, 3))
     for k in range(12):
         clip[k, :, :, 0] = k / 11.0                                                       # the clip gets redder frame by frame
-    isl, _, _, _, nsl, rsl = ns.KUBA_Shader.execute("slit scan", controls="show = 0", image0=clip, loop=False).result
+    isl, _, _, _, nsl, rsl = ns.KUBA_Shader.execute("slit scan", controls="show = 0", image0=clip, loop=False).result[:6]
     col = isl[-1, 18, :, 0]
     check("slit scan: each column keeps the moment the slit passed it", nsl == 12 and float(col[2]) < float(col[30]) < float(col[56])
           and abs(float(col[56]) - 1.0) < 0.1 and float(col[63]) < 0.1, f"{[round(float(v), 2) for v in col[::8]]} {rsl}")
-    idm, _, _, _, ndm, rdm = ns.KUBA_Shader.execute("datamosh", width=96, height=54, seconds=0.8).result
+    idm, _, _, _, ndm, rdm = ns.KUBA_Shader.execute("datamosh", width=96, height=54, seconds=0.8).result[:6]
     check("datamosh and trails run on their own moving pattern with nothing connected, and loop through a fade",
           ndm == 20 and float(idm.max()) > 0.3 and "fades into the start" in rdm and "sample facade" not in rdm
           and float(ns.KUBA_Shader.execute("trails", width=96, height=54, seconds=0.4).result[0].mean()) > 0.02, rdm)
@@ -185,6 +256,57 @@ if gpu:
     quiet = run(st.preset_code("sound bars"), [{"kLow": 0.0}])[0]
     loud = run(st.preset_code("sound bars"), [{"kLow": 1.0, "kMid": 0.8, "kHigh": 0.9, "kBeat": 1.0, "kBeats": 2.0}])[0]
     check("preset 'sound bars' grows with the sound", float(loud[..., :3].mean()) > 3 * float(quiet[..., :3].mean()))
+
+    # ---- 3D: a raymarched scene, its depth
+    px = run(SCENE, [{}], 96, 96, static={"kDepthOut": 1.0})[0]
+    check("3D: a scene of the built-in helpers draws: a ball in front of a wall, lit side up, its depth in the alpha",
+          abs(float(px[48, 48, 2]) - 1.0) < 0.02 and float(px[30, 48, 1]) > float(px[66, 48, 1]) + 0.2
+          and abs(float(px[48, 48, 3]) - 0.909) < 0.02 and float(px[2, 2, 3]) < 0.2, f"{px[48, 48]} {px[30, 48]} {px[66, 48]} {px[2, 2]}")
+    check("3D: without the node asking, the alpha stays the picture's", float(run(SCENE, [{}], 32, 32)[0][..., 3].min()) == 1.0)
+    out = ns.KUBA_Shader.execute("melting forms", width=160, height=90, seconds=0.2)
+    i3, m3, _, _, n3, r3, d3 = out.result
+    check("node: a 3D preset gives its depth, the wall black and the forms near; the mask is the brightness",
+          d3.shape == (5, 90, 160, 3) and float(d3.max()) > 0.5 and float(d3.min()) < 0.02 and "depth: near = white" in r3
+          and "brightness" in r3 and torch.equal(d3[..., 0], d3[..., 2]) and float(m3.max()) > 0.3, r3)
+    d0 = ns.KUBA_Shader.execute("rings", width=64, height=32, seconds=0.2).result
+    check("node: a shader without a depth gives one black picture there", d0[6].shape == (1, 32, 64, 3) and float(d0[6].max()) == 0.0 and "depth" not in d0[5])
+    half = torch.zeros((1, 90, 160))
+    half[:, :, :80] = 1.0
+    dc = ns.KUBA_Shader.execute("colonnade", seconds=0.04, mask=half).result[6]
+    check("node: the depth is cut to the mask too", float(dc[:, :, 80:].max()) == 0.0 and float(dc[:, :, :80].max()) > 0.5)
+    ex = ns.KUBA_Shader.execute("extrude", width=160, height=90, seconds=0.2, controls="rise = 0").result
+    check("node: extrude with nothing connected rises from the windows of the sample facade", "sample facade" in ex[5] and float(ex[6].max()) > 0.9
+          and float((ex[6][0, ..., 0] > 0.5).float().mean()) < 0.5 and float(ex[6][0, :3].max()) < 1e-3, ex[5])
+    fr_ = torch.linspace(0, 1, 64)[None, None].repeat(1, 32, 1)
+    ef = ns.KUBA_Shader.execute("extrude", seconds=0.04, field=fr_, controls="rise = 0, sway = 0").result
+    check("node: extrude with a field connected uses it (no sample)", "sample facade" not in ef[5] and float(ef[6][0, 16, -2, 0]) > 0.9 and float(ef[6][0, 16, 0, 0]) < 0.1, ef[5])
+    rl = ns.KUBA_Shader.execute("facade relief", width=160, height=90, seconds=0.2, controls="sway = 0, nod = 0, dark = 0, shade = 0").result
+    from kubakub import sample_facade as _sf3
+    flat3 = torch.from_numpy(_sf3.render(160, 90)["image"])
+    check("node: facade relief seen straight on and unlit is the picture; its depth is the picture's brightness",
+          float((rl[0][0] - flat3).abs().max()) < 0.02 and float(np.corrcoef(rl[6][0, ..., 0].numpy().ravel(), (flat3 @ torch.tensor([0.299, 0.587, 0.114])).numpy().ravel())[0, 1]) > 0.98,
+          f"{float((rl[0][0] - flat3).abs().max()):.4f}")
+    lean3 = ns.KUBA_Shader.execute("facade relief", width=160, height=90, seconds=0.2, loop=False).result[0]
+    check("node: facade relief moves when the view leans", float((lean3[1] - lean3[0]).abs().mean()) > 0.003)
+
+    # ---- Buffer tabs on the GPU
+    rcnt = ns.KUBA_Shader.execute("rings", code=COUNT, width=32, height=16, seconds=0.16, loop=False).result
+    check("tabs: a buffer that reads itself sees the frame before, one that reads an earlier tab sees this frame, the noise arrives",
+          np.allclose(rcnt[0][:, 4, 4, 0].numpy(), [0.0625, 0.125, 0.1875, 0.25], atol=1e-4) and np.allclose(rcnt[0][:, 4, 4, 1].numpy(), [0.0625, 0.125, 0.1875, 0.25], atol=1e-4)
+          and "2 buffer tabs (A, B)" in rcnt[5] and "Wired differently" in rcnt[5] and float(rcnt[0][0, :, :, 2].std()) > 0.05, rcnt[5])
+    ok, msg = raises(lambda: ns.KUBA_Shader.execute("rings", code="// Buffer A\nvoid mainImage(out vec4 c, in vec2 f){\n c = vec4(oops);\n}\n// Image\nvoid mainImage(out vec4 c, in vec2 f){c=texture(iChannel0, f);}",
+                                                    width=16, height=8), "does not compile", "line 3")
+    check("tabs: a mistake in a buffer tab names its line in the pasted text", ok, msg)
+    grow_mask = torch.zeros((1, 90, 160))
+    grow_mask[:, :, :80] = 1.0
+    gr = ns.KUBA_Shader.execute("growth", seconds=2.0, mask=grow_mask, controls="seeds = 1, size = 1", loop=False).result
+    check("growth: it grows from its seeds, stays inside the mask and gives a depth",
+          float(gr[0][45, :, :80].mean()) > float(gr[0][1, :, :80].mean()) + 0.02 and float(gr[0][:, :, 82:].max()) == 0.0 and float(gr[6][:, :, 82:].max()) == 0.0
+          and float(gr[6].max()) > 0.5 and "Wired differently" not in gr[5],
+          f"{float(gr[0][45, :, :80].mean()):.3f} {float(gr[0][1, :, :80].mean()):.3f} {float(gr[6].max()):.3f} {gr[5]}")
+    check("growth: its loop is closed by a fade", "fades into the start" in ns.KUBA_Shader.execute("growth", width=64, height=36, seconds=0.4).result[5])
+    ok, msg = raises(lambda: __import__("kubapack.nodes.shader.nodes_mix", fromlist=["x"]).KUBA_ShaderMix.execute(shader_a="growth", shader_b="rings", width=32, height=16), "last frame")
+    check("mix: a shader with buffer tabs is refused with the reason", ok, msg)
 
     # ---- the built-in noise for a channel nothing is connected to
     nz = sr.noise_picture(7)
@@ -199,7 +321,7 @@ if gpu:
 
     # ---- the node
     out = ns.KUBA_Shader.execute("warped noise", width=160, height=96, seconds=0.4)
-    images, masks, fps, audio, count, report = out.result
+    images, masks, fps, audio, count, report = out.result[:6]
     check("node, nothing connected: a preset plays", images.shape == (10, 96, 160, 3) and masks.shape == (10, 96, 160) and count == 10
           and fps == 25.0 and float(images.max()) > 0.2 and audio["waveform"].shape[-1] == 17640 and "warped noise" in report
           and "brightness" in report and "scale = 3" in report, report)
@@ -207,7 +329,7 @@ if gpu:
     out = ns.KUBA_Shader.execute("warped noise", controls="scale = 9", width=64, height=32, seconds=0.2, loops=2)
     check("node: controls text is used", "scale = 9" in out.result[5])
     drift = "out vec4 c;\nvoid main(){ c = vec4(vec3(fract(iTime * 0.37)), 0.25 + 0.5 * gl_FragCoord.x / iResolution.x); }"
-    i1, m1, _, _, n1, r1 = ns.KUBA_Shader.execute("rings", code=drift, width=64, height=32, seconds=1.0, loop=True, loop_fade=0.4).result
+    i1, m1, _, _, n1, r1 = ns.KUBA_Shader.execute("rings", code=drift, width=64, height=32, seconds=1.0, loop=True, loop_fade=0.4).result[:6]
     i0 = ns.KUBA_Shader.execute("rings", code=drift, width=64, height=32, seconds=1.0, loop=False).result[0]
     step = float((i0[1] - i0[0]).abs().max())
     check("node, own shader with loop: the end fades into the start", n1 == 25 and "fades into the start over 0.40 s" in r1
@@ -215,27 +337,27 @@ if gpu:
           and abs(float(i1[0, 0, 0, 0]) - (0.37 * 25 / 25) % 1.0) < 1e-4, r1)
     check("node: the shader's alpha is the mask when it writes one", "alpha" in r1 and float(m1[0, 5, 0]) < 0.3 and float(m1[0, 5, -1]) > 0.7 and step > 0)
     toy = "void mainImage(out vec4 c, in vec2 f){ c = vec4(vec3(f.x / iResolution.x), 0.0); }"
-    it, mt, _, _, _, rt = ns.KUBA_Shader.execute("rings", code=toy, width=64, height=32, seconds=0.2, mask_from="alpha").result
+    it, mt, _, _, _, rt = ns.KUBA_Shader.execute("rings", code=toy, width=64, height=32, seconds=0.2, mask_from="alpha").result[:6]
     check("node: a Shadertoy's alpha is ignored, as on shadertoy.com (alpha 0 is still a picture and a mask)",
           "brightness" in rt and "has no alpha" in rt and float(mt[0, 5, -1]) > 0.9 and float(it[0, 5, -1, 0]) > 0.9, rt)
     cut = torch.zeros((1, 32, 64))
     cut[:, :, :32] = 1.0
     ramp = torch.linspace(0, 1, 64)[None, None].repeat(1, 32, 1)
-    ic, mc, _, _, _, rc = ns.KUBA_Shader.execute("scan band", width=0, height=0, seconds=0.2, mask=cut, field=1.0 - ramp).result
+    ic, mc, _, _, _, rc = ns.KUBA_Shader.execute("scan band", width=0, height=0, seconds=0.2, mask=cut, field=1.0 - ramp).result[:6]
     check("node: size from the mask, pictures and masks are cut to it", ic.shape == (5, 32, 64, 3) and float(ic[:, :, 32:].max()) == 0.0
           and float(mc[:, :, 32:].max()) == 0.0 and float(ic[:, :, :32].max()) > 0.2, rc)
     check("node: the mask of a cut preset is the band, not the cut", "brightness" in rc and float(mc[:, :, :32].min()) < 0.1 < float(mc[:, :, :32].max()), rc)
-    _, ma, _, _, _, ra = ns.KUBA_Shader.execute("rings", code=drift, width=64, height=32, seconds=0.2, loop=False, mask=cut).result
+    _, ma, _, _, _, ra = ns.KUBA_Shader.execute("rings", code=drift, width=64, height=32, seconds=0.2, loop=False, mask=cut).result[:6]
     check("node: a shader's own alpha is cut to the mask too", "alpha" in ra and float(ma[:, :, 32:].max()) == 0.0 and 0.2 < float(ma[0, 5, 0]) < 0.3, ra)
     listen = "void mainImage(out vec4 c, in vec2 f){ c = vec4(kLow, kBeat, kBeats / 8.0, 1.0); }"
-    il, _, _, al, nl, rl = ns.KUBA_Shader.execute("rings", code=listen, width=16, height=8, loop=False).result
+    il, _, _, al, nl, rl = ns.KUBA_Shader.execute("rings", code=listen, width=16, height=8, loop=False).result[:6]
     check("node: a shader that listens gets the built-in beat", nl == 100 and "built-in beat" in rl and float(il[0, 0, 0, 1]) == 1.0
           and float(il[0, 0, 0, 0]) > 0.5 and float(il[6, 0, 0, 1]) < 0.6 and al["waveform"].shape[-1] == 4 * 44100, rl)
     wave = torch.from_numpy(so.sample_sound(2.0, 100.0, 22050))[None, None]
-    _, _, _, a2, n2, r2 = ns.KUBA_Shader.execute("rings", width=16, height=8, audio={"waveform": wave, "sample_rate": 22050}, bpm=100.0).result
+    _, _, _, a2, n2, r2 = ns.KUBA_Shader.execute("rings", width=16, height=8, audio={"waveform": wave, "sample_rate": 22050}, bpm=100.0).result[:6]
     check("node: the length is the sound's, the tempo can be set", n2 == 50 and a2["sample_rate"] == 22050 and "100.0 bpm (set)" in r2, r2)
     img = torch.rand((3, 20, 40, 3))
-    ig, _, _, _, ng, rg = ns.KUBA_Shader.execute("chromatic split", controls="amount = 0, wave = 0, sound = 0", image0=img).result
+    ig, _, _, _, ng, rg = ns.KUBA_Shader.execute("chromatic split", controls="amount = 0, wave = 0, sound = 0", image0=img).result[:6]
     check("node: a picture batch is the clip, one picture per frame", ng == 3 and ig.shape == (3, 20, 40, 3)
           and float((ig - img).abs().max()) < 2e-3, f"{rg} {float((ig - img).abs().max())}")
     rs = ns.KUBA_Shader.execute("glass", width=64, height=32, seconds=0.1).result[5]
@@ -250,10 +372,10 @@ if gpu:
     ok, msg = raises(lambda: ns.KUBA_Shader.execute("rings", code="float f(float x) { return x * 2.0; }", width=16, height=8), "whole shader", "Ctrl+A")
     check("node: half a shader says what is missing and how to copy all of it", ok, msg)
     reads = "void mainImage(out vec4 c, in vec2 f){ c = vec4(texture(iChannel0, f / iResolution.xy).rgb, 1.0); }"
-    i_n, _, _, _, _, r_n = ns.KUBA_Shader.execute("rings", code=reads, width=64, height=64, seconds=0.04, loop=False).result
+    i_n, _, _, _, _, r_n = ns.KUBA_Shader.execute("rings", code=reads, width=64, height=64, seconds=0.04, loop=False).result[:6]
     check("node: your code reading a picture with none connected gets the built-in noise, and the report says so",
           "built-in noise" in r_n and "image0" in r_n and float(i_n.std()) > 0.08, r_n)
-    i_b, _, _, _, _, r_b = ns.KUBA_Shader.execute("rings", code=reads, width=64, height=64, seconds=0.04, loop=False, unconnected="black").result
+    i_b, _, _, _, _, r_b = ns.KUBA_Shader.execute("rings", code=reads, width=64, height=64, seconds=0.04, loop=False, unconnected="black").result[:6]
     check("node: unconnected = black", float(i_b.max()) == 0.0 and "black" in r_b, r_b)
     r_s = ns.KUBA_Shader.execute("mosaic", width=64, height=32, seconds=0.04, unconnected="noise").result[5]
     check("node: unconnected = noise for a preset too", "built-in noise" in r_s and "sample facade" not in r_s, r_s)
@@ -356,6 +478,45 @@ if gpu:
           [(0.5, 0.0, 1.0, "0 = hard edges, 1 = soft"), (2.0, 0.0, 2.0, "wide lines"), (0.0, 0.0, 1.0, "")], str(cs))
     check("pictures: the node says what it will draw before a queue", all(x in pick for x in ('"draws"', "cannot run: ", "the preset is not used", "Hanken Grotesk KKD",
           "drawing the pictures")) and ns.shader_info("", "https://www.shadertoy.com/view/XslGRr")["error"].startswith("this is a link"))
+    # ---- a fill's own field: the shape's edges (extrude, region contours)
+    probe = "void mainImage(out vec4 c, in vec2 f){ c = vec4(kField(kUV), kMask(kUV), 0.0, 1.0); }"
+    fl = lambda **k: rd.parse(dict(doc, layers=[dict(doc["layers"][0], **k), doc["layers"][1]]))["layers"][0]   # noqa: E731
+    Lr = fl(shape=dict(type="rect", code=probe, field="edge"))
+    f_r = rd.shader_field(Lr)
+    check("field: a rectangle rises from its outline to its middle, the mask is the shape", f_r.shape == (50, 80, 2) and float(f_r[0, 40, 0]) == 0.0
+          and float(f_r[25, 40, 0]) > 0.95 and 0.2 < float(f_r[25, 6, 0]) < 0.35 and float(f_r[..., 1].min()) == 1.0, f"{f_r[25, 40]} {f_r[25, 6]}")
+    f_e = rd.shader_field(fl(shape=dict(type="ellipse", code=probe, field="edge")))
+    check("field: an ellipse is 0 in the corners of its box, 1 in the middle", float(f_e[1, 1, 1]) == 0.0 and float(f_e[1, 1, 0]) == 0.0 and float(f_e[25, 40, 0]) > 0.95)
+    two_r = np.zeros((90, 160), bool)
+    two_r[30:60, 45:70] = True
+    two_r[30:60, 90:115] = True
+    f_c = rd.shader_field(Lr, two_r, (160, 90))
+    check("field: a layer clipped to regions has every region as a piece of its own", float(f_c[25, 17, 0]) > 0.9 and float(f_c[25, 62, 0]) > 0.9
+          and float(f_c[25, 40, 1]) == 0.0 and float(f_c[25, 40, 0]) == 0.0 and float(f_c[5, 17, 1]) == 0.0, f"{f_c[25, 17]} {f_c[25, 62]} {f_c[25, 40]}")
+    turned = rd.shader_field(dict(Lr, rotation=90.0), two_r, (160, 90))
+    check("field: the regions follow a turned layer into its box", float(turned[..., 1].sum()) > 0 and not np.array_equal(turned[..., 1], f_c[..., 1]))
+    edge_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(type="rect", code=probe, field="edge")), doc["layers"][1]])
+    ie_ = rd.render(rd.animate(edge_doc, 0.0), base, {}, image_only=True)["image"]
+    ramp_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(type="rect", code=probe)), doc["layers"][1]])
+    ir_ = rd.render(rd.animate(ramp_doc, 0.0), base, {}, image_only=True)["image"]
+    check("director: field = the shape's edges reaches the shader; without it the old left to right ramp stays",
+          float(ie_[45, 80, 0]) > 0.9 and float(ie_[45, 42, 0]) < 0.1 and float(ie_[22, 80, 0]) < 0.1 and float(ir_[45, 42, 0]) < 0.1 and float(ir_[45, 117, 0]) > 0.9
+          and abs(float(ir_[22, 80, 0]) - 0.5) < 0.05, f"{ie_[45, 80]} {ie_[45, 42]} {ir_[45, 117]}")
+    check("director: extrude takes the shape's edges by itself, region contours and own code keep the ramp until told",
+          fl(shape=dict(type="rect", shader="extrude"))["shape"]["field"] == "edge" and fl(shape=dict(type="rect", shader="region contours"))["shape"]["field"] == "ramp"
+          and fl(shape=dict(type="rect", code=probe))["shape"]["field"] == "ramp" and fl(shape=dict(type="rect", shader="extrude", field="ramp"))["shape"]["field"] == "ramp"
+          and ns.shader_info("extrude")["wants_field"] and not ns.shader_info("rings")["wants_field"])
+    ex_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(type="ellipse", shader="extrude", c_rise=0, c_sway=0, c_turns=0)), doc["layers"][1]])
+    iex = rd.render(rd.animate(ex_doc, 0.0), np.full((90, 160, 3), 0.5, np.float32), {}, image_only=True)["image"]
+    check("director: an ellipse filled with extrude lifts the picture under it as a block in its own shape: flat on top, lit and shaded on its slopes",
+          abs(float(iex[45, 80, 0]) - 0.5) < 0.02 and float(iex[20:70, 40:120, 0].max()) > 0.6 and float(iex[20:70, 40:120, 0].min()) < 0.4
+          and abs(float(iex[5, 5, 0]) - 0.5) < 1e-4, f"{iex[45, 80]} {iex[20:70, 40:120, 0].max():.3f} {iex[20:70, 40:120, 0].min():.3f}")
+    buf_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(type="rect", code=COUNT)), doc["layers"][1]])
+    rbuf = rd.render(rd.animate(buf_doc, 0.0), base, {}, image_only=True)
+    check("director: a Shadertoy with buffer tabs is named as node only, the colour shows", any("buffer tabs" in n for n in rbuf["notes"])
+          and abs(float(rbuf["image"][45, 80, 0]) - 1.0) < 0.01 and ns.shader_info("", COUNT)["buffers"] == ["A", "B"], str(rbuf["notes"]))
+    check("window: a fill's own field and the buffer refusal are wired", all(x in js for x in ("shaderField(L, info)", "shaderFieldMode(L, info)", 'data-id="sh-fieldsrc"',
+          "gl.RGBA16F, field.w, field.h", 'fieldRamp(rp, fw, fh, { field: "edge distance", per: "each region" }, 1)', "info.buffers || []")))
     reads_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(shape, code=reads)), doc["layers"][1]])
     i_d = rd.render(rd.animate(reads_doc, 0.0), base, {}, image_only=True)["image"]
     check("director: a shader that reads a picture gets the built-in noise (as the window)", float(i_d[25:65, 45:115].std()) > 0.1)

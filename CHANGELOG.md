@@ -66,6 +66,57 @@ may have changed since.
   come out of the wall on the timeline or with the sound. Look: the height as grey, a relief lit from the side,
   or shading (white on the flat wall, for blend multiply over the picture under it). The window and the render
   agree per pixel.
+- **3D scenes in kubakub shader (raymarching).** A shader can now be a 3D scene. Five new presets:
+  *melting forms* (soft forms that flow into each other and out of a wall, with real shadows), *colonnade* (an
+  endless walk between two rows of columns, the sun laying their shadows across the floor), *facade relief* (your
+  picture as a real relief from its depth pass: the view leans, near parts hide far ones, a circling light throws
+  true shadows), *extrude* (the regions of a field rise out of the wall as blocks and throw shadows on it) and
+  *fog light* (a beam swinging through drifting fog). Each has a `steps` control that trades clean edges for
+  speed; about 100 ms per frame at 1920x1080. For your own code the node brings the usual parts, added when a
+  shader uses their names: distance functions (`sdSphere`, `sdBox`, `sdRoundBox`, `sdTorus`, `sdCylinder`,
+  `sdCapsule`, `sdPlane`), smooth joins (`opSmoothUnion` ...), `opRep`, `kRot`, and `kCamera`, `kMarch`, `kNormal`,
+  `kShadow`, `kAO` that walk your `float map(vec3 p)`. A pasted Shadertoy that brings its own keeps its own.
+- **A depth output on kubakub shader.** New output `depth` (near = white) from a shader that is a 3D scene: the
+  four solid presets write it, your own code writes `kDepth`. It goes into `image1` of another kubakub shader
+  (wireframe, point cloud, depth scan, hard shadow), into kubakub height animate or a depth ControlNet. Other
+  shaders give one black picture there. Saved workflows keep their links (the output is added at the end).
+  The report now says when a frame takes longer than a quarter of a second, and what to lower. Example
+  `shader_3d.json`, section "3D scenes" in [docs/shader.md](docs/shader.md).
+- **The same in the kubakub director.** The 3D presets are in the fill menu of a shape and play live; facade
+  relief works on the layers below.
+- **Shadertoys with Buffer tabs.** A Shadertoy that has Buffer A - D tabs (simulations, trails, feedback) now
+  runs on kubakub shader: paste every tab under a line that names it (`// Buffer A`, `// Image`). The node assumes
+  the usual wiring (iChannel0 = Buffer A ...) and the tab's line can say otherwise (`// Buffer A: 1 = noise`); the
+  report lists what every tab reads. New preset **growth** uses it: a pattern that grows from seeds into spots,
+  worms and mazes, like lichen over the wall, inside your mask, with a depth (59 presets). Node only, like slit
+  scan: not a fill in the director, not in shader mix.
+- **The shape as the field in the director.** A shader fill that runs along a field has a new **field** row:
+  left to right, or the shape's edges. With the edges, a layer clipped to regions has every region as its own
+  piece, so region contours draws around every window and extrude lifts every window as a block. extrude uses
+  the edges by itself; other fills keep left to right, so saved compositions look as before.
+- **Fixes from a review of the whole pack (2026-10-11).**
+  - Director: a layer with a stagger or in a swap no longer lights up the places that belong to no region; a
+    glow that names a shape layer no longer stops the render; numbers that are no numbers in a hand-edited
+    composition fall back to their defaults; frame counts are rounded as the window rounds them, and the export
+    box no longer names one frame too many; a sound gain of 0 is silent; an export whose sound is shorter than
+    its frames is filled with silence instead of being cut; Stop now works during a sequence and a walkthrough.
+  - Director window: Esc in the shader pictures closes the pictures, not the window; a dropdown that keeps the
+    focus no longer swallows the shortcuts (and Ctrl+S / O / J in a text field no longer open the browser's
+    dialogs); Space pans also right after a button was clicked; text typed into *clip to* is kept when another
+    layer is clicked; the timeline can be scrubbed with a pen; length is held to 0.5 s and more.
+  - Shader: a `void main(` in a comment, `#extension` lines, `uniform highp float iTime;` and
+    `float map(const in vec3 p)` no longer break a pasted shader; a compile message with a line break in it is
+    shown whole; stripes loops with an odd speed (it moves by an even count now); the sound and kSeconds are as
+    long as the frames; a still 4K field no longer costs 30 ms at every frame; an empty picture batch is ignored.
+  - Masks: with no sound connected, mask animate and sound mask swap keep moving after 8 s; a trigger curve in
+    steps starts at 0; a mask with four dimensions is read.
+  - Safety: `blender_path` on a node must be a full path, is never taken from ComfyUI's input, output, temp or
+    user folders, and is not used at all while ComfyUI answers other computers (`--listen`): set `blender = ...`
+    in kubakub.ini there. A path with a `%VARIABLE%` may not lead to a network share, and kubakub render passes
+    reads a network folder only on a click, not when a workflow is opened. The shader text has a size limit and
+    is checked off the server's own thread. `filename_prefix` of regions to vector cannot leave the output
+    folder through a drive letter. A lamp colour in a composition must be a hex colour.
+- **kubakub mask animate** no longer grows taller with every session.
 - **kubakub shader mix.** New node in **2d / shader**: two shaders and one mix value, 0 = shader A, 1 = shader
   B. In between they meet in the shaders, not as two pictures laid over each other: **b works on a** (B is an
   effect on A's picture), **a bends b** (A pushes the places B draws at, B melts out of A), **a cuts b** (a wipe

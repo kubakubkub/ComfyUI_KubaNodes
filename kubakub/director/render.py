@@ -56,7 +56,7 @@ class DocumentError(ValueError):
 
 def _num(d, k, default):
     v = d.get(k, default)
-    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else float(default)
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v) else float(default)
 
 
 def _video(v) -> dict:
@@ -85,7 +85,11 @@ def _shape(sh) -> dict:
                    # what the shader reads as its picture (image0): the layers below it, or the built-in noise a
                    # pasted Shadertoy expects
                    input=sh["input"] if sh.get("input") in ("below", "noise") else
-                   ("noise" if code.strip() else "below"))
+                   ("noise" if code.strip() else "below"),
+                   # what it reads as its field (kField) and mask: a left to right ramp, or the shape's own outline
+                   # inwards (with the regions the layer is clipped to), the default of a preset that needs regions
+                   field=sh["field"] if sh.get("field") in FIELDS else
+                   ("edge" if shader and not code.strip() and _wants_field(shader) else "ramp"))
         out.update({k: float(v) for k, v in sh.items() if k.startswith("c_") and _is_num(v)})     # its controls
         vec = _arrow(sh.get("vec"))
         if vec:                                           # an arrow drawn on the layer: (x0, y0, x1, y1) in its box, 0-1
@@ -213,14 +217,74 @@ def _under(below, L):
     return out
 
 
-def shader_source(L, tl, max_side=4096, below=None):
+FIELDS = ("ramp", "edge")
+FIELD_SIDE = 512                                 # the longer side of a shader fill's own field, in pixels
+
+
+def _wants_field(preset) -> bool:
+    from .. import shadertoy as st
+    try:
+        return st.sample_field(st.preset_code(preset))
+    except Exception:  # noqa: BLE001      an unknown preset is reported where it is drawn
+        return False
+
+
+def shader_field(L, clip=None, canvas=None) -> np.ndarray:
+    """What a shader fill reads as kField and kMask when its field is the shape's edges: float32 [fh, fw, 2] in the
+    layer's box (not turned). The first is the way from the outline inwards, 0 on the edge and 1 at the deepest
+    point of every separate piece (= kubakub mask field, edge distance, each region); the second is 1 inside.
+    clip: the regions the layer is clipped to as a mask of the whole canvas (canvas = its (W, H)): the pieces are
+    then those regions inside the shape. The window computes the same (shaderField)."""
+    from .. import maskfields as mf
+    sh = L["shape"]
+    bw, bh = max(1.0, abs(L["w"])), max(1.0, abs(L["h"]))
+    s = min(1.0, FIELD_SIDE / max(bw, bh))
+    fw, fh = max(2, int(_js_round(bw * s))), max(2, int(_js_round(bh * s)))
+    a = np.zeros((fh, fw), np.uint8)
+    S = 16
+    if sh["type"] == "ellipse":
+        cv2.ellipse(a, (int(round((fw / 2 - 0.5) * S)), int(round((fh / 2 - 0.5) * S))), (int(round(fw / 2 * S)), int(round(fh / 2 * S))),
+                    0, 0, 360, 255, -1, cv2.LINE_8, 4)
+    elif sh["type"] == "poly":
+        pts = (np.array(sh["points"], np.float64) * [fw, fh] - 0.5) * S
+        cv2.fillPoly(a, [np.round(pts).astype(np.int32)], 255, cv2.LINE_8, 4)
+    else:
+        a[:] = 255
+    inside = a > 0
+    if clip is not None and canvas:
+        W, H = canvas
+        mh, mw = clip.shape[:2]
+        u = ((np.arange(fw) + 0.5) / fw - 0.5) * bw * (-1 if L.get("flip_h") else 1)
+        v = ((np.arange(fh) + 0.5) / fh - 0.5) * bh * (-1 if L.get("flip_v") else 1)
+        ang = np.radians(L.get("rotation") or 0.0)
+        c, s_ = np.cos(ang), np.sin(ang)
+        xi = np.floor((L["x"] + L["w"] / 2 + c * u[None, :] - s_ * v[:, None]) * mw / W).astype(np.int64)
+        yi = np.floor((L["y"] + L["h"] / 2 + s_ * u[None, :] + c * v[:, None]) * mh / H).astype(np.int64)
+        ok = (xi >= 0) & (xi < mw) & (yi >= 0) & (yi < mh)
+        on = np.zeros((fh, fw), bool)
+        on[ok] = np.asarray(clip)[yi[ok], xi[ok]] > 0
+        inside &= on
+    out = np.zeros((fh, fw, 2), np.float32)
+    lab, n = mf.from_masks(inside[None].astype(np.float32), True, 1)
+    if n:
+        out[..., 0] = mf.field(lab, n)[0]
+    out[..., 1] = inside
+    return out
+
+
+def shader_source(L, tl, max_side=4096, below=None, clip=None, canvas=None):
     """A shape layer filled by a shader (kubakub/shadertoy.py): the shape's pixels with the shader's picture in the
     layer's box, as the window draws it (the shader is seen through the shape, nothing outside the box).
     below: the composite of the layers under this one; a shader with input = below reads the part under its box as
-    its picture (None = not known yet: black). Other pictures a shader reads are the built-in noise."""
+    its picture (None = not known yet: black). Other pictures a shader reads are the built-in noise.
+    clip, canvas: the regions the layer is clipped to (shader_field), for a fill whose field is the shape's edges."""
     from .. import shader_render as sr
     sh = L["shape"]
     t = _shader_text(sh)
+    if t.buffers:
+        from ..shadertoy import ShaderError
+        raise ShaderError("a Shadertoy with buffer tabs builds on its own last frames: it runs on the kubakub shader node "
+                          "only (bring its frames in as a video layer)")
     out, pad, gw, gh = _shape_pixels(L, max_side)
     bw, bh = max(1.0, abs(L["w"])), max(1.0, abs(L["h"]))
     s = out.shape[1] / (bw + 2 * pad)
@@ -235,6 +299,8 @@ def shader_source(L, tl, max_side=4096, below=None):
                 pictures[0] = (lambda pic: lambda k: ("below", pic))(_under(below, L))
         elif i not in t.optional:
             pictures[i] = sr.noise_texture(7 + 2 * i)
+    if sh.get("field") == "edge" and t.uses & {"kField", "kMask"}:
+        pictures[sr.FIELD_UNIT] = (lambda pair: lambda k: ("edge", pair))(shader_field(L, clip, canvas))
     px = sr.still(t.source, iw, ih, values, static, pictures)
     inside = np.zeros(out.shape[:2], np.float32)
     inside[p:p + ih, p:p + iw] = px[..., 3]
@@ -276,7 +342,7 @@ def parse(doc) -> dict:
         doc = json.loads(doc) if doc.strip() else {}
     if not isinstance(doc, dict):
         raise DocumentError("the director document must be a JSON object")
-    if doc.get("version", 1) != 1:
+    if doc.get("version", 1) not in (1, "1"):
         raise DocumentError(f"director document version {doc.get('version')} is not supported")
     layers = doc.get("layers") or [{"id": "base", "name": "base", "kind": "base"}]
     out, ids = [], set()
@@ -293,8 +359,8 @@ def parse(doc) -> dict:
         mode = raw.get("blend", "normal")
         if mode not in bl.MODES:
             raise DocumentError(f"layer {lid}: unknown blend mode {mode!r}")
-        m = raw.get("mask") or {}
-        adj = raw.get("adjust") or {}
+        m = raw.get("mask") if isinstance(raw.get("mask"), dict) else {}
+        adj = raw.get("adjust") if isinstance(raw.get("adjust"), dict) else {}
         action = raw.get("action", "keep" if kind in ("base", "adjust", "light", "shape") else "rediffuse")
         if action not in ACTIONS:
             raise DocumentError(f"layer {lid}: unknown action {action!r}")
@@ -536,11 +602,20 @@ def key_value(keys, t, presorted=False):
 
 
 def timeline(doc) -> dict:
-    tl = (doc or {}).get("timeline") or {}
-    dur = min(max(float(tl.get("duration") or 10), 0.5), 3600.0)
-    fps = int(min(max(round(float(tl.get("fps") or 25)), 1), 120))
-    return {"duration": dur, "fps": fps, "time": min(max(float(tl.get("time") or 0), 0.0), dur),
-            "frames": max(1, int(round(dur * fps)))}
+    tl = (doc or {}).get("timeline") if isinstance(doc, dict) else None
+    tl = tl if isinstance(tl, dict) else {}
+
+    def num(k, default):                              # a number, also typed as text; anything else is the default
+        try:
+            v = float(tl.get(k))
+        except (TypeError, ValueError):
+            return float(default)
+        return v if np.isfinite(v) else float(default)
+
+    dur = min(max(num("duration", 10) or 10, 0.5), 3600.0)
+    fps = int(min(max(_js_round(num("fps", 25) or 25), 1), 120))      # rounded as the window rounds (half up)
+    return {"duration": dur, "fps": fps, "time": min(max(num("time", 0), 0.0), dur),
+            "frames": max(1, int(_js_round(dur * fps)))}
 
 
 def _copy1(L):
@@ -660,6 +735,11 @@ def layer_shape(doc, layer_id, sources, labels=None, table=None, W=0, H=0):
     elif L["kind"] == "shape":
         src, Lp = shape_source(L)
         got = place(src, Lp, W, H)
+        if got is None:
+            return None
+        m = np.zeros((H, W), np.float32)
+        (x0, y0, x1, y1), _, a = got
+        m[y0:y1, x0:x1] = a
     elif L["kind"] in ("image", "paint"):
         src = sources.get(L["source"])
         got = None if src is None else (place(_as_rgba(src), L, W, H) if L["kind"] == "image" else _full(_as_rgba(src), W, H))
@@ -766,6 +846,15 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
             m = mc[k] = np.isin(labels, ids)
         return m
 
+    def fill_clip(L):                                    # the regions a shader fill is clipped to, for its own field
+        if not L["clip"] or labels is None:
+            return None
+        k = ("ids", L["clip"])
+        ids = mc.get(k)
+        if ids is None:
+            ids = mc[k] = select_regions(table, L["clip"])
+        return full_mask(ids) if ids else None
+
     def region_crop(ids, box):
         x0, y0, x1, y1 = box
         if labels is None or not ids:
@@ -850,7 +939,10 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
                         lut[i] *= wts.get(int(i), 1.0)
             stagger_luts[key] = lut
         x0, y0, x1, y1 = box
-        return lut[labels[y0:y1, x0:x1]]
+        lab = labels[y0:y1, x0:x1]                    # -1 = no region there: it must not read the last region's weight
+        if not len(lut):
+            return np.zeros(lab.shape, np.float32)
+        return np.where(lab >= 0, lut[np.clip(lab, 0, len(lut) - 1)], 0).astype(lut.dtype, copy=False)
 
     def finish(L, piece):
         """A layer's placed pixels with its clip, its effects and the light it reacts to."""
@@ -908,7 +1000,7 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
                 late.add(i)
             elif is_shader(L) and (L["visible"] or i in masking):
                 try:
-                    src, Lp = shader_source(L, tl_now)
+                    src, Lp = shader_source(L, tl_now, clip=fill_clip(L), canvas=(W, H))
                 except Exception as e:  # noqa: BLE001      a broken shader must not cost the frame: its colour shows
                     notes.append(f"{L['name']}: shader not drawn ({str(e).splitlines()[0]})")
             if src is None:
@@ -1015,7 +1107,7 @@ def render(doc, base: np.ndarray, sources: dict | None = None, labels: np.ndarra
             continue
         if i in late:                                   # its picture is everything composited so far
             try:
-                got = place(*shader_source(L, tl_now, below=comp), W, H)
+                got = place(*shader_source(L, tl_now, below=comp, clip=fill_clip(L), canvas=(W, H)), W, H)
             except Exception as e:  # noqa: BLE001      a broken shader must not cost the frame: its colour shows
                 got = None
                 notes.append(f"{L['name']}: shader not drawn ({str(e).splitlines()[0]})")

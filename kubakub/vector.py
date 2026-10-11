@@ -465,7 +465,7 @@ def render_preview(doc, H, W, background=None) -> np.ndarray:
 def write_all(doc, folder: str, prefix: str, formats=("svg", "pdf", "dxf")):
     """Write the document; the next free counter keeps earlier files. Returns the written paths."""
     sub, prefix = os.path.split(prefix.replace("\\", "/"))    # 'project/regions' = a subfolder, as in ComfyUI's save nodes
-    if sub and not os.path.isabs(sub) and ".." not in sub.split("/"):
+    if sub and not os.path.isabs(sub) and not os.path.splitdrive(sub)[0] and ".." not in sub.split("/"):
         folder = os.path.join(folder, sub)
     os.makedirs(folder, exist_ok=True)
     n = 1

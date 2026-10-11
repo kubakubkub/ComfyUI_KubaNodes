@@ -190,7 +190,7 @@ app.registerExtension({
     const executed = nodeType.prototype.onExecuted;
     nodeType.prototype.onExecuted = function (msg) {    // room for the playing masks under the curve, once
       const r = executed?.apply(this, arguments);
-      if (msg?.images?.length && !this.kkmGrown) { this.kkmGrown = true; this.setSize([this.size[0], this.size[1] + 240]); }
+      if (msg?.images?.length && !this.properties?.kkmGrown) { (this.properties ||= {}).kkmGrown = true; this.setSize([this.size[0], this.size[1] + 240]); }      // once per node, also after a reload
       return r;
     };
     const removed = nodeType.prototype.onRemoved;

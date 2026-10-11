@@ -453,7 +453,7 @@ def progress_triggers(t, triggers, cycle, easing="linear", steps=1):
         return run
     pos = (k - 1 + run) / float(steps)
     fr = pos - math.floor(pos)
-    return 1.0 if fr < 1e-9 else fr
+    return 1.0 if fr < 1e-9 and pos > 0 else fr      # the first trigger starts at 0, not at the end of a round
 
 
 def field_of(motion):

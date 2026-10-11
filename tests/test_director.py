@@ -291,6 +291,23 @@ check("no video block: no animate", "animate" not in rd.render(doc(dict(vd_doc["
 sd = rd.scale_doc({"canvas": [W, H], "layers": [{"id": "A", "x": 10, "y": 20, "w": 40, "h": 60}]}, 0.5)
 check("scale_doc", sd["layers"][0]["x"] == 5 and sd["layers"][0]["h"] == 30 and sd["canvas"] == [round(W / 2), round(H / 2)])
 
+# --- review 2026-10-11: documents that were edited by hand, glow by a shape, frame counts as the window ----------
+_base = np.zeros((40, 60, 3), np.float32)
+_sq = {"id": "s", "name": "s", "kind": "shape", "x": 10, "y": 10, "w": 20, "h": 10, "color": "#ffffff", "shape": {"type": "rect"}}
+_doc = {"version": 1, "layers": [_sq, {"id": "base", "name": "base", "kind": "base"}]}
+m_ = rd.layer_shape(_doc, "s", {}, None, None, 60, 40)
+check("the shape of a shape layer as a mask (a glow can name it)", m_ is not None and m_.shape == (40, 60) and m_[15, 20] == 1.0 and m_[5, 5] == 0.0)
+bad_ = {"version": "1", "timeline": [1], "layers": [dict(_sq, x=float("nan"), opacity=float("nan"), rotation=float("inf"), mask="base", adjust=[1]),
+                                                    {"id": "base", "name": "base", "kind": "base"}]}
+try:
+    out_ = rd.render(bad_, _base, {}, image_only=True)["image"]
+    check("numbers that are no numbers and wrong types fall back to the defaults", bool(np.isfinite(out_).all()) and rd.parse(bad_)["layers"][0]["x"] == 0.0)
+except Exception as e:  # noqa: BLE001
+    check("numbers that are no numbers and wrong types fall back to the defaults", False, repr(e))
+check("frame counts are rounded as the window rounds (half up)", rd.timeline({"timeline": {"duration": 0.5, "fps": 25}})["frames"] == 13
+      and rd.timeline({"timeline": {"duration": 2, "fps": 24.5}})["fps"] == 25 and rd.timeline({"timeline": {"duration": "x", "fps": None}}) ==
+      {"duration": 10.0, "fps": 25, "time": 0.0, "frames": 250} and rd.timeline({"timeline": {"duration": "4"}})["duration"] == 4.0)
+
 print()
 if failures:
     print(f"{len(failures)} FAILED: {', '.join(failures)}")

@@ -224,7 +224,11 @@ def _natural_key(name):
 
 def clean_folder_path(path: str) -> str:
     """Accept paths pasted from Explorer's 'Copy as path', which adds quotes."""
-    return os.path.expandvars(os.path.expanduser((path or "").strip().strip('"').strip("'")))
+    raw = (path or "").strip().strip('"').strip("'")
+    out = os.path.expandvars(os.path.expanduser(raw))
+    if ("%" in raw or "$" in raw) and out.replace("/", "\\").startswith("\\\\"):
+        raise ValueError("a path with %VARIABLES% must not lead to a network share (\\\\server\\...): type the share's path itself.")
+    return out
 
 
 def list_mask_files(folder: str, recursive: bool = False):

@@ -122,8 +122,9 @@ class KUBA_ShaderMix(io.ComfyNode):
         tb, vb, notes_b, what_b = _shader("B", shader_b, code_b, controls_b)
         notes = notes_a + notes_b
         for t, which in ((ta, "A"), (tb, "B")):
-            if "kPrev" in t.uses:
-                raise ValueError(f"{NAME}: shader {which} builds on its own last frame (slit scan, datamosh, trails): "
+            if "kPrev" in t.uses or t.buffers:
+                raise ValueError(f"{NAME}: shader {which} builds on its own last frame (slit scan, datamosh, trails, a "
+                                 "Shadertoy with buffer tabs): "
                                  "that works in kubakub shader only. Mix its result as 'image' instead.")
         fps = float(min(max(fps, 1.0), 120.0))
         pic = image[..., :3].float().cpu().numpy() if image is not None else None

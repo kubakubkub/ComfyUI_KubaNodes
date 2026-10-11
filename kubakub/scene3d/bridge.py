@@ -44,6 +44,18 @@ def _pack_settings():
 kst = _pack_settings()
 
 
+def _in_comfy_folders(path) -> bool:
+    """The path lies in a folder a request can put files into (ComfyUI's input, output, temp, user)."""
+    try:
+        import folder_paths
+        roots = [folder_paths.get_input_directory(), folder_paths.get_output_directory(), folder_paths.get_temp_directory(),
+                 folder_paths.get_user_directory()]
+    except Exception:  # noqa: BLE001      no ComfyUI here (the tests)
+        return False
+    real = os.path.normcase(os.path.realpath(path))
+    return any(real == r or real.startswith(r + os.sep) for r in (os.path.normcase(os.path.realpath(x)) for x in roots if x))
+
+
 def find_blender(explicit: str = "") -> str:
     """Explicit path, setting blender (kubakub.ini), the newest 'Blender Foundation' install, or blender on PATH."""
     for i, cand in enumerate((explicit.strip().strip('"'), kst.get("blender", "").strip().strip('"'))):
@@ -53,6 +65,13 @@ def find_blender(explicit: str = "") -> str:
                 if cand.replace("/", "\\").startswith("\\\\"):
                     raise ValueError("blender_path: a network path is not started from a node. "
                                      "Set  blender = ...  in kubakub.ini [settings] instead.")
+                if not os.path.isabs(cand):
+                    raise ValueError(f"blender_path: '{cand}' is not the full path to blender.exe. "
+                                     "Set  blender = ...  in kubakub.ini [settings] instead.")
+                if kst.reachable_from_outside() or _in_comfy_folders(cand):
+                    raise ValueError("blender_path: a program is not started from a node while ComfyUI answers other "
+                                     "computers (--listen), and never from ComfyUI's own input, output, temp or user "
+                                     "folders. Set  blender = ...  in kubakub.ini [settings] instead.")
                 if not os.path.isdir(cand) and name not in ("blender.exe", "blender"):
                     raise ValueError(f"blender_path: '{cand}' is not blender.exe (or the folder that holds it). "
                                      "Another program is only started from  blender = ...  in kubakub.ini [settings].")
@@ -79,7 +98,11 @@ def find_blender(explicit: str = "") -> str:
 
 def clean_path(path: str) -> str:
     """A path as typed (quotes from 'Copy as path', %VAR%, ~) -> the file path the export uses."""
-    return os.path.expandvars(os.path.expanduser((path or "").strip().strip('"').strip("'")))
+    raw = (path or "").strip().strip('"').strip("'")
+    out = os.path.expandvars(os.path.expanduser(raw))
+    if ("%" in raw or "$" in raw) and out.replace("/", "\\").startswith("\\\\"):
+        raise ValueError("a path with %VARIABLES% must not lead to a network share (\\\\server\\...): type the share's path itself.")
+    return out
 
 
 def _file_stamps(obj, out):

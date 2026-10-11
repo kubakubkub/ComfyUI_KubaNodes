@@ -633,7 +633,7 @@ def timeline_audio(doc, sample_rate=44100):
         src0, dst0 = max(0, off), max(0, -off)
         m = max(0, min(wave.shape[-1] - src0, n - dst0))
         if m:
-            out[0, :, dst0:dst0 + m] = wave[:, src0:src0 + m] * float(a.get("gain", 1.0) or 1.0)
+            out[0, :, dst0:dst0 + m] = wave[:, src0:src0 + m] * (float(a["gain"]) if rd._is_num(a.get("gain")) else 1.0)
     if doc:                                           # + the sound of the video layers
         va, vnotes = media_audio(doc, tl["duration"], int(sr))
         if vnotes:
@@ -773,7 +773,9 @@ def _sequence_body(doc, docs, n, fps, windows, shown, hidden, mf, sources, base_
         frames[i] = img
 
     nxt = helper.submit(mf.decode, windows[0]) if windows else None
+    import comfy.model_management
     for k_, win in enumerate(windows):                # a window of video frames: compose it, free it
+        comfy.model_management.throw_exception_if_processing_interrupted()
         decoded = nxt.result()
         mf.frames = {}                                # the previous window goes before the next one is decoded
         mf.use_window(win, decoded)
