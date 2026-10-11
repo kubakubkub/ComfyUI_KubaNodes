@@ -1,4 +1,5 @@
 // about: the picture on image0 as a real relief: what stands out (a depth pass on image1, else its brightness) rises out of the wall, the view leans from side to side so near parts hide far ones, and a circling light throws true shadows. Raymarched. Loops without a jump. Writes a depth.
+// type: relief
 // optional: image1
 uniform float height;     // 0.12 0 0.5  how far the forms stand out, in picture heights
 uniform float sway;       // 0.5 0 2     how far the view leans to the side

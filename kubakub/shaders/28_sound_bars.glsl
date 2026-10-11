@@ -1,9 +1,11 @@
 // about: bars that jump with the music: lows on the left, highs on the right. Needs a sound (a built-in beat without one).
+// type: pattern
 uniform float bars;       // 24 3 120    how many bars
 uniform float gap;        // 0.2 0 0.8   space between bars
 uniform float mirror;     // 1 0 1       1 = bars grow from the middle line, 0 = from the bottom
 uniform float glow;       // 0.4 0 1
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 float hash1(vec2 p) {
     vec3 q = fract(vec3(p.xyx) * 0.1031);
     q += dot(q, q.yzx + 33.33);
@@ -21,6 +23,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float inbar = step(gap * 0.5, abs(fract(uv.x * n) - 0.5) * -1.0 + 0.5);
     float v = smoothstep(level, level - 0.02, y) * inbar;
     float halo = glow * smoothstep(level + 0.25, level, y) * 0.35 * inbar;
-    vec3 col = mix(LAV, ORG, x) * (v + halo) + vec3(1.0) * v * smoothstep(level - 0.06, level, y) * 0.5;
+    vec3 col = mix(colour_a, colour_b, x) * (v + halo) + vec3(1.0) * v * smoothstep(level - 0.06, level, y) * 0.5;
     fragColor = vec4(col * kMask(uv), 1.0);
 }

@@ -1,10 +1,12 @@
 // about: the picture on image0 printed in dots, big where it is bright; the raster slowly turns. Loops without a jump.
+// type: look
 uniform float dots;       // 70 8 300    dots across the picture
 uniform float angle;      // 30 0 90     degrees the raster is turned
 uniform float turn;       // 1 0 4       quarter turns of the raster in one loop
 uniform float colour;     // 1 0 1       0 = one ink colour, 1 = the picture's colours
 uniform float soft;       // 0.15 0.02 1
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853;
 vec3 pic(vec2 uv) { return texture(iChannel0, clamp(uv, 0.0, 1.0)).rgb; }
 float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
@@ -18,6 +20,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 pc = pic(c);
     float radius = sqrt(clamp(lum(pc), 0.0, 1.0)) * 0.62;
     float v = smoothstep(radius, radius - soft * 0.5, length(f));
-    vec3 ink = mix(mix(LAV, ORG, lum(pc)), pc / max(lum(pc), 0.05) * 0.8, colour);
+    vec3 ink = mix(mix(colour_a, colour_b, lum(pc)), pc / max(lum(pc), 0.05) * 0.8, colour);
     fragColor = vec4(ink * v * kMask(uv), 1.0);
 }

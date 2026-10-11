@@ -1,10 +1,12 @@
 // about: streaks of rain, or light falling down the wall, or along a drawn arrow. Loops without a jump.
+// type: pattern
 uniform float columns;    // 60 4 400    streaks across the picture
 uniform float length_;    // 0.25 0.02 1 how long a streak is
 uniform float speed;      // 2 1 8       how fast the fastest streaks fall
 uniform float slant;      // 0 -1 1      wind
 uniform float warm;       // 0.2 0 1     0 = cold blue, 1 = orange
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 float hash1(vec2 p) {
     vec3 q = fract(vec3(p.xyx) * 0.1031);
     q += dot(q, q.yzx + 33.33);
@@ -24,6 +26,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float y = fract(uv.y + kLoop * v + hash1(vec2(c, 7.0)));
     float streak = smoothstep(length_, 0.0, y) * smoothstep(0.0, 0.02, y);
     float thin = smoothstep(0.5, 0.2, abs(fract(uv.x * columns) - 0.5)) * step(0.35, h);
-    vec3 col = mix(vec3(0.55, 0.75, 1.0), ORG, warm) * streak * thin * (0.4 + 0.6 * h);
+    vec3 col = mix(vec3(0.55, 0.75, 1.0), colour_b, warm) * streak * thin * (0.4 + 0.6 * h);
     fragColor = vec4(col * kMask(kUV), 1.0);
 }

@@ -1,9 +1,11 @@
 // about: a honeycomb whose cells light up one after another. Loops without a jump; a beat can flash them.
+// type: pattern
 uniform float cells;      // 10 2 60     cells across the picture height
 uniform float gap;        // 0.08 0 0.5  the dark line between cells
 uniform float lit;        // 0.35 0.05 1 how many cells are lit at once
 uniform float beat;       // 0 0 1
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 float hash1(vec2 p) {
     vec3 q = fract(vec3(p.xyx) * 0.1031);
     q += dot(q, q.yzx + 33.33);
@@ -24,6 +26,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float inside = smoothstep(0.5 - gap * 0.5, 0.5 - gap * 0.5 - 0.03, d);
     float phase = fract(hash1(h.zw) - kLoop);
     float on = smoothstep(lit, 0.0, phase) + smoothstep(1.0 - lit * 0.15, 1.0, phase);
-    vec3 col = mix(LAV, ORG, hash1(h.zw + 4.2)) * (0.08 + on * (1.0 + beat * kBeat));
+    vec3 col = mix(colour_a, colour_b, hash1(h.zw + 4.2)) * (0.08 + on * (1.0 + beat * kBeat));
     fragColor = vec4(col * inside * kMask(kUV), 1.0);
 }

@@ -8,6 +8,7 @@ Run from the ComfyUI_windows_portable folder:
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -97,9 +98,64 @@ check("cubemap is named", raises(lambda: st.translate("uniform samplerCube c;\n"
 check("sound shader is named", raises(lambda: st.translate(TOY + "\nvec2 mainSound(int s, float t){return vec2(0.0);}\nvoid mainSound(){}"), "mainSound")[0])
 check("a compile log becomes short lines", st.explain("ERROR: 0:7: 'foo' : undeclared identifier\nERROR: 0:9: bad") ==
       "line 7: 'foo' : undeclared identifier\nline 9: bad")
+st.USER_DIR = tempfile.mkdtemp(prefix="kuba_my_shaders_")      # saved presets go here, not into the real user folder
 names = list(st.presets())
-check("presets are found, the first ones in their old order", len(names) >= 30 and names[:8] == ["mapping grid", "scan band", "warped noise",
-      "caustics", "voronoi cells", "rings", "chromatic split", "glass"] and len(set(names)) == len(names), str(names))
+check("presets are found, sorted by type and by file within a type", len(names) >= 30 and names[:6] == ["warped noise", "caustics", "voronoi cells",
+      "rings", "clouds", "fire"] and len(set(names)) == len(names), str(names))
+kinds = [st.preset_type(st.preset_code(n)) for n in names]
+keys = [k for k, _, _ in st.TYPES if k != "mine"]             # 'my presets' is empty until one is saved
+check("every preset names its type, and every type has presets", all(re.search(r"^// type: \w+$", st.preset_code(n), flags=re.M) for n in names)
+      and sorted(set(kinds), key=keys.index) == keys and kinds == sorted(kinds, key=keys.index)
+      and st.preset_type("// type: nonsense") == "pattern" and st.preset_type("void x;") == "pattern", str(sorted(set(kinds))))
+by = dict(zip(names, kinds))
+
+# ---- colours to pick: a vec3 with a hex colour in its comment
+INK = "uniform vec3 ink;   // #ff8000 the line\nuniform float thick; // 1 0 4\nuniform vec3 plain;\nvoid mainImage(out vec4 c, in vec2 f){ c = vec4(ink * thick + plain, 1.0); }"
+ti = st.translate(INK)
+check("colour: a vec3 with a hex comment is three controls and one name in the shader", [(c.name, round(c.default, 3), c.colour) for c in ti.controls]
+      == [("ink_r", 1.0, "ink"), ("ink_g", 0.502, "ink"), ("ink_b", 0.0, "ink"), ("thick", 1.0, "")] and "#define ink vec3(ink_r, ink_g, ink_b)" in ti.source
+      and "uniform float ink_r; uniform float ink_g; uniform float ink_b;" in ti.source and "uniform vec3 plain;" in ti.source
+      and ti.source.split("#line 1\n")[1].count("\n") == st.translate(INK.replace("// #ff8000 the line", "")).source.split("#line 1\n")[1].count("\n"))
+_cv, _cn = st.parse_values("ink = #0080FF, thick = 2  # a note\nplain = #ffffff", ti.controls)
+check("colour: 'ink = #0080ff' in controls sets the three, a comment after # still works", (_cv["ink_r"], round(_cv["ink_g"], 3), _cv["ink_b"], _cv["thick"]) == (0.0, 0.502, 1.0, 2.0)
+      and st.colour_hex(_cv, "ink") == "#0080ff" and len(_cn) == 1 and "plain" in _cn[0], str(_cn))
+_cw = st.with_defaults(INK, _cv)
+check("colour: saved defaults are written back as a hex colour", "uniform vec3 ink;      // #0080ff   the line" in _cw and st.parse_controls(_cw)[2].default == 1.0
+      and st.with_defaults(INK, {"thick": 3}) .count("#ff8000") == 1)
+_house = [n for n in names if any(c.colour == "colour_a" for c in st.translate(st.preset_code(n)).controls)]
+check("colour: the presets' two house colours can be picked", len(_house) >= 35 and "plasma" in _house and "melting forms" in _house
+      and all(st.colour_hex({c.name: c.default for c in st.translate(st.preset_code(n)).controls}, "colour_a") == "#a187b7" for n in _house), str(len(_house)))
+
+# ---- presets of your own: the sliders become the defaults of a saved file
+_wd = st.with_defaults("uniform float warp;   // 1 0 4   the folds\nuniform float plain;\nuniform float iTime;\nvoid x;", {"warp": 2.5, "plain": 9, "nope": 1})
+check("with_defaults: the values become the defaults, ranges and words stay", "uniform float warp;      // 2.5 0 4   the folds" in _wd
+      and [(c.name, c.default, c.lo, c.hi) for c in st.parse_controls(_wd)] == [("warp", 2.5, 0.0, 4.0), ("plain", 1.0, 0.0, 1.0)] and "void x;" in _wd)
+_saved = st.save_preset("  My  Smoke_2 ", st.preset_code("warped noise"), {"warp": 3.5})
+_mine = list(st.presets())
+check("save: a preset of my own is listed first, under 'my presets', with the sliders as its defaults", _saved == "my smoke 2" and _mine[0] == "my smoke 2"
+      and st.type_of("my smoke 2") == "mine" and st.is_mine("my smoke 2") and not st.is_mine("warped noise") and st.type_of("warped noise") == "pattern"
+      and {c.name: c.default for c in st.parse_controls(st.preset_code("my smoke 2"))}["warp"] == 3.5 and "// type:" not in st.preset_code("my smoke 2")
+      and st.about(st.preset_code("my smoke 2")) == st.about(st.preset_code("warped noise")) and os.listdir(st.USER_DIR) == ["my_smoke_2.glsl"], str(_mine[:3]))
+check("save: a built-in name, a bad name, a path and a shader that cannot run are refused", raises(lambda: st.save_preset("plasma", TOY), "built-in")[0]
+      and raises(lambda: st.save_preset("../x", TOY), "letters")[0] and raises(lambda: st.save_preset("9 lives", TOY), "letters")[0]
+      and raises(lambda: st.save_preset("x" * 41, TOY), "letters")[0] and raises(lambda: st.save_preset("broken", "float f() { return 1.0; }"), "")[0]
+      and os.listdir(st.USER_DIR) == ["my_smoke_2.glsl"])
+st.save_preset("my smoke 2", TOY)
+check("save: my own preset can be saved again, and gets an about line", "mainImage" in st.preset_code("my smoke 2") and st.about(st.preset_code("my smoke 2")).startswith("my smoke 2")
+      and ns.shader_info("my smoke 2")["mine"] and ns.shader_info("my smoke 2")["type"] == "mine" and ns.shader_info("plasma", controls="scale = 3")["values"]["scale"] == 3.0
+      and ns.shader_info("plasma")["text"] == st.preset_code("plasma") and ns.shader_info("", TOY)["text"] == "")
+_fp = ns.KUBA_Shader.fingerprint_inputs(preset="my smoke 2")
+st.save_preset("my smoke 2", TOY.replace("0.5", "0.25") if "0.5" in TOY else TOY + "\n// again")
+check("a preset saved again under its name runs again (the node's fingerprint is its text)", _fp and ns.KUBA_Shader.fingerprint_inputs(preset="my smoke 2") != _fp
+      and ns.KUBA_Shader.fingerprint_inputs(preset="plasma") == ns.KUBA_Shader.fingerprint_inputs(preset="plasma")
+      and ns.KUBA_Shader.fingerprint_inputs(preset="plasma", code=TOY) == "" and ns.KUBA_Shader.fingerprint_inputs(preset="no such") == "")
+st.delete_preset("my smoke 2")
+check("delete: mine goes, a built-in stays", "my smoke 2" not in st.presets() and os.listdir(st.USER_DIR) == [] and raises(lambda: st.delete_preset("plasma"), "not one of your")[0]
+      and list(st.presets()) == names)
+check("the types hold what their titles say", by["melting forms"] == "space" and by["vhs tape"] == "signal" and by["cartoon"] == "look"
+      and by["extrude"] == "regions" and by["facade relief"] == "relief" and by["growth"] == "time" and by["plasma"] == "pattern"
+      and [n for n in names if by[n] == "lens"] == ["blur", "motion blur", "zoom blur", "grade", "duotone", "vignette", "lens bend", "swirl", "under water",
+                                                    "little planet", "glow", "mirrors"])
 check("every preset has an about line and translates", all(st.about(st.preset_code(n)) and st.translate(st.preset_code(n)).kind == "shadertoy" for n in names))
 
 # ---- 3D: distance functions and a raymarcher for a shader that uses their names
@@ -124,7 +180,7 @@ check("3D: the march without a scene says what is missing", raises(lambda: st.tr
                                                                "kMarch", "float map(vec3 p)")[0])
 check("3D: line numbers stay those of the pasted code", "#line 1\nfloat map(vec3 p) {" in sc.source)
 SOLID = ("melting forms", "colonnade", "facade relief", "extrude", "growth")
-check("3D: the presets that are a scene write a depth, the others do not", [n for n in names if st.translate(st.preset_code(n)).depth] == list(SOLID),
+check("3D: the presets that are a scene write a depth, the others do not", sorted(n for n in names if st.translate(st.preset_code(n)).depth) == sorted(SOLID),
       str([n for n in names if st.translate(st.preset_code(n)).depth]))
 check("3D: extrude asks for the sample field, no other preset does", [n for n in names if st.sample_field(st.preset_code(n))] == ["extrude"])
 
@@ -236,6 +292,65 @@ if gpu:
     check(f"all {len(names)} presets draw, close their loop and move", len(names) >= 48 and not worst, "; ".join(worst))
     check("which presets work on a picture, which on their own last frame", {"contour lines", "wireframe", "point cloud", "eight bit", "characters"} <= set(pictures)
           and feedback == ["slit scan", "datamosh", "trails", "growth"] and ns.node_only() == feedback, f"{pictures} {feedback}")
+    # ---- a picture under a shader that does not read it
+    _pic = torch.zeros((1, 48, 64, 3)); _pic[..., 0] = 0.5; _pic[:, :, 32:, 1] = 1.0
+    _run = lambda **kw: ns.KUBA_Shader.execute("stripes", width=64, height=48, fps=5.0, seconds=0.4, **kw).result      # noqa: E731
+    _alone = _run()
+    _scr, _off, _mul, _half = _run(image0=_pic), _run(image0=_pic, on_picture="off"), _run(image0=_pic, on_picture="multiply"), _run(image0=_pic, picture_amount=0.5)
+    _p, _s = _pic.expand(2, -1, -1, -1), _alone[0]
+    check("on_picture: a pattern is laid over the picture on image0 (screen), off leaves it alone, masks stay the shader's",
+          torch.allclose(_scr[0], 1 - (1 - _p) * (1 - _s), atol=1e-5) and torch.equal(_off[0], _s) and torch.equal(_scr[1], _alone[1])
+          and torch.allclose(_mul[0], _p * _s, atol=1e-5) and torch.allclose(_half[0], _p + (_scr[0] - _p) * 0.5, atol=1e-5)
+          and "laid over your picture" in _scr[5] and "only sets the size" in _off[5] and "image0" not in _alone[5])
+    _m = torch.zeros((1, 48, 64)); _m[:, :, :20] = 1.0
+    _mk = _run(image0=_pic, mask=_m, on_picture="multiply")
+    check("on_picture: outside the mask the picture stays as it is", torch.allclose(_mk[0][:, :, 20:], _p[:, :, 20:], atol=1e-5)
+          and torch.allclose(_mk[0][:, :, :20], (_p * _s)[:, :, :20], atol=1e-5))
+    for _how in ns.ON_PICTURE:
+        _o = _run(image0=_pic, on_picture=_how)[0]
+        check(f"on_picture = {_how}: a whole picture in 0-1", bool(torch.isfinite(_o).all()) and float(_o.min()) >= 0.0 and float(_o.max()) <= 1.0 and _o.shape == _s.shape)
+    _car = ns.KUBA_Shader.execute("cartoon", width=64, height=48, fps=5.0, seconds=0.4, image0=_pic).result
+    check("on_picture: a preset that reads the picture is not laid over it", "laid over" not in _car[5]
+          and torch.equal(_car[0], ns.KUBA_Shader.execute("cartoon", width=64, height=48, fps=5.0, seconds=0.4, image0=_pic, on_picture="off").result[0]))
+    _big = ns.KUBA_Shader.execute("melting forms", width=64, height=48, fps=5.0, seconds=0.4, image0=torch.rand((1, 24, 32, 3))).result
+    check("on_picture: a 3D scene over a picture of another size keeps its depth", _big[0].shape == (2, 48, 64, 3) and float(_big[6].max()) > 0.2 and "and depth are the shader's own" in _big[5])
+
+    _snd = {"waveform": torch.sin(torch.linspace(0, 400, 8000))[None, None] * 0.8, "sample_rate": 8000}
+    _deaf, _hear = _run(), _run(audio=_snd)
+    _typed = _run(audio=_snd, controls="beat = 0")
+    check("a connected sound opens a preset's beat / sound control, unless a value is typed",
+          "a sound is connected: beat = 1" in _hear[5] and "a sound is connected" not in _typed[5] and "a sound is connected" not in _deaf[5]
+          and "beat = 1 " in _hear[5].split("controls:")[1].splitlines()[0] and "beat = 0 " in _typed[5].split("controls:")[1].splitlines()[0])
+    _idle = ns.KUBA_Shader.execute("clouds", width=64, height=48, fps=5.0, seconds=0.4, image1=_pic, field=torch.rand((1, 48, 64)), audio=_snd).result[5]
+    check("an input the shader has no use for is named in the report", "image1: this shader does not read it" in _idle
+          and "field: this shader does not run along a field" in _idle and "audio: this shader does not listen" in _idle)
+
+    _red = ns.KUBA_Shader.execute("stripes", width=64, height=48, fps=5.0, seconds=0.4, controls="colour_a = #ff0000, colour_b = #ff0000").result
+    check("colour: a picked colour is what the node draws, and the report names it", float(_red[0][..., 1].max()) < 0.02 and float(_red[0][..., 0].max()) > 0.5
+          and float(_alone[0][..., 1].max()) > 0.3 and "colour_a = #ff0000" in _red[5] and "colour_a_r" not in _red[5])
+
+    check("what a preset reads and gives, in words for the picker", ns.preset_tags("cartoon") == ["your picture"] and ns.preset_tags("plasma") == []
+          and ns.preset_tags("slit scan") == ["a clip", "node only"] and "gives a depth" in ns.preset_tags("melting forms")
+          and ns.preset_tags("facade relief") == ["your picture", "a depth pass", "gives a depth"] and "a normal pass" in ns.preset_tags("glass")
+          and "a field" in ns.preset_tags("region contours") and all(by[n] in ("look", "signal", "lens", "relief") for n in names if "your picture" in ns.preset_tags(n)),
+          str({n: ns.preset_tags(n) for n in ("slit scan", "facade relief", "glass", "extrude", "scan band")}))
+    import io as _pio
+    from PIL import Image as _PImage
+    for _n in ("plasma", "vhs tape", "extrude", "trails"):
+        _im = _PImage.open(_pio.BytesIO(ns.preset_preview(_n)))
+        _fr = []
+        for _k in range(_im.n_frames):
+            _im.seek(_k)
+            _fr.append(np.asarray(_im.convert("RGB"), np.float32) / 255.0)
+        check(f"the moving picture of '{_n}': one loop, lit and moving", _im.n_frames == ns.PREVIEW_FRAMES and _im.size == ns.PREVIEW
+              and max(f.max() for f in _fr) > 0.2 and float(np.abs(_fr[0] - _fr[len(_fr) // 2]).max()) > 0.02, f"{_im.n_frames} {_im.size}")
+    _a, _b = ns.look("plasma", "", "", False, ns.LOOK), ns.look("plasma", "", "scale = 6", False, ns.LOOK)
+    _ia, _ib = (np.asarray(_PImage.open(_pio.BytesIO(q)).convert("RGB"), np.float32) / 255.0 for q in (_a, _b))
+    check("adjust: one frame of a shader with its controls as they stand", _a[:2] == b"\xff\xd8" and _ia.shape == (ns.LOOK[1], ns.LOOK[0], 3)
+          and float(np.abs(_ia - _ib).mean()) > 0.01 and ns.look("growth", "", "", False, (96, 54))[:2] == b"\xff\xd8"
+          and ns.look("", TOY, "", True, (96, 54))[:4] == b"RIFF")
+    check("a preview is kept, and a name that is no preset is refused", ns.preset_preview("plasma") is ns.preset_preview("plasma")
+          and raises(lambda: ns.preset_preview("../x"), "no preset")[0])
 
     # ---- feedback: a shader that reads the frame before
     grow = "void mainImage(out vec4 c, in vec2 f){ c = vec4(kPrev(kUV).r + 0.25, float(iFrame) * 0.1, 0.0, 1.0); }"

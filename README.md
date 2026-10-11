@@ -61,7 +61,7 @@ Masks that move: *mask field* turns the windows into a grey ramp, *mask animate*
 
 ![masks running over the windows of a facade, and the same on the facade](docs/images/masks.gif)
 
-*kubakub shader* draws moving pictures on the graphics card: 59 presets picked by their picture, or a shader pasted
+*kubakub shader* draws moving pictures on the graphics card: 71 presets in eight types, picked by their moving picture and adjusted with sliders and colour swatches, or a shader pasted
 from shadertoy.com (workflow shader, no AI model):
 
 ![six shader presets: clouds, grid flight, endless zoom, a facade as a wire mesh and in 8 bit, datamosh](docs/images/shader.gif)
@@ -209,7 +209,7 @@ One page per menu group, with every input, the rule syntax, speeds and tests:
 |---|---|
 | [regions](docs/regions.md) | regions from a matrix, a line drawing, mask folders, any masks, SAM 3, Illustrator; regions to SVG / PDF / DXF; canvas plan / to work / restore |
 | [masks](docs/masks.md) | mask field, mask animate: effects, curves, things to try |
-| [shader](docs/shader.md) | shader: the 59 presets, pasting a shader from shadertoy.com step by step (also with Buffer tabs), 3D scenes (raymarching) and the depth output, the names a shader can use, speed |
+| [shader](docs/shader.md) | shader: the 71 presets by type, adjusting one with sliders and colours and saving your own, pasting a shader from shadertoy.com step by step (also with Buffer tabs), 3D scenes (raymarching) and the depth output, the names a shader can use, speed |
 | [sketch](docs/sketch.md) | scan to line, regions from sketch, line overlay |
 | [generate](docs/generate.md) | region plan (the rule text), region sampler (Klein, Qwen Image 2.1 and its LoRAs), seam pass, audience viewpoint, frame in frame |
 | [director](docs/director.md) | the director window: layers, timeline, sound, LTX and H3 clips, diffuse, light layers, video mapping, behaviours, export |
@@ -247,6 +247,11 @@ Every group has a model-free test in `tests/`, e.g. `python_embeded\python.exe C
   signal chain of ntsc-rs (github.com/valadaptive/ntsc-rs, valadaptive), found through olegchomp's TouchDesigner
   version (github.com/olegchomp/ntsc-td). *scan modulation*: the idea of olegchomp's td-modulation
   (github.com/olegchomp/td-rnd). All three are written new as single shader passes.
+- The shader presets of the type *grade and lens* (`kubakub/shaders/60_*` - `71_*`): which effects belong in such
+  a set follows GIPS by Martin J. Fiedler (github.com/kajott/GIPS), found through theRealAi's ComfyUI-GLSL
+  (github.com/theRealAi/ComfyUI-GLSL). All are written new for this pack.
+- A colour as a control of a shader, and the idea of a picker for it: comfyui_glslnodes by Patricio Gonzalez Vivo
+  (github.com/patriciogonzalezvivo/comfyui_glslnodes). Written new (`kubakub/shadertoy.py`, `web/kubakub_shader.js`).
 - The distance functions and smooth joins a kubakub shader can use for a 3D scene (`kubakub/shadertoy.py`, SDF):
   Inigo Quilez, iquilezles.org/articles/distfunctions.
 - MKL colour transfer: Pitie & Kokaram 2007, as in the color-matcher library

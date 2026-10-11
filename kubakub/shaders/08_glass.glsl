@@ -1,4 +1,5 @@
 // about: the picture on image0 seen through rippled glass. A normal pass on image1 is the glass; without one it is made of ripples.
+// type: look
 // optional: image1
 uniform float bend;      // 0.04 0 0.3   how strongly the glass bends the picture
 uniform float ripples;    // 6 1 40       size of the built-in ripples (no normal pass connected)

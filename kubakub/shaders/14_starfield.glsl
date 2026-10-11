@@ -1,9 +1,11 @@
 // about: stars flying towards you. Loops without a jump.
+// type: space
 uniform float stars;      // 1 0.2 4     how many stars
 uniform float speed;      // 1 1 6       how many layers pass in one loop
 uniform float streak;     // 0.4 0 1     how long their tails are
 uniform float colour;     // 0.5 0 1     0 = white, 1 = violet and orange stars
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 float hash1(vec2 p) {
     vec3 q = fract(vec3(p.xyx) * 0.1031);
     q += dot(q, q.yzx + 33.33);
@@ -27,7 +29,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float along = dot(d, dir), across = dot(d, vec2(-dir.y, dir.x));
         float len = 1.0 + streak * 14.0 * z;
         float s = smoothstep(0.06, 0.0, length(vec2(along / len, across))) * step(0.72, h);
-        vec3 tint = mix(vec3(1.0), mix(LAV, ORG, hash1(id + 11.3)) * 1.5, colour);
+        vec3 tint = mix(vec3(1.0), mix(colour_a, colour_b, hash1(id + 11.3)) * 1.5, colour);
         col += tint * s * fade * (0.4 + 0.6 * z);
     }
     fragColor = vec4(col * kMask(kUV), 1.0);

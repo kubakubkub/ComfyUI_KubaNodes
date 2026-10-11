@@ -1,4 +1,5 @@
 // about: the picture on image0 as a cartoon: a few flat tones, black ink outlines and hatching in the dark parts that drifts. High contrast, made for architecture.
+// type: look
 uniform float tones;      // 5 2 10      how many flat tones between dark and bright
 uniform float contrast;   // 1.3 0.5 4   pushes dark and bright apart before the tones are cut
 uniform float ink;        // 1 0 1       how black the outlines are
@@ -8,12 +9,13 @@ uniform float hatch;      // 0.5 0 1     hatching in the dark tones
 uniform float lines;      // 120 20 400  hatching lines across the picture
 uniform float drift;      // 2 0 12      lines the hatching moves in one loop
 uniform float two_colours; // 0 0 1      0 = the picture's own colours, 1 = dark, lavender, orange
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 vec3 pic(vec2 uv) { return texture(iChannel0, clamp(uv, 0.0, 1.0)).rgb; }
 float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 float lumAt(vec2 uv) { return lum(pic(uv)); }
 vec3 ramp(float t) {
-    return t < 0.5 ? mix(vec3(0.05, 0.04, 0.07), LAV, t * 2.0) : mix(LAV, mix(ORG, vec3(1.0), 0.35), t * 2.0 - 1.0);
+    return t < 0.5 ? mix(vec3(0.05, 0.04, 0.07), colour_a, t * 2.0) : mix(colour_a, mix(colour_b, vec3(1.0), 0.35), t * 2.0 - 1.0);
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {

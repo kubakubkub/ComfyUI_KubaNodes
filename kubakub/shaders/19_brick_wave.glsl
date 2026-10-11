@@ -1,10 +1,12 @@
 // about: a wall of bricks; a wave of light runs through them along the field (or left to right). Loops without a jump.
+// type: regions
 uniform float rows;       // 14 2 80     rows of bricks
 uniform float ratio;      // 2.2 1 5     how long a brick is
 uniform float mortar;     // 0.08 0 0.4  the gap between bricks
 uniform float width;      // 0.3 0.05 1  how wide the wave is
 uniform float waves;      // 1 1 8       how many waves run at once
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 float hash1(vec2 p) {
     vec3 q = fract(vec3(p.xyx) * 0.1031);
     q += dot(q, q.yzx + 33.33);
@@ -22,7 +24,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float x = fract(along * floor(waves) - kLoop + hash1(id) * 0.08);
     float on = smoothstep(width, 0.0, min(x, 1.0 - x) * 2.0);
     vec2 b = smoothstep(vec2(0.5), vec2(0.5) - vec2(0.04 / ratio, 0.04), abs(f) + vec2(mortar / ratio, mortar) * 0.5);
-    vec3 stone = mix(LAV * 0.35, ORG * 0.35, hash1(id + 2.7));
-    vec3 col = (stone * 0.5 + mix(ORG, vec3(1.0, 0.92, 0.8), on) * on) * b.x * b.y;
+    vec3 stone = mix(colour_a * 0.35, colour_b * 0.35, hash1(id + 2.7));
+    vec3 col = (stone * 0.5 + mix(colour_b, vec3(1.0, 0.92, 0.8), on) * on) * b.x * b.y;
     fragColor = vec4(col * kMask(kUV), 1.0);
 }

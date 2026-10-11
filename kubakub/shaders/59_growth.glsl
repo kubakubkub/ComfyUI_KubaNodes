@@ -1,10 +1,12 @@
 // about: a living pattern that grows from scattered seeds into spots, worms and mazes, like coral or lichen spreading over the wall (reaction and diffusion). It builds on its own last frames; stays inside the mask. Gives a depth.
+// type: time
 uniform float feed;       // 0.037 0.01 0.08 what the pattern is fed: low = worms and mazes, high = spots that divide
 uniform float kill;       // 0.06 0.045 0.07 how fast it dies back: low = it fills the wall, high = thin and sparse
 uniform float size;       // 2 1 6       how coarse the pattern is (also how fast it spreads)
 uniform float seeds;      // 0.5 0.02 1  how many seeds it starts from
 uniform float warm;       // 0.6 0 1
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 // one step of the two substances (Gray-Scott): x is eaten where y is, y grows on it and dies back
 vec4 grow(sampler2D last, sampler2D specks, vec2 fragCoord) {
     float s = floor(clamp(size, 1.0, 6.0) + 0.5);     // the pattern lives on cells of s x s pixels
@@ -38,7 +40,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 h = 0.5 * floor(clamp(size, 1.0, 6.0) + 0.5) / iResolution.xy;      // between the cells: round outlines
     float v = 0.25 * (texture(iChannel0, uv + h).y + texture(iChannel0, uv - h).y + texture(iChannel0, uv + vec2(h.x, -h.y)).y + texture(iChannel0, uv + vec2(-h.x, h.y)).y);
     v = smoothstep(0.04, 0.34, v);
-    vec3 col = mix(vec3(0.07, 0.06, 0.09), mix(LAV, ORG, warm), v) + vec3(1.0, 0.95, 0.9) * smoothstep(0.75, 1.0, v) * 0.25;
+    vec3 col = mix(vec3(0.07, 0.06, 0.09), mix(colour_a, colour_b, warm), v) + vec3(1.0, 0.95, 0.9) * smoothstep(0.75, 1.0, v) * 0.25;
     kDepth = v;
     fragColor = vec4(col * kMask(uv), 1.0);
 }

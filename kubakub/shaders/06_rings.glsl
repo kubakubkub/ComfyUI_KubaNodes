@@ -1,4 +1,5 @@
 // about: rings that run out from a point (or in); a drawn arrow's start is the point. Loops without a jump; a beat can flash them.
+// type: pattern
 uniform float rings;      // 6 1 60     rings between the point and the edge
 uniform float width;      // 0.35 0.02 1 how much of each ring is lit
 uniform float soft;       // 0.3 0 1

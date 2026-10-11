@@ -1,4 +1,5 @@
 // about: the picture on image0 sent through a composite video cable: colour fringes and rainbows crawling along fine detail, dots on colour edges, soft colour.
+// type: signal
 // Light and colour are put on one signal (the colour on a carrier wave) and taken apart again, as NTSC does it; the
 // idea of doing the real thing comes from ntsc-rs (github.com/valadaptive/ntsc-rs, valadaptive), found through
 // olegchomp's TouchDesigner version (github.com/olegchomp/ntsc-td); written new as one shader pass.

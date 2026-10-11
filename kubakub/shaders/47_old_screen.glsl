@@ -1,4 +1,5 @@
 // about: the picture on image0 on an old tube television: a curved glass, scan lines, coloured dots and a bar that rolls through.
+// type: signal
 uniform float lines;      // 240 60 1080 scan lines
 uniform float curve;      // 0.12 0 0.5  how much the glass bulges
 uniform float dots;       // 0.35 0 1    the red green blue dots of the tube

@@ -1,4 +1,5 @@
 // about: a beam of light swinging through drifting fog, like a projector in a hazy hall. Raymarched through the fog. Loops without a jump; a sound brightens the beam.
+// type: space
 uniform float density;    // 0.6 0.05 1.5 how thick the fog is
 uniform float scale;      // 1.4 0.4 5   bigger = finer banks of fog
 uniform float beam;       // 1 0 3       how bright the beam is
@@ -8,7 +9,8 @@ uniform float sweep;      // 1 0 4       times the beam swings from side to side
 uniform float warm;       // 0.5 0 1
 uniform float sound;      // 0 0 2
 uniform float steps;      // 40 12 120   more = smoother fog, slower
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853;
 float hash3(vec3 p) {
     p = fract(p * 0.1031);
@@ -35,7 +37,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 ld = normalize(vec3(0.75 * sin(a * sw), -1.0, 0.3 * cos(a * sw) + 0.1));
     vec3 u1 = normalize(cross(ld, vec3(0.0, 0.0, 1.0))), u2 = cross(ld, u1);
     vec3 drift = 0.6 * vec3(cos(a), 0.5 * sin(a), sin(a));      // the fog moves in a circle: the loop closes
-    vec3 glow = mix(mix(LAV, ORG, warm), vec3(1.0, 0.95, 0.9), 0.35) * beam * (1.0 + sound * kLevel);
+    vec3 glow = mix(mix(colour_a, colour_b, warm), vec3(1.0, 0.95, 0.9), 0.35) * beam * (1.0 + sound * kLevel);
     float n = clamp(steps, 12.0, 120.0), dt = 6.0 / n, edge = cos(spread * 0.9), count = floor(rays + 0.5);
     float t = dt * hash3(vec3(fragCoord, 1.0)), through = 1.0;      // every pixel starts a little off: no bands
     vec3 col = vec3(0.0);
@@ -46,7 +48,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         vec3 vn = v / max(d, 1e-4);
         float cone = smoothstep(edge, mix(edge, 1.0, 0.6), dot(vn, ld));
         float shaft = count > 0.5 ? 0.35 + 0.65 * pow(0.5 + 0.5 * sin(atan(dot(vn, u2), dot(vn, u1)) * count), 2.0) : 1.0;
-        col += through * fogHere * (glow * cone * shaft * 14.0 / (0.5 + 0.3 * d * d) + LAV * 0.1) * dt;
+        col += through * fogHere * (glow * cone * shaft * 14.0 / (0.5 + 0.3 * d * d) + colour_a * 0.1) * dt;
         through *= exp(-fogHere * dt * 0.8);
         t += dt;
     }

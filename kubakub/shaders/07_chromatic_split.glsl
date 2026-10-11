@@ -1,4 +1,5 @@
 // about: the picture on image0 with its colours pulled apart; a wave runs through and the sound pushes it.
+// type: look
 uniform float amount;     // 0.012 0 0.1  how far red and blue move apart
 uniform float wave;       // 0.004 0 0.05 a sideways wobble that runs down the picture
 uniform float lines;      // 40 1 400     how many wobbles from top to bottom

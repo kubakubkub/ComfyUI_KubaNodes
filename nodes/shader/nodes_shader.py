@@ -3,9 +3,11 @@ a sound, a field and pictures as inputs (text side kubakub/shadertoy.py, picture
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import random
+import re
 import time
 
 import numpy as np
@@ -22,12 +24,14 @@ from ...kubakub import shadertoy as st
 from ...kubakub import sound as so
 
 log = logging.getLogger("KUBA.shader")
+st.USER_DIR = os.path.join(folder_paths.get_user_directory(), "kubakub", "shaders")      # presets saved from the node
 NAME = "kubakub shader"
 PREVIEW_PX, PREVIEW_FRAMES = 384, 240
 SLOW = 0.25                                          # seconds a frame may take before the report says how to make it faster
 MASK_FROM = ("auto", "alpha", "brightness")
 UNCONNECTED = ("auto", "noise", "sample facade", "black")
 LUMA = (0.2126, 0.7152, 0.0722)
+ON_PICTURE = ("screen", "add", "multiply", "overlay", "difference", "displace", "off")
 
 
 def _fit(a, w, h):
@@ -77,6 +81,35 @@ def _ram_check(name, frames, w, h, per_pixel):
                          f"{free / 2 ** 30:.0f} GB are free. Lower 'seconds' or the size.")
 
 
+def lay_over(shader, picture, how="screen", amount=1.0, mask=None):
+    """A shader that does not read the picture, laid over it: float32 [h, w, 3] each -> the shader's array, changed in
+    place. amount 0 = the picture alone, 1 = all of the blend; mask [h, w]: the picture stays as it is outside it.
+    multiply = the shader as light on the picture; displace = the shader's light and dark bend the picture like glass."""
+    p, s = picture[..., :3], shader
+    if how == "add":
+        out = np.minimum(p + s, 1.0)
+    elif how == "multiply":
+        out = p * s
+    elif how == "overlay":
+        out = np.where(p < 0.5, 2.0 * p * s, 1.0 - 2.0 * (1.0 - p) * (1.0 - s))
+    elif how == "difference":
+        out = np.abs(p - s)
+    elif how == "displace":
+        import cv2
+        h, w = s.shape[:2]
+        lum = cv2.GaussianBlur((s * np.asarray(LUMA, np.float32)).sum(-1), (0, 0), max(1.0, w / 160.0))
+        reach = 0.25 * w                              # soft slopes of light push the picture a few pixels, like glass
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        out = cv2.remap(np.ascontiguousarray(p), xx + cv2.Sobel(lum, cv2.CV_32F, 1, 0, ksize=3) * reach / 8.0,
+                        yy + cv2.Sobel(lum, cv2.CV_32F, 0, 1, ksize=3) * reach / 8.0, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    else:                                             # screen
+        out = 1.0 - (1.0 - p) * (1.0 - s)
+    k = float(min(max(amount, 0.0), 1.0))
+    k = k * mask[..., None] if mask is not None else k
+    shader[...] = p + (out - p) * k
+    return shader
+
+
 def _luma_masks(images):
     """How bright each frame is, as masks [frames, h, w]; in blocks, so there is no second copy of the whole clip."""
     masks = torch.empty(images.shape[:3], dtype=torch.float32)
@@ -87,7 +120,8 @@ def _luma_masks(images):
 
 
 def _controls_text(t, values):
-    return ", ".join(f"{c.name.rstrip('_')} = {values[c.name]:g} ({c.lo:g} to {c.hi:g})" for c in t.controls)
+    return ", ".join(f"{c.colour} = {st.colour_hex(values, c.colour)}" if c.colour else f"{c.name.rstrip('_')} = {values[c.name]:g} ({c.lo:g} to {c.hi:g})"
+                     for c in t.controls if not c.colour or c.name.endswith("_r"))
 
 
 class KUBA_Shader(io.ComfyNode):
@@ -110,7 +144,9 @@ class KUBA_Shader(io.ComfyNode):
                 "shader gives its depth. Nothing connected runs a preset. No AI model."),
             inputs=[
                 io.Combo.Input("preset", options=names, default="warped noise" if "warped noise" in names else names[0],
-                               tooltip="A built-in shader. Used while 'code' is empty. The report lists its controls."),
+                               tooltip="A built-in shader. Used while 'code' is empty. The list is sorted by type: "
+                                       + ", ".join(title for _, title, _ in st.TYPES) + ". The button under it shows "
+                                       "them as moving pictures. The report lists its controls."),
                 io.String.Input("code", default="", multiline=True,
                                 placeholder="A shader from shadertoy.com instead of the preset: open it there, click "
                                             "into the code, Ctrl+A, Ctrl+C, then paste here. No need to understand it.",
@@ -140,8 +176,10 @@ class KUBA_Shader(io.ComfyNode):
                                  tooltip="The last frame meets the first. The presets loop by themselves; a pasted "
                                          "shader is rendered a little longer and its end is faded into its start."),
                 io.Image.Input("image0", optional=True,
-                               tooltip="iChannel0 in the shader. A batch plays as a clip, one picture per frame. A "
-                                       "shader that reads it with nothing connected gets the sample facade."),
+                               tooltip="Your picture. A batch plays as a clip, one picture per frame. The presets "
+                                       "that work on a picture redraw it; every other shader is laid over it "
+                                       "(on_picture). iChannel0 in the shader; one that reads it with nothing "
+                                       "connected gets the sample facade."),
                 io.Image.Input("image1", optional=True, tooltip="iChannel1 (e.g. a normal pass for the glass preset)."),
                 io.Image.Input("image2", optional=True, tooltip="iChannel2."),
                 io.Image.Input("image3", optional=True, tooltip="iChannel3."),
@@ -154,8 +192,10 @@ class KUBA_Shader(io.ComfyNode):
                                       "band runs along. Empty = a left to right ramp."),
                 io.Audio.Input("audio", optional=True,
                                tooltip="What the shader hears: kLevel, kLow, kMid, kHigh (0-1), kBeat (1 on a beat, "
-                                       "then falling), kBeats (a count). Passed on to 'audio'. A shader that listens "
-                                       "without a sound runs on a built-in beat (120 bpm)."),
+                                       "then falling), kBeats (a count). Passed on to 'audio'. Connecting a sound "
+                                       "makes a preset follow it: its 'sound' or 'beat' control goes to 1 unless you "
+                                       "type a value. A shader that listens without a sound runs on a built-in beat "
+                                       "(120 bpm)."),
                 io.Float.Input("time_offset", default=0.0, min=-36000.0, max=36000.0, step=0.1, optional=True, advanced=True,
                                tooltip="The shader's clock at the first frame, in seconds."),
                 io.Float.Input("loop_fade", default=1.0, min=0.0, max=60.0, step=0.1, optional=True, advanced=True,
@@ -185,6 +225,18 @@ class KUBA_Shader(io.ComfyNode):
                                         "region contours ...) run from its start to its end when no field is connected; "
                                         "stripes, rain and pixel smear take its direction; rings, ripples and radar "
                                         "start at its start. Your own code reads kFrom, kTo, kDir and kVector. Empty = none."),
+                io.Combo.Input("on_picture", options=list(ON_PICTURE), default="screen", optional=True,
+                               tooltip="A picture on image0 and a shader that does not read it (the patterns, the 3d "
+                                       "scenes, most pasted code): how the shader is laid over your picture. screen and "
+                                       "add = its light on top; multiply = the shader as the light that falls on the "
+                                       "picture (dark where the shader is dark); overlay = stronger contrast; "
+                                       "difference = inverted where it is bright; displace = its light and dark bend "
+                                       "the picture like glass; off = the shader alone (the picture only sets the "
+                                       "size). With a mask the picture stays as it is outside it. 'masks' and 'depth' "
+                                       "stay those of the shader. Presets that read the picture (picture looks, screen "
+                                       "and tape, picture with depth) do not use this."),
+                io.Float.Input("picture_amount", default=1.0, min=0.0, max=1.0, step=0.05, optional=True, advanced=True,
+                               tooltip="on_picture: how much of the shader is laid over the picture. 0 = the picture alone."),
             ],
             outputs=[
                 io.Image.Output("images", tooltip="One picture per frame."),
@@ -202,10 +254,20 @@ class KUBA_Shader(io.ComfyNode):
         )
 
     @classmethod
+    def fingerprint_inputs(cls, preset="", code="", **kwargs):
+        # a preset is a file: one that was saved again under its name (adjust > save as my preset) runs again
+        if (code or "").strip():
+            return ""
+        try:
+            return hashlib.sha256(st.preset_code(preset).encode("utf-8", "replace")).hexdigest()
+        except st.ShaderError:
+            return ""
+
+    @classmethod
     def execute(cls, preset, code="", controls="", width=0, height=0, fps=25.0, seconds=0.0, speed=1.0, loops=1, loop=True,
                 image0=None, image1=None, image2=None, image3=None, mask=None, field=None, audio=None,
                 time_offset=0.0, loop_fade=1.0, mask_from="auto", clip=True, bpm=0.0, gain=1.0,
-                release=0.15, unconnected="auto", vector="") -> io.NodeOutput:
+                release=0.15, unconnected="auto", vector="", on_picture="screen", picture_amount=1.0) -> io.NodeOutput:
         notes = []
         try:
             arrow = mf.parse_vector(vector)
@@ -233,6 +295,23 @@ class KUBA_Shader(io.ComfyNode):
 
         wave, sr_hz, mono = _sound_in(audio)
         sample_sound = False
+        # whatever is connected does something: a sound opens a preset's 'sound' / 'beat' control (they rest at 0),
+        # and an input the shader has no use for is named in the report
+        if mono is not None and not own:
+            typed = {m.lower() for m in re.findall(r"(\w+?)_?\s*=", str(controls or ""))}
+            opened = [c for c in t.controls if c.name in ("sound", "beat") and c.default == 0 and c.name not in typed]
+            for c in opened:
+                values[c.name] = min(1.0, c.hi)
+            if opened:
+                notes.append("a sound is connected: " + ", ".join(f"{c.name} = {values[c.name]:g}" for c in opened)
+                             + " (it rests at 0 without one; type another value in controls)")
+            elif not t.listens:
+                notes.append("audio: this shader does not listen to the sound; it is passed on to 'audio'")
+        idle = [f"image{i}" for i in sorted(pics) if i and i not in t.channels]
+        if idle:
+            notes.append(f"{', '.join(idle)}: this shader does not read " + ("them" if len(idle) > 1 else "it"))
+        if fs is not None and "kField" not in t.uses:
+            notes.append("field: this shader does not run along a field (scan band, brick wave, region contours and extrude do)")
         longest = max([len(p) for p in pics.values()] + [len(x) for x in (ms, fs) if x is not None] + [1])
         if seconds > 0:
             secs = float(seconds)
@@ -374,6 +453,20 @@ class KUBA_Shader(io.ComfyNode):
                 for a in range(frames):
                     masks[a] *= torch.from_numpy(_fit(ms[a % len(ms)], w, h))
 
+        if 0 in pics and 0 not in t.channels:         # a picture is there and the shader does not read it: it goes under
+            how_over = on_picture if on_picture in ON_PICTURE else "screen"
+            if how_over == "off":
+                notes.append("image0: this shader does not read it, and on_picture is off: the picture only sets the size")
+            else:
+                under = pics[0]
+                for a in range(frames):
+                    comfy.model_management.throw_exception_if_processing_interrupted()
+                    lay_over(img[a], _fit(np.ascontiguousarray(under[a % len(under)][..., :3]), w, h), how_over, picture_amount,
+                             _fit(ms[a % len(ms)], w, h) if clip and ms is not None else None)
+                notes.append(f"image0: this shader does not read it, so it is laid over your picture (on_picture = {how_over}"
+                             + (f", {picture_amount:g} of it" if picture_amount < 1.0 else "") + "); masks"
+                             + (" and depth" if t.depth else "") + " are the shader's own. off = the shader alone")
+
         sound = _sound_out(wave, sr_hz, secs)
 
         what = ("your " + ("Shadertoy" if t.kind == "shadertoy" else "fragment shader")) if own else f"preset '{preset}'"
@@ -416,16 +509,19 @@ def _preview(out, fps):
         return None
 
 
-def shader_info(preset="", code="") -> dict:
+def shader_info(preset="", code="", controls="") -> dict:
     """What the director window needs to draw a shader itself (WebGL 2 runs the same text): the complete fragment
     shader, its controls, or the reason it cannot run."""
     try:
         text = st.shader_text(preset, code)
         t = st.translated(text)
+        own = bool((code or "").strip())
         return {"source": t.source, "about": st.about(text), "notes": t.notes, "channels": t.channels,
+                "type": "" if own else st.type_of(preset), "mine": not own and st.is_mine(preset),
+                "text": "" if own else text, "values": st.parse_values(controls, t.controls)[0],
                 "optional": sorted(t.optional), "buffers": [b.name for b in t.buffers], "wants_field": st.sample_field(text),
                 "kind": t.kind, "uses": sorted(t.uses),
-                "controls": [{"name": c.name, "default": c.default, "min": c.lo, "max": c.hi, "about": c.about} for c in t.controls]}
+                "controls": [{"name": c.name, "default": c.default, "min": c.lo, "max": c.hi, "about": c.about, "colour": c.colour} for c in t.controls]}
     except st.ShaderError as e:
         return {"error": str(e)}
 
@@ -441,8 +537,97 @@ def node_only() -> list:
     return [name for name in st.presets() if _builds_up(st.translated(st.preset_code(name)))]
 
 
+def preset_tags(name) -> list:
+    """What a preset needs and gives, as short words for the pickers."""
+    text = st.preset_code(name)
+    t = st.translated(text)
+    tags = []
+    if 0 in t.channels and 0 not in t.optional:
+        tags.append("your picture")
+    if _builds_up(t) and 0 in t.optional:
+        tags.append("a clip")
+    if 1 in t.channels:
+        tags.append("a depth pass" if "depth pass" in st.about(text) else "a normal pass")
+    if st.sample_field(text) or "kField" in t.uses:
+        tags.append("a field")
+    if t.depth:
+        tags.append("gives a depth")
+    if _builds_up(t):
+        tags.append("node only")
+    return tags
+
+
 TILE, COLUMNS = (160, 90), 6
+PREVIEW, PREVIEW_FRAMES, PREVIEW_FPS = (320, 180), 36, 12
 _SHEET = {}
+_PREVIEWS = {}
+_HEARD = {"kLoop": 0.3, "iTime": 1.2, "kLevel": 0.8, "kLow": 0.9, "kMid": 0.5, "kHigh": 0.7, "kBeat": 0.6, "kBeats": 3.0}
+
+
+def _preset_setup(name, w, h, facade, text=None, values=None):
+    """(translated, static values, pictures) to draw a preset with nothing connected, as the node does. text: pasted
+    code instead of the preset (it reads the built-in noise, as on the node); values: its controls."""
+    own = text is not None
+    text = text if own else st.preset_code(name)
+    t = st.translated(text)
+    static = {"kSeconds": 4.0, "iFrameRate": 25.0, **{c.name: c.default for c in t.controls}, **(values or {})}
+    pictures = {0: lambda k: (0, facade)} if 0 in t.channels and 0 not in t.optional else None
+    if own:
+        pictures = {i: sr.noise_texture(7 + 2 * i) for i in t.channels} or None
+    if st.sample_field(text):                         # it works on regions: the windows of the sample facade, as on the node
+        lab, n_regions, _ = mf.sample_regions()
+        pair = np.stack([mf.field(lab, n_regions)[0], np.ones(lab.shape, np.float32)], -1)
+        pictures = {**(pictures or {}), sr.FIELD_UNIT: lambda k, pair=pair: ("field", pair)}
+    return t, static, pictures
+
+
+def preset_preview(name) -> bytes:
+    """One loop of a preset as a small moving picture (animated WebP): what the pickers play under the pointer.
+    Drawn on the first request, and again when the preset file changes."""
+    path = st.presets().get(name)
+    if not path:
+        raise st.ShaderError(f"no preset '{name}'.")
+    key = os.path.getmtime(path)
+    hit = _PREVIEWS.get(name)
+    if hit is None or hit[0] != key:
+        hit = _PREVIEWS[name] = (key, look(name))
+    return hit[1]
+
+
+LOOK = (480, 270)
+
+
+def look(preset="", code="", controls="", moving=True, size=PREVIEW) -> bytes:
+    """A shader with these controls and nothing connected, as the node draws it: one loop as an animated WebP
+    (moving), or one frame as a JPEG. What the pickers play, and what 'adjust' shows while a slider moves."""
+    import io as _io
+    from PIL import Image
+    from ...kubakub import sample_facade as sf
+    own = bool((code or "").strip())
+    values = st.parse_values(controls, st.translated(st.shader_text(preset, code)).controls)[0]
+    w, h = size
+    t, static, pictures = _preset_setup(preset, w, h, sf.render(w, h)["image"], code if own else None, values)
+    n = PREVIEW_FRAMES
+    warm = (150 if t.buffers else 40) if _builds_up(t) else 0      # it builds up: show it after a while
+    frames = []
+    for k in range(warm + n):
+        u = k / n
+        frames.append(dict(_HEARD, kLoop=u % 1.0, iTime=4.0 * u, iTimeDelta=4.0 / n, iFrame=k, kBeat=max(0.0, 1.0 - (4.0 * u) % 1.0),
+                           kBeats=float(int(4.0 * u)), kLow=0.55 + 0.4 * np.cos(2 * np.pi * 2 * u), kLevel=0.6 + 0.3 * np.cos(2 * np.pi * 2 * u)))
+    if not moving:                                    # one frame, a third into the loop (where the sheet of pictures looks too)
+        frames = frames[:warm + n // 3 + 1] if warm else [dict(_HEARD, iFrame=0, iTimeDelta=0.04)]
+    got = []
+    last = len(frames) - 1
+    sr.render(t.source, w, h, frames, static, pictures,
+              lambda k, px: got.append((np.clip(px[..., :3], 0, 1) * 255).astype(np.uint8)) if k >= (warm if moving else last) else None,
+              buffers=t.buffers, inputs=t.inputs)
+    imgs = [Image.fromarray(g) for g in got]
+    buf = _io.BytesIO()
+    if moving:
+        imgs[0].save(buf, "WEBP", save_all=True, append_images=imgs[1:], duration=int(round(1000.0 / PREVIEW_FPS)), loop=0, quality=72, method=2)
+    else:
+        imgs[0].save(buf, "JPEG", quality=88)
+    return buf.getvalue()
 
 
 def thumbs_sheet() -> bytes:
@@ -458,17 +643,10 @@ def thumbs_sheet() -> bytes:
         rows = (len(found) + COLUMNS - 1) // COLUMNS
         sheet = np.zeros((max(1, rows) * h, COLUMNS * w, 3), np.float32)
         facade = sf.render(w, h)["image"]
-        heard = {"kLoop": 0.3, "iTime": 1.2, "kLevel": 0.8, "kLow": 0.9, "kMid": 0.5, "kHigh": 0.7, "kBeat": 0.6, "kBeats": 3.0}
+        heard = _HEARD
         for i, name in enumerate(found):
             try:
-                text = st.preset_code(name)
-                t = st.translated(text)
-                static = {"kSeconds": 4.0, "iFrameRate": 25.0, **{c.name: c.default for c in t.controls}}
-                pictures = {0: lambda k: (0, facade)} if 0 in t.channels and 0 not in t.optional else None
-                if st.sample_field(text):             # it works on regions: the windows of the sample facade, as on the node
-                    lab, n_regions, _ = mf.sample_regions()
-                    pair = np.stack([mf.field(lab, n_regions)[0], np.ones(lab.shape, np.float32)], -1)
-                    pictures = {**(pictures or {}), sr.FIELD_UNIT: lambda k, pair=pair: ("field", pair)}
+                t, static, pictures = _preset_setup(name, w, h, facade)
                 if _builds_up(t):                     # it builds up over frames: the picture is what it shows after a while
                     last, n = [], 150 if t.buffers else 40
                     sr.render(t.source, w, h, [dict(heard, kLoop=k / 100.0, iTime=k / 25.0, iFrame=k) for k in range(n)],
@@ -497,7 +675,21 @@ def _routes():
     async def presets(request):
         found = st.presets()
         return web.json_response({"presets": list(found), "about": {n: st.about(st.preset_code(n)) for n in found},
+                                  "types": [{"key": k, "title": title, "about": about} for k, title, about in st.TYPES],
+                                  "type": {n: st.type_of(n) for n in found},
+                                  "tags": {n: preset_tags(n) for n in found},
                                   "node_only": node_only(), "tile": list(TILE), "columns": COLUMNS})
+
+    async def preview(request):
+        import asyncio
+        name = str(request.query.get("name") or "")
+        if name not in st.presets():                  # only the names of the list, never a path
+            return web.Response(status=404, text="no such preset")
+        try:
+            data = await asyncio.get_running_loop().run_in_executor(None, preset_preview, name)
+        except Exception as e:  # noqa: BLE001      no GL here, or a broken preset: the picker keeps its still
+            return web.Response(status=503, text=str(e).splitlines()[0] if str(e) else "no preview")
+        return web.Response(body=data, content_type="image/webp", headers={"Cache-Control": "no-cache"})
 
     async def thumbs(request):
         import asyncio
@@ -514,10 +706,50 @@ def _routes():
             body = {}
         import asyncio                                # off the server's own thread: a long text must not hold up the UI
         return web.json_response(await asyncio.get_running_loop().run_in_executor(
-            None, shader_info, str(body.get("preset") or ""), str(body.get("code") or "")))
+            None, shader_info, str(body.get("preset") or ""), str(body.get("code") or ""), str(body.get("controls") or "")))
+
+    async def look_route(request):                    # what 'adjust' shows: the shader with the controls as they stand
+        import asyncio
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+        moving = bool(body.get("moving"))
+        try:
+            data = await asyncio.get_running_loop().run_in_executor(
+                None, look, str(body.get("preset") or ""), str(body.get("code") or ""), str(body.get("controls") or ""), moving, LOOK)
+        except Exception as e:  # noqa: BLE001
+            return web.Response(status=422, text=str(e).splitlines()[0] if str(e) else "no picture")
+        return web.Response(body=data, content_type="image/webp" if data[:4] == b"RIFF" else "image/jpeg", headers={"Cache-Control": "no-store"})
+
+    async def save(request):                          # 'save as my preset': a .glsl file in ComfyUI's user folder
+        try:
+            body = await request.json()
+            preset, code = str(body.get("preset") or ""), str(body.get("code") or "")
+            text = st.shader_text(preset, code)
+            values = st.parse_values(str(body.get("controls") or ""), st.translated(text).controls)[0]
+            return web.json_response({"name": st.save_preset(str(body.get("name") or ""), text, values)})
+        except (st.ShaderError, OSError) as e:
+            return web.json_response({"error": str(e)})
+        except Exception:  # noqa: BLE001
+            return web.json_response({"error": "nothing to save."})
+
+    async def delete(request):
+        try:
+            body = await request.json()
+            st.delete_preset(str(body.get("name") or ""))
+            return web.json_response({"ok": True})
+        except (st.ShaderError, OSError) as e:
+            return web.json_response({"error": str(e)})
+        except Exception:  # noqa: BLE001
+            return web.json_response({"error": "nothing to delete."})
 
     routes.get("/kubakub/shader/presets")(presets)
     routes.get("/kubakub/shader/thumbs")(thumbs)
+    routes.get("/kubakub/shader/preview")(preview)
+    routes.post("/kubakub/shader/look")(look_route)
+    routes.post("/kubakub/shader/save")(save)
+    routes.post("/kubakub/shader/delete")(delete)
     routes.post("/kubakub/shader/translate")(translate)
 
 

@@ -1,10 +1,12 @@
 // about: fine lines flowing like wood grain or a topographic map. Loops without a jump.
+// type: pattern
 uniform float lines;      // 18 2 120    how many lines
 uniform float scale;      // 1.6 0.2 8   how large the bends are (more = smaller)
 uniform float thin;       // 0.25 0.03 0.9 how thin the lines are
 uniform float drift;      // 0.8 0 6     how far it moves in one loop
 uniform float warm;       // 0.4 0 1
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 float hash(vec3 p) {
     p = fract(p * vec3(0.1031, 0.1030, 0.0973));
     p += dot(p, p.yxz + 33.33);
@@ -31,6 +33,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float w = fwidth(x) * 1.2;
     float d = abs(fract(x) - 0.5) * 2.0;
     float v = smoothstep(thin + w, thin - w, d);
-    vec3 col = mix(LAV, ORG, clamp(warm + (h - 0.5) * 1.5, 0.0, 1.0)) * v;
+    vec3 col = mix(colour_a, colour_b, clamp(warm + (h - 0.5) * 1.5, 0.0, 1.0)) * v;
     fragColor = vec4(col * kMask(kUV), 1.0);
 }

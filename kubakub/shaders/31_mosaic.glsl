@@ -1,4 +1,5 @@
 // about: the picture on image0 as tiles that change size with the loop or the sound.
+// type: look
 uniform float tiles;      // 40 2 300    tiles across the picture
 uniform float breathe;    // 0.5 0 1     how much the tile size swings in one loop
 uniform float gap;        // 0.1 0 0.6   the dark line between tiles

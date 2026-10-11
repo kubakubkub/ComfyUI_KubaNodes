@@ -1,4 +1,5 @@
 // about: the picture on image0 as scan lines that the brightness pushes out of place, like a signal on a tube; the lines drift. Loops without a jump.
+// type: signal
 // The idea (brightness shifts the phase of a cosine carrier, then steps and smoothing) is olegchomp's td-modulation
 // for TouchDesigner (github.com/olegchomp/td-rnd); written new from its description.
 uniform float rate;       // 90 10 400   lines down the picture

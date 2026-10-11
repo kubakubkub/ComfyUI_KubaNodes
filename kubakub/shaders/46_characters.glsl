@@ -1,4 +1,5 @@
 // about: the picture on image0 typed in characters, dense signs where it is bright, like text-mode art; the signs flicker.
+// type: look
 uniform float columns;    // 110 20 320  characters across the picture
 uniform float colour;     // 0.6 0 1     0 = terminal green, 1 = the picture's colours
 uniform float flicker;    // 6 0 40      times a character changes in one loop

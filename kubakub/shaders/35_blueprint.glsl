@@ -1,4 +1,5 @@
 // about: the picture on image0 as an architect's blueprint: white outlines on blue, a drawing grid, and a pen of light that redraws it.
+// type: look
 uniform float thick;      // 1.2 0.5 6   outline width in pixels
 uniform float gain;       // 4 0.5 20    how many outlines show
 uniform float grid;       // 24 0 120    grid squares across, 0 = none

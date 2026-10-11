@@ -94,6 +94,35 @@ may have changed since.
   left to right, or the shape's edges. With the edges, a layer clipped to regions has every region as its own
   piece, so region contours draws around every window and extrude lifts every window as a block. extrude uses
   the edges by itself; other fills keep left to right, so saved compositions look as before.
+- **Presets by type, with moving pictures.** The 59 presets are sorted into seven types: patterns, 3d scenes, on
+  your regions, picture looks, screen and tape, picture with depth, over time. The `preset` list of kubakub shader
+  and the `fill` menu of the director follow that order, and the picker (the button under `preset`, **pictures**
+  in the director) shows them under these headings with a line on what the type is and what it needs. A tile
+  plays one loop when the pointer rests on it, a box finds by a word (`fire`, `vhs`, `depth`), small marks say
+  what a preset reads (picture, clip) or gives (depth), and the line at the bottom says what it draws. The names
+  are the same, so saved workflows and compositions open as before. A preset file names its type in a
+  `// type:` line.
+- **Colours to pick.** A shader can have colours as controls: `uniform vec3 ink; // #f18a58`. In **adjust** and in
+  the director's inspector a colour is a swatch; in `controls` it is `ink = #2040ff`. 37 presets that were drawn
+  in the pack's lavender and orange now have these two as `colour_a` and `colour_b`, so their look is yours.
+- **Twelve new presets, type "grade and lens"** (71 in all): blur, motion blur, zoom blur, grade (exposure,
+  contrast, saturation, warmth, black and white point), duotone (two colours of your choice), vignette (with film
+  grain), lens bend (fish eye and colour fringes), swirl, under water, little planet, glow, mirrors. They work on
+  your picture, hold still unless a control asks them to move, and follow a sound or a drawn arrow where that
+  makes sense.
+- **Adjust a preset with sliders, see its code, save your own.** New button **adjust** on kubakub shader: every
+  control of the shader as a slider with a line on what it does, next to a picture that the node redraws as you
+  move (one frame while dragging, the loop when you stop). The sliders write the `controls` field. **show the
+  code** puts the preset's code into `code` to change it; **save as my preset** stores the shader with the
+  sliders as its new defaults under a name of yours. Saved presets are `.glsl` files in ComfyUI's user folder
+  (`kubakub/shaders`), are listed first as **my presets** in the list and the picker, and can be replaced or
+  deleted from the same panel. A preset that was saved again runs again on the next queue.
+- **Whatever you connect does something.** A picture on `image0` of kubakub shader used to do nothing with a
+  pattern or a 3d scene. Now every shader that does not read the picture is laid over it: new input
+  **on_picture** (screen, add, multiply = the shader as light on the picture, overlay, difference, displace, off)
+  and `picture_amount`; with a mask the picture stays as it is outside it, and `masks` and `depth` stay the
+  shader's own. Connecting a sound makes a preset follow it (its `sound` / `beat` control goes from 0 to 1 unless
+  you type a value). An input a shader has no use for (image1 - image3, a field, a sound) is named in the report.
 - **Fixes from a review of the whole pack (2026-10-11).**
   - Director: a layer with a stagger or in a swap no longer lights up the places that belong to no region; a
     glow that names a shape layer no longer stops the render; numbers that are no numbers in a hand-edited

@@ -1,4 +1,5 @@
 // about: an endless walk between two rows of columns under an open sky; the sun lays their shadows across the floor. Raymarched. Loops without a jump. Writes a depth.
+// type: space
 uniform float bays;       // 2 1 8       columns you pass in one loop
 uniform float width;      // 1.5 0.8 4   how far the rows stand apart
 uniform float thick;      // 0.22 0.08 0.45 how thick a column is
@@ -8,7 +9,8 @@ uniform float sway;       // 0.3 0 1     how far the view drifts from side to si
 uniform float fog;        // 0.5 0 1     how much the far end fades into the sky
 uniform float sound;      // 0 0 2       the low end of a sound brightens the sun
 uniform float steps;      // 96 24 200   more = cleaner edges, slower
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853, BAY = 2.0, FLOOR = -1.0, TOP = 1.1;
 
 float map(vec3 p) {                               // the distance from p to the nearest surface
@@ -25,7 +27,7 @@ float map(vec3 p) {                               // the distance from p to the 
 }
 
 vec3 sky(vec3 rd) {
-    return mix(mix(ORG, vec3(1.0, 0.9, 0.8), 0.35), LAV * 0.75, smoothstep(-0.05, 0.6, rd.y));
+    return mix(mix(colour_b, vec3(1.0, 0.9, 0.8), 0.35), colour_a * 0.75, smoothstep(-0.05, 0.6, rd.y));
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -38,13 +40,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         vec3 p = ro + rd * t, n = kNormal(p);
         float s = radians(clamp(sun, 5.0, 85.0));
         vec3 L = normalize(vec3(0.8 * cos(s), sin(s), -0.6 * cos(s)));
-        vec3 stone = mix(vec3(0.74, 0.69, 0.66), LAV, 0.18);
+        vec3 stone = mix(vec3(0.74, 0.69, 0.66), colour_a, 0.18);
         if (p.y < FLOOR + 0.01) {                      // the floor: two tones of tiles, one bay is four of them
             vec2 g = floor(p.xz * 2.0);
             stone *= mod(g.x + g.y, 2.0) < 0.5 ? 0.62 : 0.9;
         }
         float ao = kAO(p, n), dif = max(dot(n, L), 0.0) * kShadow(p + n * 0.01, L, 12.0, 24.0);
-        col = stone * (ORG * 1.6 * dif * (1.0 + sound * kLow) + LAV * 0.4 * ao * (0.6 + 0.4 * n.y));
+        col = stone * (colour_b * 1.6 * dif * (1.0 + sound * kLow) + colour_a * 0.4 * ao * (0.6 + 0.4 * n.y));
         col = mix(col, back, fog * (1.0 - exp(-0.0035 * t * t)));
         kDepth = kDepthOf(t, 0.5, 14.0);
     }

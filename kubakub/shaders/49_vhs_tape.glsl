@@ -1,4 +1,5 @@
 // about: the picture on image0 as a worn VHS tape: soft, colours bleeding sideways, a wobbling edge, snow, a noisy band and the torn lines of the head switch at the bottom.
+// type: signal
 // The steps and their order follow the VHS signal chain of ntsc-rs (github.com/valadaptive/ntsc-rs, valadaptive),
 // found through olegchomp's TouchDesigner version (github.com/olegchomp/ntsc-td); written new as one shader pass.
 uniform float wear;       // 0.5 0 1     how worn the tape is: everything at once

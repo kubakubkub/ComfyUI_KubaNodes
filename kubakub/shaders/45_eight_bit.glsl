@@ -1,4 +1,5 @@
 // about: the picture on image0 as on an old game console: big pixels, a handful of colours, dither patterns.
+// type: look
 uniform float pixels;     // 160 16 640  pixels across the picture
 uniform float palette;    // 0 0 4       0 = four greens, 1 = cyan magenta white, 2 = amber, 3 = eight colours, 4 = 64 colours
 uniform float dither;     // 0.8 0 1     how much the dot pattern is used to fake more shades

@@ -1,10 +1,12 @@
 // about: small lights wandering in the dark, each on its own path. Loops without a jump.
+// type: pattern
 uniform float count;      // 40 1 120    how many lights
 uniform float size;       // 0.02 0.002 0.1
 uniform float wander;     // 0.12 0 0.5  how far each one roams
 uniform float twinkle;    // 0.6 0 1     how much they blink
 uniform float sound;      // 0 0 2       the highs of a sound make them flare
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853;
 float hash1(vec2 p) {
     vec3 q = fract(vec3(p.xyx) * 0.1031);
@@ -27,7 +29,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float d = length(p - c * asp);
         float blink = 1.0 - twinkle * (0.5 + 0.5 * sin(a * (floor(hash1(vec2(fi, 8.8)) * 5.0) + 2.0) + fi * 3.0));
         float s = size * (1.0 + sound * kHigh);
-        col += mix(LAV, ORG, hash1(vec2(fi, 6.2))) * blink * (s * s) / (d * d + s * s * 0.15) * 0.4;
+        col += mix(colour_a, colour_b, hash1(vec2(fi, 6.2))) * blink * (s * s) / (d * d + s * s * 0.15) * 0.4;
     }
     fragColor = vec4(col * kMask(kUV), 1.0);
 }

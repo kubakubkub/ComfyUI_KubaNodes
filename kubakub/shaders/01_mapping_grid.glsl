@@ -1,4 +1,5 @@
 // about: a line-up grid for the projector: squares, the centre cross, circles and the diagonals; a scan line runs through.
+// type: regions
 uniform float cells;      // 12 2 64   squares across the picture
 uniform float line;       // 2 0.5 12  line width in pixels
 uniform float scan;       // 1 0 1     the running scan line, 0 = off

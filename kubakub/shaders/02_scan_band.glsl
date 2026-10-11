@@ -1,4 +1,5 @@
 // about: a band of light that runs along the field (connect kubakub mask field; without one: left to right).
+// type: regions
 uniform float width;      // 0.15 0.01 1  how wide the band is
 uniform float soft;       // 0.5 0 1      0 = hard edges, 1 = a soft glow
 uniform float bands;      // 1 1 12       how many bands run at once

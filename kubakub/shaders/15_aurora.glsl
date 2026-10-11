@@ -1,4 +1,5 @@
 // about: curtains of northern light swaying across the top. Loops without a jump.
+// type: pattern
 uniform float height;     // 0.6 0.1 1    how far down the curtains hang
 uniform float folds;      // 3 0.5 12     how many folds across
 uniform float sway;       // 1.2 0 6      how far they move in one loop

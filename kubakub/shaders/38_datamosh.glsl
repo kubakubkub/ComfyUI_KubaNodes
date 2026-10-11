@@ -1,4 +1,5 @@
 // about: datamosh: the clip on image0 breaks into blocks that smear along its own shapes until a clean frame snaps back. Needs a clip (a moving pattern without one).
+// type: time
 // optional: image0
 uniform float blocks;     // 48 6 240    blocks across the picture
 uniform float smear;      // 6 0 40      how far a block drags per frame, in pixels
@@ -10,7 +11,8 @@ float hash1(vec2 p) {
     q += dot(q, q.yzx + 33.33);
     return fract((q.x + q.y) * q.z);
 }
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853;
 vec3 src(vec2 uv) {
     if (iChannelResolution[0].x > 1.5) return texture(iChannel0, clamp(uv, 0.0, 1.0)).rgb;
@@ -19,7 +21,7 @@ vec3 src(vec2 uv) {
     vec2 c = vec2(0.45 * cos(a), 0.25 * sin(a * 2.0));
     float ring = smoothstep(0.25, 0.2, abs(fract(length(p - c) * 5.0 - kLoop * 4.0) - 0.5));
     float bar = smoothstep(0.06, 0.04, abs(p.y - 0.3 * sin(a * 3.0 + p.x * 4.0)));
-    return mix(LAV, ORG, 0.5 + 0.5 * sin(a + p.x * 5.0)) * ring * smoothstep(0.5, 0.1, length(p - c)) + vec3(1.0, 0.9, 0.8) * bar;
+    return mix(colour_a, colour_b, 0.5 + 0.5 * sin(a + p.x * 5.0)) * ring * smoothstep(0.5, 0.1, length(p - c)) + vec3(1.0, 0.9, 0.8) * bar;
 }
 
 float lumOf(vec2 uv) { return dot(src(uv), vec3(0.299, 0.587, 0.114)); }

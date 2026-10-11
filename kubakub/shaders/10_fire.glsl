@@ -1,4 +1,5 @@
 // about: flames rising from the bottom edge. Loops without a jump; the low end of a sound makes them taller.
+// type: pattern
 uniform float height;     // 0.7 0.1 1.5  how high the flames reach
 uniform float scale;      // 4 1 20       how many tongues across
 uniform float rise;       // 3 0 12       how far the flames travel up in one loop

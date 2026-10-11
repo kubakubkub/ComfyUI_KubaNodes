@@ -216,6 +216,9 @@ void main() {
 
 _NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
 _CONTROL = re.compile(r"^[ \t]*uniform\s+float\s+(\w+)\s*;[ \t]*(?://(.*))?$", re.M)
+# a colour to pick: `uniform vec3 ink; // #f18a58 what it is`. In the shader it is three numbers (ink_r, ink_g, ink_b,
+# each a control like any other, so the director and the keyframes need nothing new) and `ink` is a name for the three
+_COLOUR = re.compile(r"^[ \t]*uniform\s+vec3\s+(\w+)\s*;[ \t]*//[ \t]*#([0-9a-fA-F]{6})\b[ \t]*(.*)$", re.M)
 _UNIFORM = re.compile(r"^[ \t]*uniform\s+(?:(?:highp|mediump|lowp)\s+)?\w+\s+(\w+)\s*(?:\[\s*\d+\s*\])?\s*;.*$", re.M)
 _TOY = re.compile(r"\bvoid\s+mainImage\s*\(")
 _MAIN = re.compile(r"\bvoid\s+main\s*\(")
@@ -236,6 +239,7 @@ class Control:
     lo: float = 0.0
     hi: float = 1.0
     about: str = ""                   # what the comment says after the numbers
+    colour: str = ""                  # the colour it is the red, green or blue of ('ink' for ink_r), else ""
 
 
 @dataclass
@@ -287,9 +291,13 @@ def _no_comments(code: str) -> str:
 def parse_controls(code: str) -> list:
     """`uniform float speed; // 1 0 4` -> Control(speed, 1, 0, 4). The numbers are default, min, max; all optional."""
     out = []
-    for m in _CONTROL.finditer(code):
+    for m in sorted([*_CONTROL.finditer(code), *_COLOUR.finditer(code)], key=lambda q: q.start()):
         name = m.group(1)
         if name in _BUILTIN or re.fullmatch(r"u_(float|int|bool)\d+", name):
+            continue
+        if m.re is _COLOUR:                           # a colour: its red, green and blue, 0-1
+            out += [Control(f"{name}_{ch}", int(m.group(2)[2 * i:2 * i + 2], 16) / 255.0, 0.0, 1.0, m.group(3).strip(), name)
+                    for i, ch in enumerate("rgb")]
             continue
         comment = m.group(2) or ""
         head = re.match(rf"\s*(?:{_NUM}\s+){{0,2}}(?:{_NUM})?(?![\w.])", comment)
@@ -300,6 +308,20 @@ def parse_controls(code: str) -> list:
     if len(out) > MAX_CONTROLS:
         raise ShaderError(f"the shader has {len(out)} controls (uniform float lines); {MAX_CONTROLS} is the limit.")
     return out
+
+
+def _colours(body: str) -> tuple:
+    """The colour lines of a shader as three numbers each, on the same line -> (body, the '#define's that give the
+    three their one name back)."""
+    names = [m.group(1) for m in _COLOUR.finditer(body) if m.group(1) not in _BUILTIN]
+    body = _COLOUR.sub(lambda m: m.group(0) if m.group(1) in _BUILTIN else
+                       "uniform float {0}_r; uniform float {0}_g; uniform float {0}_b;".format(m.group(1)), body)
+    return body, "".join("#define {0} vec3({0}_r, {0}_g, {0}_b)\n".format(n) for n in dict.fromkeys(names))
+
+
+def colour_hex(values: dict, name: str) -> str:
+    """The colour `name` in these control values as '#rrggbb'."""
+    return "#" + "".join(f"{int(round(min(max(float(values.get(f'{name}_{ch}', 0.0)), 0.0), 1.0) * 255)):02x}" for ch in "rgb")
 
 
 def unsupported(code: str, tabbed=False) -> list:
@@ -342,7 +364,13 @@ def parse_values(text: str, controls: list) -> tuple:
     by_lower = {c.name.lower(): c for c in controls}
     by_lower.update({c.name.lower().rstrip("_"): c for c in controls})      # 'length_' in the code is 'length' to type
     notes = []
+    colours = {c.colour.lower(): c.colour for c in controls if c.colour}
     for part in re.split(r"[,;\n]+", str(text or "")):
+        col = re.fullmatch(r"\s*(\w+)\s*[=:]\s*#([0-9a-fA-F]{6})\s*(?:#.*)?", part)
+        if col and col.group(1).lower() in colours:   # a colour: 'ink = #ff8800'
+            for i, ch in enumerate("rgb"):
+                vals[f"{colours[col.group(1).lower()]}_{ch}"] = int(col.group(2)[2 * i:2 * i + 2], 16) / 255.0
+            continue
         part = part.split("#", 1)[0].strip()
         if not part:
             continue
@@ -437,6 +465,7 @@ def _translate_tabs(code: str, parts: list) -> Translated:
             raise ShaderError(f"the tab {label} must have one 'void mainImage(...)'; it has "
                               f"{len(_TOY.findall(_no_comments(text)))}. " + HOW_TO_TABS)
         body = "".join(f"#line {s}\n{_clean(t)}\n" for s, t in common) + f"#line {start}\n{_clean(text)}\n"
+        body, picked = _colours(body)
         used = _no_comments(body)
         reads = {}
         for c in range(CHANNELS):
@@ -451,7 +480,7 @@ def _translate_tabs(code: str, parts: list) -> Translated:
         says.append(f"{label} reads " + (", ".join(f"iChannel{c} = {('Buffer ' + s) if len(s) == 1 else s}" for c, s in reads.items()) or "no picture"))
         uses |= {n for n in ("iMouse", "iDate", "kLoop", "kLevel", "kLow", "kMid", "kHigh", "kBeat", "kBeats", "kField", "kMask", "kPrev", "kDepth", *VECTOR)
                  if re.search(rf"\b{n}\b", used)}
-        built[name] = (HEADER + helpers(body) + body + (FOOTER_TOY if name == "image" else FOOTER_BUFFER), reads)
+        built[name] = (HEADER + picked + helpers(body) + body + (FOOTER_TOY if name == "image" else FOOTER_BUFFER), reads)
     if "kPrev" in uses:
         raise ShaderError("kPrev (the frame before) cannot be used together with Buffer tabs: a Buffer tab that reads "
                           "itself is that already.")
@@ -511,7 +540,8 @@ def translate(code: str) -> Translated:
         body = re.sub(r"\bgl_FragColor\b", "kOut", body)
         at = _MAIN.search(_no_comments(body))          # the real one, not a 'void main(' in a comment
         body = body[:at.start()] + "void kUserMain(" + body[at.end():]
-    source = head + helpers(body) + "#line 1\n" + body + "\n" + (FOOTER_TOY if kind == "shadertoy" else FOOTER_GLSL)
+    body, picked = _colours(body)
+    source = head + picked + helpers(body) + "#line 1\n" + body + "\n" + (FOOTER_TOY if kind == "shadertoy" else FOOTER_GLSL)
 
     used = _no_comments(body)
     channels = [i for i in range(CHANNELS) if re.search(rf"\b(?:iChannel|u_image){i}\b", used)]
@@ -549,12 +579,125 @@ def explain(error: str) -> str:
 # the presets: kubakub/shaders/*.glsl
 # --------------------------------------------------------------------------
 
+# The types of preset, in menu order: (key, title, what they are and what they need). A preset names its own in a
+# '// type: key' line; the pickers on the node and in the director show the presets under these headings.
+TYPES = (
+    ("mine", "my presets", "Presets you saved yourself (adjust, then save as my preset). They are files in ComfyUI's user folder, under kubakub/shaders."),
+    ("pattern", "patterns", "Moving pictures made from nothing: smoke, cells, stripes, light. They need no input; a picture on image0 goes under them (on_picture)."),
+    ("space", "3d scenes", "A space you look into: forms, columns, corridors, fog. They need no input (a picture on image0 goes under them); they cost more to draw, and some give a depth."),
+    ("regions", "on your regions", "Light that follows your masks and regions: connect kubakub mask field (the sample facade without one). For projection mapping."),
+    ("look", "picture looks", "Your picture on image0, redrawn: cartoon, blueprint, dots, big pixels (the sample facade without one)."),
+    ("signal", "screen and tape", "Your picture on image0 as on old video gear: a VHS tape, a tube television, a composite cable."),
+    ("lens", "grade and lens", "Your picture on image0, finished: blur, colour grading, glow, and what a lens does to it (bend, swirl, mirrors). Most hold still unless you ask them to move."),
+    ("relief", "picture with depth", "Your picture on image0 gets depth: relief, shadows, a wire mesh, points. A depth pass on image1 makes it true; without one its brightness is the depth."),
+    ("time", "over time", "They build every frame on the one before: a clip that smears and leaves trails, a pattern that grows. On the node only."),
+)
+_TYPE_ORDER = {key: i for i, (key, _, _) in enumerate(TYPES)}
+
+
+USER_DIR = None                                      # where saved presets live: set by the node (ComfyUI's user folder)
+
+
+def preset_type(code: str) -> str:
+    """The '// type: key' line of a preset -> a key of TYPES ('pattern' when it names none or one that is unknown)."""
+    m = re.search(r"^//\s*type:\s*(\w+)", code, flags=re.M)
+    return m.group(1) if m and m.group(1) in _TYPE_ORDER and m.group(1) != "mine" else "pattern"
+
+
+def is_mine(name: str) -> bool:
+    """A preset the user saved (a file in USER_DIR), not one of the pack's."""
+    path = _NAMES.get(name) or presets().get(name)
+    return bool(path and USER_DIR and os.path.dirname(os.path.abspath(path)) == os.path.abspath(USER_DIR))
+
+
+def type_of(name: str) -> str:
+    """The type a preset is listed under: 'mine' for a saved one, else what its file says."""
+    return "mine" if is_mine(name) else preset_type(preset_code(name))
+
+
+def with_defaults(code: str, values: dict) -> str:
+    """The code with the values written into its control lines as their new defaults (the ranges and words stay):
+    `uniform float warp; // 1 0 4 folds` and {warp: 2.5} -> `uniform float warp; // 2.5 0 4 folds`."""
+    by = {c.name: c for c in parse_controls(code)}
+
+    def line(m):
+        c = by.get(m.group(1))
+        if c is None or c.name not in values:
+            return m.group(0)
+        v = min(max(float(values[c.name]), c.lo), c.hi)
+        return f"{m.group(0).split('//')[0].rstrip().split(';')[0]};{' ' * 6}// {v:g} {c.lo:g} {c.hi:g}{'   ' + c.about if c.about else ''}"
+
+    def colour(m):
+        n = m.group(1)
+        if f"{n}_r" not in by or not any(f"{n}_{ch}" in values for ch in "rgb"):
+            return m.group(0)
+        now = {f"{n}_{ch}": values.get(f"{n}_{ch}", by[f"{n}_{ch}"].default) for ch in "rgb"}
+        return f"{m.group(0).split('//')[0].rstrip()}{' ' * 6}// {colour_hex(now, n)}{'   ' + m.group(3).strip() if m.group(3).strip() else ''}"
+    return _COLOUR.sub(colour, _CONTROL.sub(line, code))
+
+
+def preset_file_name(name: str) -> str:
+    """A name typed by the user -> the name a saved preset gets (lowercase letters, digits, spaces; it starts with a
+    letter), or a ShaderError that says what is wrong."""
+    name = re.sub(r"\s+", " ", str(name or "").strip().lower().replace("_", " "))
+    if not re.fullmatch(r"[a-z][a-z0-9 ]{0,39}", name):
+        raise ShaderError("a preset name is 1 to 40 letters, digits and spaces, and starts with a letter.")
+    return name
+
+
+def save_preset(name: str, code: str, values: dict = None) -> str:
+    """Save a shader as a preset of the user's own (a .glsl file in USER_DIR), the values as its defaults -> its name.
+    One of the pack's presets cannot be overwritten; one of the user's own with that name is."""
+    if not USER_DIR:
+        raise ShaderError("there is no folder for saved presets here.")
+    name = preset_file_name(name)
+    found = presets()
+    if name in found and not is_mine(name):
+        raise ShaderError(f"'{name}' is a built-in preset: pick another name.")
+    code = str(code or "")
+    translate(code)                                   # only a shader that runs is saved
+    code = with_defaults(code, values or {})
+    code = re.sub(r"^//[ \t]*type:.*\r?\n", "", code, flags=re.M)      # its type is 'my presets' now
+    if not about(code):
+        code = f"// about: {name}, a preset of my own.\n" + code
+    os.makedirs(USER_DIR, exist_ok=True)
+    path = os.path.join(USER_DIR, name.replace(" ", "_") + ".glsl")
+    part = path + ".part"
+    with open(part, "w", encoding="utf-8", newline="\n") as f:
+        f.write(code if code.endswith("\n") else code + "\n")
+    os.replace(part, path)
+    presets()
+    return name
+
+
+def delete_preset(name: str) -> None:
+    """Remove a preset the user saved. The pack's own presets stay."""
+    if not is_mine(name):
+        raise ShaderError(f"'{name}' is not one of your saved presets.")
+    os.remove(_NAMES[name])
+    presets()
+
+
 def presets() -> dict:
-    """{name: path}; the name is the file name with spaces. Sorted, the file order is the menu order."""
+    """{name: path}; the name is the file name with spaces. The menu order: by type (TYPES), then by file name."""
     if not os.path.isdir(SHADER_DIR):
         return {}
     found = {re.sub(r"^\d+_", "", os.path.splitext(f)[0]).replace("_", " "): os.path.join(SHADER_DIR, f)
              for f in sorted(os.listdir(SHADER_DIR)) if f.endswith(".glsl")}
+    mine = set()
+    if USER_DIR and os.path.isdir(USER_DIR):          # the user's own, saved from the node; a built-in name stays the built-in
+        for f in sorted(os.listdir(USER_DIR)):
+            name = os.path.splitext(f)[0].replace("_", " ")
+            if f.endswith(".glsl") and name not in found:
+                found[name] = os.path.join(USER_DIR, f)
+                mine.add(name)
+
+    def order(item):
+        try:
+            return _TYPE_ORDER["mine" if item[0] in mine else preset_type(_read(item[1]))]
+        except OSError:
+            return 0
+    found = dict(sorted(found.items(), key=order))   # a stable sort: the file order stays within a type
     _NAMES.clear()
     _NAMES.update(found)
     return found
@@ -566,20 +709,24 @@ _NAMES = {}                                          # the last listing: a known
 _CODE = {}                                           # path -> (mtime, text): the director asks at every frame
 
 
-def preset_code(name: str) -> str:
-    path = _NAMES.get(name) or presets().get(name)
-    if not path:
-        raise ShaderError(f"no preset '{name}' (there are: {', '.join(presets()) or 'none'}).")
-    try:
-        mtime = os.path.getmtime(path)
-    except OSError:                                  # the file went away since the last listing
-        _NAMES.clear()
-        raise ShaderError(f"no preset '{name}' (there are: {', '.join(presets()) or 'none'}).") from None
+def _read(path: str) -> str:
+    mtime = os.path.getmtime(path)
     hit = _CODE.get(path)
     if hit is None or hit[0] != mtime:
         with open(path, encoding="utf-8") as f:
             hit = _CODE[path] = (mtime, f.read())
     return hit[1]
+
+
+def preset_code(name: str) -> str:
+    path = _NAMES.get(name) or presets().get(name)
+    if not path:
+        raise ShaderError(f"no preset '{name}' (there are: {', '.join(presets()) or 'none'}).")
+    try:
+        return _read(path)
+    except OSError:                                  # the file went away since the last listing
+        _NAMES.clear()
+        raise ShaderError(f"no preset '{name}' (there are: {', '.join(presets()) or 'none'}).") from None
 
 
 def shader_text(preset="", code="") -> str:

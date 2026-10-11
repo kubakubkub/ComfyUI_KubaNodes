@@ -1,4 +1,5 @@
 // about: slow folding smoke: noise warped by noise. Loops without a jump.
+// type: pattern
 uniform float scale;      // 3 0.5 20   how many folds across the picture
 uniform float warp;       // 1.2 0 4    how strongly it folds
 uniform float drift;      // 1.5 0 8    how far it moves in one loop

@@ -1,4 +1,5 @@
 // about: the picture on image0 as a glowing wire mesh, its lines bent by depth (a depth pass on image1, else by brightness). A wave of light runs through.
+// type: relief
 // optional: image1
 uniform float rows;       // 40 4 200    lines from top to bottom
 uniform float columns;    // 0 0 200     lines from left to right, 0 = none
@@ -6,7 +7,8 @@ uniform float relief;     // 0.08 0 0.4  how far depth pushes the lines up
 uniform float thin;       // 0.12 0.02 0.8
 uniform float wave;       // 0.7 0 1     a wave of brightness through the depth
 uniform float keep;       // 0 0 1       how much of the picture stays visible underneath
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 vec3 pic(vec2 uv) { return texture(iChannel0, clamp(uv, 0.0, 1.0)).rgb; }
 float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 float depthAt(vec2 uv) {                          // a depth pass on image1 when there is one, else how bright the picture is
@@ -29,6 +31,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     if (columns > 0.5) { float c = lineOf((uv.x + (h0 - 0.5) * relief * 0.3) * floor(columns), thin * 0.6); if (c > v) { v = c; hSeen = h0; } }
     float x = fract(hSeen - kLoop);
     float glow = mix(1.0, 0.25 + 1.5 * smoothstep(0.35, 0.0, min(x, 1.0 - x) * 2.0), wave);
-    vec3 col = pic(uv) * keep + mix(LAV, ORG, hSeen) * v * glow;
+    vec3 col = pic(uv) * keep + mix(colour_a, colour_b, hSeen) * v * glow;
     fragColor = vec4(col * kMask(uv), 1.0);
 }

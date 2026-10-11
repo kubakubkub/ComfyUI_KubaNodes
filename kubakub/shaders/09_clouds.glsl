@@ -1,4 +1,5 @@
 // about: soft clouds drifting across a sky. Loops without a jump.
+// type: pattern
 uniform float cover;      // 0.5 0 1     how much of the sky is cloud
 uniform float scale;      // 2.5 0.5 12  how big the clouds are (more = smaller)
 uniform float drift;      // 1.5 0 8     how far they travel in one loop

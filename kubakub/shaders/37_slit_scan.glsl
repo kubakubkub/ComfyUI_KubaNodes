@@ -1,9 +1,11 @@
 // about: slit scan: a slit travels across and paints what the clip on image0 shows at that moment, so moving things bend and stretch. Needs a clip (a moving pattern without one).
+// type: time
 // optional: image0
 uniform float passes;     // 1 1 12      times the slit crosses in one loop
 uniform float upright;    // 1 0 1       1 = the slit travels left to right, 0 = top to bottom
 uniform float show;       // 0.6 0 1     how bright the slit itself is drawn
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853;
 vec3 src(vec2 uv) {
     if (iChannelResolution[0].x > 1.5) return texture(iChannel0, clamp(uv, 0.0, 1.0)).rgb;
@@ -12,7 +14,7 @@ vec3 src(vec2 uv) {
     vec2 c = vec2(0.45 * cos(a), 0.25 * sin(a * 2.0));
     float ring = smoothstep(0.25, 0.2, abs(fract(length(p - c) * 5.0 - kLoop * 4.0) - 0.5));
     float bar = smoothstep(0.06, 0.04, abs(p.y - 0.3 * sin(a * 3.0 + p.x * 4.0)));
-    return mix(LAV, ORG, 0.5 + 0.5 * sin(a + p.x * 5.0)) * ring * smoothstep(0.5, 0.1, length(p - c)) + vec3(1.0, 0.9, 0.8) * bar;
+    return mix(colour_a, colour_b, 0.5 + 0.5 * sin(a + p.x * 5.0)) * ring * smoothstep(0.5, 0.1, length(p - c)) + vec3(1.0, 0.9, 0.8) * bar;
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {

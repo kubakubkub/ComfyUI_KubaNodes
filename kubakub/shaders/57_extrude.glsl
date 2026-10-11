@@ -1,4 +1,5 @@
 // about: the regions rise out of the wall as blocks with sloped edges and throw shadows on it (connect the field of kubakub mask field, edge distance); a picture on image0 is painted on them. Raymarched. Loops without a jump; a beat can lift them. Writes a depth.
+// type: regions
 // optional: image0
 // sample: field
 uniform float height;     // 0.1 0 0.4   how far the blocks stand out, in picture heights
@@ -14,7 +15,8 @@ uniform float dark;       // 0.6 0 1     how dark the shadow is
 uniform float shade;      // 0.6 0 1     slopes turned to the light get brighter, the others darker
 uniform float beat;       // 0 0 1       how much higher on a beat
 uniform float steps;      // 64 16 200   more = cleaner edges, slower
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853;
 float hAt(vec2 uv) {                              // how high the surface stands over the wall here
     float f = kField(clamp(uv, 0.0, 1.0)), x = clamp(f / max(bevel, 1e-3), 0.0, 1.0);
@@ -57,7 +59,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float facing = max(dot(normalize(vec3(-slope, 1.0)), L), 0.0) / L.z;      // 1 on the flat wall
     float on = smoothstep(0.0, 0.03 * top, hAt(q));
     vec3 c = iChannelResolution[0].x > 1.5 ? texture(iChannel0, clamp(q, 0.0, 1.0)).rgb
-                                           : mix(vec3(0.2, 0.18, 0.22), mix(LAV, ORG, kField(clamp(q, 0.0, 1.0))), on);
+                                           : mix(vec3(0.2, 0.18, 0.22), mix(colour_a, colour_b, kField(clamp(q, 0.0, 1.0))), on);
     c *= mix(1.0, clamp(facing, 0.0, 1.8), shade) * mix(1.0 - dark, 1.0, lit);
     kDepth = z / top;
     fragColor = vec4(clamp(c, 0.0, 1.0), 1.0);

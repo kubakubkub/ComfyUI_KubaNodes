@@ -1,9 +1,11 @@
 // about: soft blobs of light that melt into each other, like a lava lamp. Loops without a jump.
+// type: pattern
 uniform float blobs;      // 6 1 12      how many blobs
 uniform float size;       // 0.16 0.03 0.5
 uniform float edge;       // 0.15 0.01 1  0 = hard blobs, 1 = a soft glow
 uniform float sound;      // 0 0 2        a kick makes them swell
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853;
 float hash1(vec2 p) {
     vec3 q = fract(vec3(p.xyx) * 0.1031);
@@ -30,7 +32,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         mixc += w * hash1(vec2(fi, 3.9));
     }
     float v = smoothstep(1.0 - edge, 1.0 + edge, sum);
-    vec3 col = mix(LAV, ORG, clamp(mixc / max(sum, 1e-4), 0.0, 1.0)) * v;
+    vec3 col = mix(colour_a, colour_b, clamp(mixc / max(sum, 1e-4), 0.0, 1.0)) * v;
     col += vec3(1.0, 0.95, 0.9) * smoothstep(2.5, 6.0, sum) * 0.4;
     fragColor = vec4(col * kMask(kUV), 1.0);
 }

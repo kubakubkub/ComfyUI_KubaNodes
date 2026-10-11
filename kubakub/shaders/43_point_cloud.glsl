@@ -1,4 +1,5 @@
 // about: the picture on image0 as a cloud of points that sways in depth (a depth pass on image1, else by brightness), like a 3D scan.
+// type: relief
 // optional: image1
 uniform float points;     // 90 10 400   points across the picture
 uniform float size;       // 0.95 0.1 1.5 how big a point is

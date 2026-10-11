@@ -1,10 +1,12 @@
 // about: rays of light fanning out from a point above, slowly shifting. Loops without a jump.
+// type: pattern
 uniform float rays;       // 14 2 80     how many rays
 uniform float cx;         // 0.5 -0.5 1.5 where the light is, 0 = left edge, 1 = right edge
 uniform float cy;         // 1.15 0 2    its height, 1 = the top edge
 uniform float reach;      // 1.2 0.2 3   how far the rays reach
 uniform float warm;       // 0.7 0 1
-const vec3 LAV = vec3(0.63, 0.53, 0.72), ORG = vec3(0.95, 0.54, 0.35);
+uniform vec3 colour_a;    // #a187b7   the cool colour
+uniform vec3 colour_b;    // #f18a58   the warm colour
 const float TAU = 6.2831853;
 float hash(vec3 p) {
     p = fract(p * vec3(0.1031, 0.1030, 0.0973));

@@ -1,4 +1,5 @@
 // about: the bright parts of the picture on image0 melt downwards (or along a drawn arrow) in long streaks, like sorted pixels; the amount breathes with the loop.
+// type: look
 uniform float length_;    // 0.35 0.02 1 how long the streaks are
 uniform float level;      // 0.6 0 1     how bright a place has to be to start a streak
 uniform float breathe;    // 0.25 0 0.5  how much the level swings in one loop

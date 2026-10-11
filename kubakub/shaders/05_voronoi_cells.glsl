@@ -1,4 +1,5 @@
 // about: cells with glowing borders that slowly trade places. Loops without a jump.
+// type: pattern
 uniform float cells;      // 8 2 60     cells across the picture height
 uniform float border;     // 0.06 0.005 0.5  how thick the glowing borders are
 uniform float move;       // 0.35 0 0.5 how far the cell centres wander
