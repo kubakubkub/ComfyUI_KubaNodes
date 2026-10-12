@@ -20,6 +20,7 @@ import comfy.samplers
 import comfy.utils
 
 from ...kubakub import adapters
+from ...kubakub import materials as ma
 from ...kubakub import plan as rp
 from ...kubakub import region_cache as rc
 from ...kubakub import schedules
@@ -40,7 +41,7 @@ def only_filter(text: str):
     try:
         section = rp.parse_rules(f"[{text}]\n")[0]
     except rp.PlanError as e:
-        raise ValueError(f"kubakub region sampler only: {e}") from None
+        raise ValueError(f"kubakub region sampler: {rp.WHICH} = '{text}' cannot be read ({e}). {rp.WHICH_TIP}") from None
     return lambda entry: section.match(entry) is not None
 
 
@@ -61,7 +62,9 @@ class KUBA_RegionSampler(io.ComfyNode):
                 "Flux 2 Klein and Qwen Image 2.1 are detected automatically. Results are kept in RAM "
                 "across queues: a region whose crop pixels, masks, prompt, seed, settings and models are "
                 "unchanged is pasted from the cache, so changing one prompt re-samples only that region "
-                "(and later regions whose crops overlap it)."),
+                "(and later regions whose crops overlap it). A kubakub shader can be the material of the "
+                "regions: its picture on 'material' is what the model paints from, its mask on 'change' says "
+                "how much each place may change."),
             inputs=[
                 io.Model.Input("model", tooltip="The image model (Flux 2 Klein, Qwen Image 2.1 or a "
                                                 "generic model), with any LoRAs already applied."),
@@ -93,10 +96,8 @@ class KUBA_RegionSampler(io.ComfyNode):
                                        "the Pruna Qwen-Image-2.1 LoRA (strength 1.0). Partial denoise starts "
                                        "at the matching step, steps is ignored. Sampler as set (euler, or "
                                        "res_2s / deis_2m for more detail)."),
-                io.String.Input("only", default="", optional=True,
-                                placeholder="W_F1_*, group:M_Pilasters",
-                                tooltip="Process only the regions matching these selectors (plan "
-                                        "syntax: space = AND, comma = OR). Empty = all."),
+                io.String.Input("only", display_name=rp.WHICH, default="", optional=True, placeholder=rp.WHICH_HINT,
+                                tooltip="Process only these regions, to work on a few. Empty = all. " + rp.WHICH_TIP),
                 io.Int.Input("seed_offset", default=0, min=0, max=0xFFFFFFFF, advanced=True,
                              tooltip="Added to every region seed, for a new variation of all regions."),
                 io.Combo.Input("adapter", options=adapters.families(), default="auto", advanced=True,
@@ -106,6 +107,20 @@ class KUBA_RegionSampler(io.ComfyNode):
                                tooltip="A style image for the regions whose plan says reference = style: the "
                                        "model sees it as a second reference next to the region's own crop "
                                        "(scaled to about 1 megapixel). Of a batch the first image is used."),
+                io.Float.Input("material_at", default=0.3, min=0.0, max=1.0, step=0.01, optional=True, advanced=True,
+                               tooltip="A clip on 'material' or 'change' (a kubakub shader gives one): which of its "
+                                       "frames is used, 0 = the first, 1 = the last."),
+                io.Image.Input("material", optional=True,
+                               tooltip="A picture the painted regions start from, e.g. the images of a kubakub "
+                                       "shader with the same regions connected: the model paints from its forms and "
+                                       "colours (Flux 2 Klein follows it well at denoise 0.8). A region whose plan "
+                                       "says reference = material keeps its own start and is shown the material "
+                                       "instead (the way Qwen Image follows it best). Regions with strategy = keep "
+                                       "stay as they are. Of a clip the frame at material_at is used."),
+                io.Mask.Input("change", optional=True,
+                              tooltip="How much each place of a painted region may change, e.g. the masks of a "
+                                      "kubakub shader: white = all of the region's denoise, black = nothing. With a 4 "
+                                      "or 5 step model the map has that many levels."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The image with all processed regions pasted in."),
@@ -118,7 +133,7 @@ class KUBA_RegionSampler(io.ComfyNode):
     @classmethod
     def execute(cls, model, clip, vae, plan, image, steps, cfg, sampler_name, scheduler, region_mp,
                 max_upscale, schedule="auto", only="", seed_offset=0, adapter="auto",
-                style=None) -> io.NodeOutput:
+                style=None, material_at=0.3, material=None, change=None) -> io.NodeOutput:
         ad = adapters.make_adapter(model, clip, vae, adapter)
         ad.set_schedule(schedule)
         log.info("[KUBA regions] sampler: adapter %s, grid %d px, schedule %s", ad.family, ad.grid, ad.schedule)
@@ -146,16 +161,31 @@ class KUBA_RegionSampler(io.ComfyNode):
             notes.append(f"style image used by {len(want_style)} region(s)")
         for n in notes:
             log.info("[KUBA regions] sampler: %s", n)
+        stop = comfy.model_management.throw_exception_if_processing_interrupted
+        rw, rh = plan.regions.size
+        mat = ma.Prepared(image)
+        if (image.shape[2], image.shape[1]) == (rw, rh):      # a wrong size is said by run_plan
+            mat = ma.before(plan, image, material, change, pick, material_at)
+        want_mat = [i for i in plan.order
+                    if entries[i]["strategy"] == "inpaint" and entries[i].get("reference", "self") == "material"
+                    and (pick is None or pick(entries[i]))]
+        if want_mat and material is None:
+            notes.append(f"{len(want_mat)} region(s) have reference = material but nothing is connected to 'material': "
+                         "they use their own crop (reference = self). Connect the images of a kubakub shader.")
+        if getattr(ad, "family", "") == "generic" and mat.reference is not None:
+            notes.append("reference = material: this model takes no reference picture, so the material is not shown to it "
+                         "(take 'reference = material' out of the plan to paint from it)")
         pbar = None
         n_todo = len(plan.order)
         if n_todo:
             pbar = comfy.utils.ProgressBar(n_todo)
         out, changed, results = st.run_plan(
-            ad, image, plan, settings, only=pick,
+            ad, mat.canvas, plan, settings, only=pick,
             progress=(lambda i, n: pbar.update_absolute(i, n)) if pbar else None,
-            check_interrupt=comfy.model_management.throw_exception_if_processing_interrupted)
+            check_interrupt=stop, change=mat.change, material=mat.reference)
         report = (f"adapter {ad.family}, grid {ad.grid}, schedule {ad.schedule}; cache {rc.RESULTS.stats()}\n"
-                  + st.results_report(results) + "".join(f"\nnote: {n}" for n in notes))
+                  + st.results_report(results) + "".join(f"\n{line}" for line in mat.lines)
+                  + "".join(f"\nnote: {n}" for n in notes))
         log.info("[KUBA regions] %s", report.splitlines()[1])
         return io.NodeOutput(out, changed, report)
 

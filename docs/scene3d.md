@@ -145,8 +145,11 @@ incidence 3-83 deg; sills and ledge tops get ~40 % of the wall's brightness; 104
 ## kubakub scene preview: previz from the audience
 
 The matrix (one image or a batch of video frames) is projected from the file's camera onto the model
-and rendered from audience spots, one per line of `spots`: `x from the frame centre, distance from the
-wall, eye height` (m). Each spot is one Blender render (cached); every pixel of that view is projected
+and rendered from audience spots. Place them on the **map on the node**: click = a new spot, drag = move it
+along and away from the wall, wheel over it = eye height, double click (or Delete) = remove. Before the first run
+the map is a plain grid with the wall as a line; after one run it is the real top view with your model, the
+buildings around and the projector. The `spots` text says the same in numbers, one spot per line: `x from the
+frame centre, distance from the wall, eye height` (m), and changes with the map. Each spot is one Blender render (cached); every pixel of that view is projected
 into the projector image and depth tested against the projection view, so surfaces the projector cannot
 reach stay at `ambient` (projection shadow, also a MASK per spot). `physical` darkens steep / far
 surfaces like a real projector. The lookup is computed once per spot, so frames cost one remap each.
@@ -160,15 +163,18 @@ everything behind the building, scaled to cover the view.
 | viewer (optional) | the audience spot of scene measure / audience viewpoint / project settings. Connected: it replaces the typed `spots` (one view from there) |
 
 `clay_color` (a colour picker, almost white by default) is the colour of the model and its surroundings where no
-picture lands. `shader` draws them as `clay`, as `wireframe` (the edges as lines in the clay colour on black, not
+picture lands. `look` draws them as `clay`, as `wireframe` (the edges as lines in the clay colour on black, not
 dimmed by `ambient`) or as `clay + wireframe`. The lines come from the passes the view already has (a new face, a
 turn of the surface, a step in depth), so changing the shader or the colour renders nothing again. Scene
 walkthrough has the same two inputs; scene relight and pieces render have `clay_color` (white = the neutral clay).
 
 ## kubakub scene walkthrough: previz video
 
-The same previz along a camera path: `path` has one keyframe per line, `x, distance, eye[, look_x,
-look_height]` (m, x / look_x along the wall from the frame centre); the keys are spread evenly over
+The same previz along a camera path. Draw the walk on the **map on the node**, as on scene preview: click = the
+next point, drag = move it, wheel = eye height, double click = remove; the dashed line is the walk in the order of
+the points. The `path` text says the same in numbers, one keyframe per line, `x, distance, eye[, look_x,
+look_height]` (m, x / look_x along the wall from the frame centre; a look point is typed, the map shows it as a
+thin line to the wall); the keys are spread evenly over
 `seconds` and joined by a smooth spline, the camera looks at the frame centre unless a look point is
 given. Frame i of the walk shows matrix frame i (looping), so an animated matrix plays in sync; the
 optional `background` (still or frames) sits behind the building. Output: IMAGE frames -> core Create
@@ -316,7 +322,7 @@ dormer) is a piece. Build a chain like in MOPS for Houdini:
   `mask` output (last) is 1 on the pieces that can move, at the scene's size.
   With **regions** connected (regions from id maps, masks, cryptomatte ...) every part belongs to the region most
   of it is in: `regions: one piece each` moves every region as one block (a floor, a bay, all windows),
-  `regions: parts inside` moves only the parts in the regions of `selection` (names, `group:windows`, `tag:left`).
+  `regions: parts inside` moves only the parts in the regions of `which regions` (names, `group:windows`, `tag:left`).
 - **kubakub pieces falloff**: how strongly a transform acts on each piece over time.
   *wave*: a front runs across the facade (`direction`, `speed` in m/s, a soft edge of `width` m) and the pieces it
   passed stay moved. *pulse*: a band of `width` m runs across; pieces move and come back. *stagger*: one piece after

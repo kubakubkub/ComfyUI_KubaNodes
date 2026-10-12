@@ -272,7 +272,7 @@ or as a layer mask for the director.
 | input | default | what it does |
 |---|---|---|
 | regions | | From any kubakub regions node. |
-| select | * | Plan selector: names with wildcards (`W_F1_*`), `group:Windows`, `tag:front`; comma = or, space = and, `!` = not. `*` or empty = all. |
+| which regions | * | Plan selector: names with wildcards (`W_F1_*`), `group:Windows`, `tag:front`; comma = or, space = and, `!` = not. `*` or empty = all. |
 | grow_px | 0 | Grow (> 0) or shrink (< 0) the mask, in pixels. |
 | feather_px | 0 | Soft edge. It blurs the edge both ways, inwards and outwards, over about this many pixels in total. |
 | invert | off | On: everything except the selected regions. |
@@ -306,10 +306,10 @@ POLYLINEs for outlines, open ones for centerlines, y flipped, curves flattened).
 `width_mm` > 0 writes real millimetres (one uniform scale), `kerf_mm` grows or
 shrinks every outline by kerf / 2 (mitred corners) for cutting; it is ignored
 while `width_mm` is 0. `corner_deg`, `spur_px` and `kerf_mm` are advanced inputs.
-`select` picks regions with the same plan selector as regions to mask
+`which regions` picks regions with the same plan selector as regions to mask
 (`W_F1_*`, `group:Windows`, `tag:...`; comma or new line = or, space = and,
 `!` = not; empty = all). With a `mask` connected the mask is vectorised and
-`regions` and `select` are not used; the report says so.
+`regions` and `which regions` are not used; the report says so.
 
 Tested: a mask-folder atlas, 75 regions -> 223 paths in 5 layers (traced area = pixel
 area for every region); festival line layers as centerlines over 40 x 27 m.

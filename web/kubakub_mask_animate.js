@@ -1,5 +1,6 @@
-// kubakub mask animate: the curve of the node drawn on the node itself, with the curve types as buttons.
-// It only reads and sets the node's own widgets (curve, cycle, value_from, value_to, easing, duty, phase, seed,
+// The curve of a node drawn on the node itself, with the curve types as buttons: the same view on every node
+// that runs a value over time (NODES below: kubakub mask animate, height animate, motion guide, shader mix).
+// It only reads and sets the node's own widgets (curve, cycle, the low and the high end, easing, duty, phase, seed,
 // seconds), so the widgets stay the truth and a workflow without this file still runs.
 // Drag left / right on the curve = faster / slower (cycle). The formulas are those of kubakub/maskfields.py shape().
 // Plain ES module, no build step, no network. Look: kubakub.art (Hanken Grotesk, #f18a58 actions, #a187b7 selection).
@@ -9,6 +10,13 @@ const HERE = new URL(".", import.meta.url).href;
 const ORANGE = "#f18a58", LAV = "#a187b7";
 const CURVES = ["ramp", "saw", "triangle", "sine", "square", "random", "noise",
   "sound level", "beats", "bars", "low hits", "mid hits", "high hits"];
+// node -> the widgets that hold the curve's low and high end, and what the value is
+const NODES = {
+  KUBA_MaskAnimate: { lo: "value_from", hi: "value_to" },
+  KUBA_HeightAnimate: { lo: "value_from", hi: "value_to" },
+  KUBA_MotionGuide: { lo: "curve_from", hi: "curve_to" },
+  KUBA_ShaderMix: { lo: "mix_from", hi: "mix" },
+};
 const SOUND = { "beats": 0.5, "bars": 2, "low hits": 0.5, "mid hits": 1, "high hits": 0.5 };   // s between the example triggers (120 bpm)
 const isSound = c => c in SOUND || c === "sound level";
 const UNIT = { "move x": "widths", "move y": "heights", "rotate": "turns", "scale": "size" };
@@ -45,6 +53,7 @@ export function shape(kind, u, easing, duty, seed) {
 }
 // 0..1 at t seconds; the sound curves are drawn on an example beat (the real sound decides when the node runs)
 function valueAt(s, t) {
+  if (s.curve === "constant") return 1;
   if (s.curve === "sound level") {
     const since = t % 0.5;
     return Math.min(1, s.gain * Math.exp(-since / Math.max(0.01, s.release)));
@@ -69,6 +78,7 @@ function style() {
 @font-face{font-family:"Hanken Grotesk KKD";src:url("${HERE}fonts/HankenGrotesk-latin-var.woff2") format("woff2");font-weight:200 800;font-display:swap}
 .kkm{display:flex;flex-direction:column;gap:5px;width:100%;height:100%;font-family:"Hanken Grotesk KKD",system-ui,sans-serif;font-size:11px;color:rgba(255,255,255,.85);text-transform:lowercase;box-sizing:border-box}
 .kkm canvas{display:block;width:100%;flex:1;min-height:0;background:#101010;border-radius:6px;cursor:ew-resize;touch-action:none}
+.kkm.flat canvas{display:none}
 .kkm-row{display:flex;flex-wrap:wrap;gap:4px}
 .kkm button{font:inherit;text-transform:lowercase;border:0;border-radius:10em;padding:2px 9px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.85);cursor:pointer}
 .kkm button.on{background:${ORANGE};color:#141414;font-weight:700}
@@ -77,7 +87,7 @@ function style() {
   document.head.appendChild(el);
 }
 
-function build(node) {
+function build(node, names) {
   style();
   const el = document.createElement("div");
   el.className = "kkm";
@@ -92,10 +102,12 @@ function build(node) {
   const set = (name, v) => { const w = widget(name); if (w) { w.value = v; w.callback?.(v); node.graph?.setDirtyCanvas(true, true); } };
   const state = () => ({
     curve: val("curve", "ramp"), effect: val("effect", "reveal"), cycle: Math.max(0.01, +val("cycle", 2)),
-    lo: +val("value_from", 0), hi: +val("value_to", 1), easing: val("easing", "linear"), duty: +val("duty", 0.5),
+    lo: +val(names.lo, 0), hi: +val(names.hi, 1), easing: val("easing", "linear"), duty: +val("duty", 0.5),
     phase: +val("phase", 0), seed: +val("seed", 1), seconds: +val("seconds", 0), nth: Math.max(1, +val("nth", 1)),
     steps: Math.max(1, +val("steps", 1)), gain: +val("gain", 1), release: +val("release", 0.15) });
-  const buttons = CURVES.map(name => {
+  const offered = widget("curve")?.options?.values;       // the node's own list (some also stay put: constant)
+  el.kkmFlat = () => val("curve", "ramp") === "constant";
+  const buttons = (Array.isArray(offered) && offered.length ? offered : CURVES).map(name => {
     const b = document.createElement("button");
     b.textContent = name;
     if (isSound(name)) b.classList.add("snd");
@@ -109,6 +121,19 @@ function build(node) {
   let shown = "", last = 0;
   function draw() {
     const s = state(), dpr = window.devicePixelRatio || 1;
+    const flat = s.curve === "constant";             // nothing runs: the buttons alone, no curve to look at
+    if (flat !== el.classList.contains("flat")) {
+      el.classList.toggle("flat", flat);
+      shown = "";
+      node.setSize([node.size[0], Math.max(node.computeSize()[1], flat ? 0 : node.size[1])]);
+      if (flat) node.setSize([node.size[0], node.computeSize()[1]]);
+      node.setDirtyCanvas(true, true);
+    }
+    if (flat) {
+      buttons.forEach(b => b.classList.toggle("on", b.textContent === s.curve));
+      hint.textContent = `stays at ${s.hi}. pick a curve to run it over time`;
+      return;
+    }
     const W = Math.max(40, cv.clientWidth), H = Math.max(40, cv.clientHeight);
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     const g = cv.getContext("2d");
@@ -165,7 +190,7 @@ function build(node) {
 
   let raf = 0;
   const tick = now => {                              // the moving dot needs no more than 20 pictures a second
-    if (now - last >= 50 && el.isConnected && cv.clientWidth) { last = now; draw(); }
+    if (now - last >= 50 && el.isConnected && el.clientWidth) { last = now; draw(); }
     raf = requestAnimationFrame(tick);
   };
   raf = requestAnimationFrame(tick);
@@ -176,13 +201,15 @@ function build(node) {
 app.registerExtension({
   name: "kubakub.maskanimate",
   async beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData.name !== "KUBA_MaskAnimate") return;
+    const names = NODES[nodeData.name];
+    if (!names) return;
+    const grows = nodeData.name === "KUBA_MaskAnimate";
     const created = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
       const r = created?.apply(this, arguments);
-      const el = build(this);
+      const el = build(this, names);
       const w = this.addDOMWidget("curve_view", "kubakub_mask_curve", el, { serialize: false, hideOnZoom: false,
-        getMinHeight: () => 190 });
+        getMinHeight: () => (el.kkmFlat() ? 96 : 190), getMaxHeight: () => (el.kkmFlat() ? 96 : undefined) });
       w.serialize = false;                               // nothing of its own to save: it shows the widgets
       this.kkmCurve = el;
       return r;
@@ -190,7 +217,7 @@ app.registerExtension({
     const executed = nodeType.prototype.onExecuted;
     nodeType.prototype.onExecuted = function (msg) {    // room for the playing masks under the curve, once
       const r = executed?.apply(this, arguments);
-      if (msg?.images?.length && !this.properties?.kkmGrown) { (this.properties ||= {}).kkmGrown = true; this.setSize([this.size[0], this.size[1] + 240]); }      // once per node, also after a reload
+      if (grows && msg?.images?.length && !this.properties?.kkmGrown) { (this.properties ||= {}).kkmGrown = true; this.setSize([this.size[0], this.size[1] + 240]); }      // once per node, also after a reload
       return r;
     };
     const removed = nodeType.prototype.onRemoved;

@@ -106,6 +106,33 @@ try:
     bent = nx.KUBA_ShaderMix.execute("rings", "rings", how="a bends b", mix=0.5, strength=0.25, code_a=PUSH, code_b=UVX, width=64, height=32, seconds=0.1, fps=10.0).result[0]
     want = 0.5 * 1.0 + 0.5 * (16.5 + 8) / 64                   # half A's red, half B drawn 8 pixels to the right
     check("node, a bends b: A pushes the places B draws at", abs(float(bent[0, 5, 16, 0]) - want) < 0.01, f"{float(bent[0, 5, 16, 0]):.3f} vs {want:.3f}")
+    # ---- A and B as finished clips (two kubakub shader nodes on 'a' and 'b')
+    schema = nx.KUBA_ShaderMix.define_schema()
+    by = {i.id: i for i in schema.inputs}
+    check("node: a, b and sound are the last inputs; the preset lists, controls and size are advanced",
+          [i.id for i in schema.inputs][-3:] == ["a", "b", "sound"] and all(by[k].advanced for k in ("shader_a", "shader_b", "controls_a", "controls_b", "width", "height", "seconds", "loops"))
+          and not by["how"].advanced and not by["mix"].advanced and by["how"].default == "a cuts b")
+    red, blue = torch.zeros(3, 16, 32, 3), torch.zeros(2, 8, 16, 3)
+    red[..., 0], blue[..., 2] = 1.0, 1.0
+    two = nx.KUBA_ShaderMix.execute("rings", "rings", how="blend", mix=0.25, a=red, b=blue, width=640, height=360, seconds=9.0, fps=10.0).result
+    check("node, two clips: A sets the size and the length, B is resized and plays again", two[0].shape == (3, 16, 32, 3)
+          and torch.allclose(two[0][2, 3, 3], torch.tensor((0.75, 0.0, 0.25)), atol=0.01) and "resized to A's 32x16" in two[5]
+          and "plays again" in two[5] and "A = the clip on 'a', B = the clip on 'b'" in two[5] and "controls of" not in two[5], two[5])
+    half = torch.zeros(1, 16, 32, 3)
+    half[:, :, 16:] = 1.0
+    cutted = nx.KUBA_ShaderMix.execute("rings", "rings", how="a cuts b", mix=0.5, soft=0.01, a=half, b=blue[:1], fps=10.0).result[0]
+    check("node, two clips, a cuts b: B shows first where A is bright", float(cutted[0, 8, 28, 2]) > 0.9 and float(cutted[0, 8, 4, 2]) < 0.1, f"{cutted[0, 8, 28]} {cutted[0, 8, 4]}")
+    push = torch.zeros(1, 32, 64, 3)
+    push[..., 0], push[..., 1] = 1.0, 0.5
+    uvx = torch.linspace(0.5 / 64, 1.0 - 0.5 / 64, 64)[None, None, :, None].expand(1, 32, 64, 3).clone()
+    bent2 = nx.KUBA_ShaderMix.execute("rings", "rings", how="a bends b", mix=0.5, strength=0.25, a=push, b=uvx, fps=10.0).result[0]
+    check("node, two clips, a bends b: A pushes B's picture as it pushes a shader B", abs(float(bent2[0, 5, 16, 2]) - 0.5 * (16.5 + 8) / 64) < 0.01
+          and abs(float(bent2[0, 5, 16, 0]) - want) < 0.01, f"{bent2[0, 5, 16]}")
+    said = nx.KUBA_ShaderMix.execute("rings", "rings", how="b works on a", mix=0.5, a=red, b=blue, fps=10.0).result[5]
+    check("node, two clips, b works on a: said to be a plain fade, with the cable that does it", "plain fade" in said and "image0" in said, said)
+    mixed = nx.KUBA_ShaderMix.execute("rings", "rings", how="b works on a", mix=1.0, a=half.expand(1, 16, 32, 3) * torch.tensor((0.0, 1.0, 0.0)), code_b=ON, fps=10.0, seconds=0.1).result
+    check("node, a clip on 'a' and a preset B: B works on A's picture", mixed[0].shape == (1, 16, 32, 3) and float(mixed[0][0, 8, 28, 1]) > 0.9
+          and "controls of B" in mixed[5] and "controls of A" not in mixed[5], mixed[5])
     presets = nx.KUBA_ShaderMix.execute("plasma", "eight bit", width=64, height=32, seconds=0.1).result
     check("node, nothing connected: two presets mix", presets[0].shape[1:] == (32, 64, 3) and float(presets[0].max()) > 0.2
           and "A = 'plasma', B = 'eight bit'" in presets[5], presets[5])

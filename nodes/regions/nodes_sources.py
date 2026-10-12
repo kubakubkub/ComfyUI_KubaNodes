@@ -28,6 +28,7 @@ import torch
 from comfy_api.latest import io, ui
 from comfy_execution.graph_utils import ExecutionBlocker
 
+from ...kubakub import plan as rp
 from ...kubakub import facade_core as fc
 from ...kubakub import save_paths
 from ...kubakub import sam_prompts as sp
@@ -705,7 +706,8 @@ class KUBA_RegionsMask(io.ComfyNode):
                 "effect or core node work on regions, or feeds the director as a layer mask."),
             inputs=[
                 RegionsType.Input("regions", tooltip="From any kubakub regions node (e.g. regions from masks)."),
-                io.String.Input("select", default="*", tooltip="Plan selector, e.g. 'group:Windows, W_F0_*' or 'tag:underside'."),
+                io.String.Input("select", display_name=rp.WHICH, default="*", placeholder=rp.WHICH_HINT,
+                                tooltip="The regions that become the mask. * = all. " + rp.WHICH_TIP),
                 io.Int.Input("grow_px", default=0, min=-256, max=256, tooltip="Grow (> 0) or shrink (< 0) the mask."),
                 io.Int.Input("feather_px", default=0, min=0, max=256,
                              tooltip="Soft edge: blurs the edge both ways, inwards and outwards, over about "
@@ -727,12 +729,7 @@ class KUBA_RegionsMask(io.ComfyNode):
     @classmethod
     def execute(cls, regions, select, grow_px, feather_px, invert, per_region_masks=False) -> io.NodeOutput:
         import cv2
-        from ...kubakub.director.render import select_regions
-        all_ids = [r["region_id"] for r in regions.table.get("regions", [])]
-        ids = all_ids if select.strip() in ("", "*") else select_regions(regions.table, select)
-        if not ids and all_ids:
-            raise ValueError(f"select '{select.strip()}' matches no region. Names, groups and tags are in the region table "
-                             "(the report of the node that made the regions).")
+        ids = rp.pick_or_say(regions.table, select, "kubakub regions to mask")
         lab = regions.labels[0].cpu().numpy()
         m = np.isin(lab, ids).astype(np.float32)
         if grow_px:
@@ -750,7 +747,7 @@ class KUBA_RegionsMask(io.ComfyNode):
             each = ExecutionBlocker("kubakub regions to mask: switch on 'per_region_masks' to get region_masks.")
         elif gb > REGION_MASKS_MAX_GB:
             raise ValueError(f"region_masks: {len(chosen)} regions at {lab.shape[1]}x{lab.shape[0]} would take "
-                             f"{gb:.1f} GB of RAM (the limit is {REGION_MASKS_MAX_GB:g} GB). Narrow 'select' to "
+                             f"{gb:.1f} GB of RAM (the limit is {REGION_MASKS_MAX_GB:g} GB). Narrow 'which regions' to "
                              "fewer regions, or switch per_region_masks off.")
         elif not chosen:                                # a table without regions
             each = torch.zeros((1, *lab.shape), dtype=torch.float32)

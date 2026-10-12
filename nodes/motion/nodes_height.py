@@ -22,6 +22,8 @@ from comfy_api.latest import io
 
 from ...kubakub import heightanim as ha
 from ...kubakub import maskfields as mf
+from ...kubakub import sound as so
+from ...kubakub.io_types import SoundType
 from ..shader.nodes_shader import _built_in_beat, _preview, _ram_check, _sound_in, _sound_out
 
 log = logging.getLogger("KUBA.motion")
@@ -98,6 +100,10 @@ class KUBA_HeightAnimate(io.ComfyNode):
                 io.Audio.Input("audio", optional=True,
                                tooltip="For the sound curves, and passed on to 'audio' for Create Video. A sound "
                                        "curve without a sound runs on a built-in beat (120 bpm)."),
+                SoundType.Input("sound", optional=True,
+                                tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release, band, threshold, gap), set "
+                                        "once for every node that listens, so all of them step on the same beat. Connected, it comes before '"
+                                        "audio' and before this node's own sound settings."),
             ],
             outputs=[
                 io.Image.Output("height", tooltip="The height per frame, grey: for the depth presets of kubakub shader "
@@ -115,7 +121,8 @@ class KUBA_HeightAnimate(io.ComfyNode):
     @classmethod
     def execute(cls, height=None, image=None, field=None, grow=ha.GROWS[0], curve="ramp", cycle=3.0, value_from=0.0,
                 value_to=1.0, easing="ease in out", wall=0.0, soft=0.15, light_angle=35.0, relief=1.0, fps=25.0,
-                seconds=0.0, scale=1.0, audio=None, wall_image=None) -> io.NodeOutput:
+                seconds=0.0, scale=1.0, audio=None, wall_image=None, sound=None) -> io.NodeOutput:
+        audio, heard, cabled = so.take(sound, audio)
         notes = []
         fps = float(min(max(fps, 1.0), 120.0))
         grow = grow if grow in ha.GROWS else ha.GROWS[0]
@@ -165,7 +172,8 @@ class KUBA_HeightAnimate(io.ComfyNode):
         _ram_check(NAME, frames, W, H, 28)                # height and lit as pictures, the masks: 7 floats per pixel
 
         times = [i / fps for i in range(frames)]
-        values, lines = mf.timed_values(times, curve, cycle, value_from, value_to, easing, mono, sr or 44100, sample_sound)
+        values, lines = mf.timed_values(times, curve, cycle, value_from, value_to, easing, mono, sr or 44100, sample_sound,
+                                        heard if cabled else None)
         masks = torch.empty((frames, H, W), dtype=torch.float32)
         lit = torch.empty((frames, H, W, 3), dtype=torch.float32)
         pbar = comfy.utils.ProgressBar(frames)

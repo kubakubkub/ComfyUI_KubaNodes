@@ -41,7 +41,7 @@
     0.05,
     ""
    ],
-   "title": "1 \u00b7 projector: 30 m from the wall, 1.5 m up"
+   "title": "1 · projector: 30 m from the wall, 1.5 m up"
   },
   {
    "id": 3,
@@ -151,7 +151,7 @@
     1.0,
     0.5
    ],
-   "title": "2 \u00b7 scene render (Blender): paste your file, or leave empty for the sample"
+   "title": "2 · scene render (Blender): paste your file, or leave empty for the sample"
   },
   {
    "id": 4,
@@ -226,7 +226,7 @@
     0.0,
     1.0
    ],
-   "title": "3 \u00b7 surroundings: paste 'latitude, longitude', or leave empty for the sample square"
+   "title": "3 · surroundings: paste 'latitude, longitude', or leave empty for the sample square"
   },
   {
    "id": 5,
@@ -237,7 +237,7 @@
    ],
    "size": [
     360,
-    440
+    760
    ],
    "flags": {},
    "order": 3,
@@ -309,7 +309,7 @@
     "#f2f2f2",
     "clay"
    ],
-   "title": "4 \u00b7 previz: the picture on the building, seen from the square"
+   "title": "4 · previz: the picture on the building, seen from the square"
   },
   {
    "id": 20,
@@ -351,7 +351,7 @@
    "type": "PreviewImage",
    "pos": [
     780,
-    840
+    1160
    ],
    "size": [
     520,
@@ -386,7 +386,7 @@
    "type": "PreviewImage",
    "pos": [
     1220,
-    500
+    820
    ],
    "size": [
     520,
@@ -421,7 +421,7 @@
    "type": "PreviewAny",
    "pos": [
     1340,
-    920
+    1240
    ],
    "size": [
     320,
@@ -469,7 +469,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "## scene surroundings \u00b7 the street around the building\n\n**You need:** Blender 4.x installed (it runs in the background). No AI models.\n\n**Do:** Queue. The sample building stands on a sample square: neighbours in its row, a row across the square, a block with a courtyard. The plan shows the fit from above, the previz shows the clay model as the picture on the building, seen from three spots on the square.\n\n**Your own place:** open a map, right click on the middle of your facade, copy the coordinates and paste them into `location` of **scene surroundings** (`latitude, longitude`). The buildings around come from OpenStreetMap. Downloads are off until you allow them: write `surroundings_download = on` under `[settings]` in `kubakub.ini` (pack folder) and restart ComfyUI. Then it is one download per place (the node sends the coordinates and the radius to overpass-api.de), and after that it works offline. The node finds which way your facade faces and leaves the building's own footprint out.\n\n**Your own picture on the building:** connect it to `matrix` of **scene preview**. It must be made in the projector's view, the same frame as the `clay` picture of scene render. A festival file with its own projection camera: unplug the **projector** node and set `width` / `height` of scene render to 0, then the file's camera and matrix size are used and a picture made on the festival template fits. Too bright: lower `gain`; `ambient` is the light on everything the projector does not reach.\n\n**If the fit is off:** the advanced inputs `turn_deg`, `along_m`, `out_m` move the street against the model; `facing_deg` sets the facade's compass direction by hand. Watch the plan.\n\n**Your own surroundings:** a city model or a Houdini export in the same space as the building goes into `file`; then nothing is downloaded.\n\n**Light it:** **scene relight** renders the building in its street with lamps and an HDRI, your picture cast on it from the projector (`matrix`; here the clay stands in for it). Lamps: one per line in `lights`, or by hand on the plan the node shows after its first run: drag a lamp, turn the mouse wheel over it for its height, click it for watts, colour and size; the `+` buttons add lamps. `environment` picks the HDRI (night, sunset, city ... or your own file).\n\n**Where the camera stands:** drag the violet ring on the plan (`camera = audience`) and the dot in front of it to turn it; switch `live` on and every drop renders again (lower `resolution_scale` and `samples` for speed). Or set `camera = previz` to take the very viewpoint of **scene preview** (its first spot; `previz_spot` picks another). `camera = projector` is the matrix view of the building alone.\n\n**Too bright:** lower `exposure`, the lamps' watts or `projector_brightness` (1 = as in the previz). A projection only shows where the lamps leave the wall dark.\n\n**Looks:** on **scene preview**, `clay_color` picks the clay's colour and `shader` switches between clay, wireframe and clay + wireframe.\n\n**Then try:** connect the surroundings' `scene` to **scene walkthrough**, or to **pieces render** with `view = audience`; `view = street` on the surroundings node.\n"
+    "## scene surroundings · the street around the building\n\n**You need:** Blender 4.x installed (it runs in the background). No AI models.\n\n**Do:** Queue. The sample building stands on a sample square: neighbours in its row, a row across the square, a block with a courtyard. The plan shows the fit from above, the previz shows the clay model as the picture on the building, seen from three spots on the square.\n\n**Your own place:** open a map, right click on the middle of your facade, copy the coordinates and paste them into `location` of **scene surroundings** (`latitude, longitude`). The buildings around come from OpenStreetMap. Downloads are off until you allow them: write `surroundings_download = on` under `[settings]` in `kubakub.ini` (pack folder) and restart ComfyUI. Then it is one download per place (the node sends the coordinates and the radius to overpass-api.de), and after that it works offline. The node finds which way your facade faces and leaves the building's own footprint out.\n\n**Your own picture on the building:** connect it to `matrix` of **scene preview**. It must be made in the projector's view, the same frame as the `clay` picture of scene render. A festival file with its own projection camera: unplug the **projector** node and set `width` / `height` of scene render to 0, then the file's camera and matrix size are used and a picture made on the festival template fits. Too bright: lower `gain`; `ambient` is the light on everything the projector does not reach.\n\n**If the fit is off:** the advanced inputs `turn_deg`, `along_m`, `out_m` move the street against the model; `facing_deg` sets the facade's compass direction by hand. Watch the plan.\n\n**Your own surroundings:** a city model or a Houdini export in the same space as the building goes into `file`; then nothing is downloaded.\n\n**Light it:** **scene relight** renders the building in its street with lamps and an HDRI, your picture cast on it from the projector (`matrix`; here the clay stands in for it). Lamps: one per line in `lights`, or by hand on the plan the node shows after its first run: drag a lamp, turn the mouse wheel over it for its height, click it for watts, colour and size; the `+` buttons add lamps. `environment` picks the HDRI (night, sunset, city ... or your own file).\n\n**Where the camera stands:** drag the violet ring on the plan (`camera = audience`) and the dot in front of it to turn it; switch `live` on and every drop renders again (lower `resolution_scale` and `samples` for speed). Or set `camera = previz` to take the very viewpoint of **scene preview** (its first spot; `previz_spot` picks another). `camera = projector` is the matrix view of the building alone.\n\n**Too bright:** lower `exposure`, the lamps' watts or `projector_brightness` (1 = as in the previz). A projection only shows where the lamps leave the wall dark.\n\n**Looks:** on **scene preview**, `clay_color` picks the clay's colour and `shader` switches between clay, wireframe and clay + wireframe.\n\n**Then try:** connect the surroundings' `scene` to **scene walkthrough**, or to **pieces render** with `view = audience`; `view = street` on the surroundings node.\n"
    ],
    "title": "read me"
   },
@@ -565,7 +565,7 @@
     1,
     0.0
    ],
-   "title": "5 \u00b7 relight: your picture on the building, lamps dragged on the plan, seen from the audience"
+   "title": "5 · relight: your picture on the building, lamps dragged on the plan, seen from the audience"
   },
   {
    "id": 26,
@@ -607,7 +607,7 @@
    "type": "PreviewImage",
    "pos": [
     2290,
-    470
+    790
    ],
    "size": [
     520,

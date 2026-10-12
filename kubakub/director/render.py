@@ -235,6 +235,46 @@ def shader_field(L, clip=None, canvas=None) -> np.ndarray:
     point of every separate piece (= kubakub mask field, edge distance, each region); the second is 1 inside.
     clip: the regions the layer is clipped to as a mask of the whole canvas (canvas = its (W, H)): the pieces are
     then those regions inside the shape. The window computes the same (shaderField)."""
+    return _pieces(L, clip, canvas)[3]
+
+
+def shader_pieces(L, clip=None, canvas=None) -> tuple:
+    """The separate pieces of a shader fill in the layer's box (not turned): (label map int32 [fh, fw] with -1
+    outside, how many, inside bool). A piece is a connected part of the shape; a layer clipped to regions has those
+    regions inside the shape as its pieces. They are numbered in reading order of their first pixel, as the window
+    numbers them: they are what a shader knows as its regions (kRegion and its kin)."""
+    return _pieces(L, clip, canvas)[:3]
+
+
+_PIECES = {}                                     # a fill's pieces, kept while its shape, box and regions stay the same
+
+
+def _pieces(L, clip=None, canvas=None) -> tuple:
+    """(label map, how many, inside, the field and mask pair, the region picture's source and count): found once
+    for a fill and kept, a sequence draws the same fill at every frame."""
+    sh = L["shape"]
+    stamp = None
+    if clip is not None:
+        c = np.asarray(clip)
+        stamp = (c.shape, int(np.count_nonzero(c)), hash(np.ascontiguousarray(c[::7, ::11]).tobytes()))
+    key = (sh["type"], repr(sh.get("points")) if sh["type"] == "poly" else "", L["x"], L["y"], L["w"], L["h"],
+           L.get("rotation") or 0.0, bool(L.get("flip_h")), bool(L.get("flip_v")), stamp, tuple(canvas) if canvas else None)
+    hit = _PIECES.get(key)
+    if hit is None:
+        from .. import maskfields as mf
+        from .. import shader_render as sr
+        lab, n, inside = _find_pieces(L, clip, canvas)
+        pair = np.zeros((*lab.shape, 2), np.float32)
+        if n:
+            pair[..., 0] = mf.field(lab, n)[0]
+        pair[..., 1] = inside
+        if len(_PIECES) >= 16:
+            _PIECES.pop(next(iter(_PIECES)))
+        hit = _PIECES[key] = (lab, n, inside, pair, sr.region_source(lab))
+    return hit
+
+
+def _find_pieces(L, clip=None, canvas=None) -> tuple:
     from .. import maskfields as mf
     sh = L["shape"]
     bw, bh = max(1.0, abs(L["w"])), max(1.0, abs(L["h"]))
@@ -264,12 +304,16 @@ def shader_field(L, clip=None, canvas=None) -> np.ndarray:
         on = np.zeros((fh, fw), bool)
         on[ok] = np.asarray(clip)[yi[ok], xi[ok]] > 0
         inside &= on
-    out = np.zeros((fh, fw, 2), np.float32)
     lab, n = mf.from_masks(inside[None].astype(np.float32), True, 1)
-    if n:
-        out[..., 0] = mf.field(lab, n)[0]
-    out[..., 1] = inside
-    return out
+    if n > 1:                                         # in reading order of each piece's first pixel
+        flat = lab.ravel()
+        at = np.flatnonzero(flat >= 0)
+        first = np.full(n, flat.size, np.int64)
+        np.minimum.at(first, flat[at], at)
+        number = np.empty(n, np.int32)
+        number[np.argsort(first, kind="stable")] = np.arange(n, dtype=np.int32)
+        lab = np.where(lab >= 0, number[np.maximum(lab, 0)], -1).astype(np.int32)
+    return lab, n, inside
 
 
 def shader_source(L, tl, max_side=4096, below=None, clip=None, canvas=None):
@@ -301,6 +345,8 @@ def shader_source(L, tl, max_side=4096, below=None, clip=None, canvas=None):
             pictures[i] = sr.noise_texture(7 + 2 * i)
     if sh.get("field") == "edge" and t.uses & {"kField", "kMask"}:
         pictures[sr.FIELD_UNIT] = (lambda pair: lambda k: ("edge", pair))(shader_field(L, clip, canvas))
+    if t.regions:                                     # its regions are the pieces of the fill (the regions it is clipped to)
+        pictures[sr.REGION_UNIT], static["kRegions"] = _pieces(L, clip, canvas)[4]
     px = sr.still(t.source, iw, ih, values, static, pictures)
     inside = np.zeros(out.shape[:2], np.float32)
     inside[p:p + ih, p:p + iw] = px[..., 3]
@@ -404,17 +450,11 @@ def select_regions(table: dict | None, selector: str) -> list[int]:
     """Region ids matching a plan selector ('W_F1_*', 'group:Windows', 'tag:front', 'a, b', '!x')."""
     if not selector.strip() or not table:
         return []
-    regions = table.get("regions", [])
-    want = selector.strip().lower()
-    exact = [r["region_id"] for r in regions if str(r.get("name", "")).lower() == want]
-    if exact:
-        return exact
     from .. import plan as pl
     try:
-        sec = pl.parse_rules(f"[{selector}]\ndenoise = 0.5\n")[0]
+        return pl.pick_ids(table, selector)           # the same reading as every 'which regions' input of the nodes
     except pl.PlanError:
         return []
-    return [r["region_id"] for r in regions if sec.match(r) is not None]
 
 
 def region_mask(labels: np.ndarray | None, table: dict | None, selector: str) -> np.ndarray | None:

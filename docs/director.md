@@ -100,7 +100,7 @@ connected to guide runs a built-in sample. Example: `example_workflows/motion_gu
   the masks of kubakub mask animate, of a kubakub shader or an ID pass let the repaint travel over the picture.
 - **curve**: how the amount runs over the clip. `ramp` goes from your guide to fully repainted once (`cycle` = how
   long that takes), saw / triangle / sine / square repeat, and sound level, beats, bars and hits follow the sound
-  on `audio`. `curve_from` and `curve_to` are its low and high end. It multiplies the mask.
+  on `audio`. `value_from` and `value_to` are its low and high end. It multiplies the mask.
 - **mask_does**: *shows the repaint* (the default) repaints the whole clip and shows it through the mask and the
   curve over your guide. *limits the change* is LTX's own noise mask: LTX may only change things inside the mask
   and keeps your guide's look everywhere; the guide's own pixels are put back where nothing may change
@@ -303,6 +303,32 @@ from the same region boxes. A drag of a moving layer moves its rest position.
 Test in the UI: three shapes of different colours, each clipped to another floor of windows, a song (♪ audio),
 "swap masks: on beats" on one of them, tick the other two, play. A shape + "orbit" or "breathe", play; a layer clipped to `*` + "stagger: regions on in order";
 a song (♪ audio) + "pulse on beats (scale)"; "echo trail" on a keyed shape.
+
+## kubakub sound (2d / motion)
+
+One place for the sound and how it is heard. Connect your sound (Load Audio) to `audio` and the node's `sound`
+output to the `sound` input of every node that should listen: **kubakub shader**, **mask animate**, **height
+animate**, **motion guide**, **shader mix**, **sound mask swap**. Example: `example_workflows/sound.json`.
+
+| input | default | what it does |
+|---|---|---|
+| audio | optional | your sound. Empty = a built-in beat (120 bpm) |
+| bpm | 0 | the tempo when you know it. 0 = found in the sound; the report and the `bpm` output say which |
+| gain | 1 | how loud the sound is heard (the orange line). Above 1 for a quiet recording |
+| release | 0.15 | seconds the loudness takes to fall after a peak: low = nervous, high = slow and round |
+| listen | everything | which part the loudness follows: everything, low (kick, bass), mid or high (hats, clicks) |
+| threshold | 0.3 | how strong a hit has to be to count: the bright dots count, the dim ones do not |
+| gap | 0.1 | the shortest time between two hits that count, so a roll does not flicker |
+| start, seconds | 0, 0 | where the sound starts and how much of it is used (0 = to its end) |
+
+After a run the node draws the sound: the loudness as a line, the beats as bars (every fourth one brighter), the
+hits in the high, mid and low frequencies as three rows of dots. Outputs: `sound` (the cable), `audio` (the same
+stretch of the sound, for Create Video), `bpm`, `report`.
+
+The tempo is found once here, so every node on the cable steps on the same beat. A node with the cable hides its
+own sound settings (they come from the cable) and its own `audio` input is not used; pull the cable off and they are
+back. What stays on each node is what belongs to it: on which beat it acts (`nth`, `steps`, `every`) and what it
+does then. Without the cable, a plain `audio` works as before.
 
 ## kubakub sound mask swap (2d / motion)
 

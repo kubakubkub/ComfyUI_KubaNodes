@@ -71,9 +71,9 @@ export async function pickShader(anchor, current, onPick, skip = []) {
       const b = el("button", `all:unset;cursor:pointer;display:block;width:${tw}px;border-radius:10px;outline:2px solid ${name === current ? LAV : "transparent"};outline-offset:2px`);
       const pic = el("div", `position:relative;width:${tw}px;height:${th}px;border-radius:8px;overflow:hidden;background-color:${dark ? "#2c2c2e" : "#e9e6e3"};background-repeat:no-repeat`);
       pic._at = `-${(i % cols) * tw}px -${Math.floor(i / cols) * th}px`; pic.style.backgroundPosition = pic._at;
-      const tags = (info.tags?.[name] || []).filter(q => q === "your picture" || q === "a clip" || q === "gives a depth");
+      const tags = (info.tags?.[name] || []).filter(q => q === "your picture" || q === "a clip" || q === "gives a depth" || q === "your regions");
       if (tags.length) { const row = el("div", "position:absolute;left:4px;bottom:4px;display:flex;gap:3px");      // what it reads and gives, on the picture
-        row.append(...tags.map(q => el("span", "background:rgba(0,0,0,.62);color:#fff;border-radius:999px;padding:0 6px;font-size:10px;line-height:15px", q === "gives a depth" ? "depth" : q === "a clip" ? "clip" : "picture")));
+        row.append(...tags.map(q => el("span", "background:rgba(0,0,0,.62);color:#fff;border-radius:999px;padding:0 6px;font-size:10px;line-height:15px", q === "gives a depth" ? "depth" : q === "a clip" ? "clip" : q === "your regions" ? "regions" : "picture")));
         pic.append(row); }
       pics.push(pic);
       const label = el("div", `padding:4px 2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${name === current ? LAV : "inherit"}`, name);
@@ -343,7 +343,7 @@ function editCode(node) {
   const pic = el("img", `display:block;width:100%;aspect-ratio:16/9;border-radius:10px;background:${dark ? "#2c2c2e" : "#e9e6e3"};object-fit:cover`); pic.alt = "";
   const says = el("div", "white-space:pre-wrap;overflow-wrap:anywhere");
   const names = el("div", "opacity:.55;white-space:pre-wrap;margin-top:auto",
-    "names a shader can use here\nkUV  the place, 0-1 · kLoop  0-1 over the clip\niChannel0-3  your pictures · kMask(uv) · kField(uv)\nkLevel kLow kMid kHigh kBeat  the sound\nuniform float glow; // 0.5 0 1   a slider\nuniform vec3 ink; // #f18a58   a colour");
+    "names a shader can use here\nkUV  the place, 0-1 · kLoop  0-1 over the clip\niChannel0-3  your pictures · kMask(uv) · kField(uv)\nkRegion(uv) kRegionUV(uv) kRegionEdge(uv) kRegionRand(uv)  your regions\nkLevel kLow kMid kHigh kBeat  the sound\nuniform float glow; // 0.5 0 1   a slider\nuniform vec3 ink; // #f18a58   a colour");
   side.append(pic, says, names);
   mid.append(nums, area, side);
   const foot = el("div", `display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 14px 12px`);
@@ -481,5 +481,27 @@ app.registerExtension({
     };
     const configured = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () { const r = configured?.apply(this, arguments); setTimeout(() => check(this), 300); return r; };
+  },
+});
+
+// kubakub shader mix: with two shaders connected to `a` and `b` it is a small node. The preset lists, controls, code
+// and size of the old way (the node drawing two presets itself) show only for the side that has nothing connected.
+function mixTidy(node) {
+  const on = name => node.inputs?.find(i => i.name === name)?.link != null;
+  const a = on("a"), b = on("b");
+  const gone = { shader_a: a, controls_a: a, code_a: a, shader_b: b, controls_b: b, code_b: b, width: a || b, height: a || b, seconds: a || b, loops: a && b };
+  let changed = false;
+  for (const w of node.widgets || []) if (w.name in gone && !!w.hidden !== gone[w.name]) { w.hidden = gone[w.name]; changed = true; }
+  if (changed) { node.setSize([node.size[0], node.computeSize()[1]]); node.setDirtyCanvas(true, true); }
+}
+
+app.registerExtension({
+  name: "kubakub.shader_mix",
+  async beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData.name !== "KUBA_ShaderMix") return;
+    for (const hook of ["onNodeCreated", "onConfigure", "onConnectionsChange"]) {
+      const before = nodeType.prototype[hook];
+      nodeType.prototype[hook] = function () { const r = before?.apply(this, arguments); setTimeout(() => mixTidy(this), 0); return r; };
+    }
   },
 });

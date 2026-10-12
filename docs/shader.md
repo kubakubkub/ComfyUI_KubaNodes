@@ -76,6 +76,7 @@ Every preset works with every input, so you can connect first and read later:
 | a `mask` | Every shader shows inside it only. With a picture under the shader, the picture stays as it is outside the mask. |
 | a sound on `audio` | A preset follows it: its `sound` or `beat` control, which rests at 0, goes to 1. Type `sound = 0.3` in `controls` for less, `sound = 0` for none. |
 | a `field` | The presets of *on your regions* run along it. Others have no use for it, and the report says so. |
+| your `regions` | The three *region* presets treat every region on its own (its own colour, its own pace, a pattern that fits its box). Every other shader shows on the regions only, as if they were its mask, and one that runs along a field runs from each region's edge to its middle. A connected mask or field comes first. `which regions` picks them (`W_F1_*`, `group:Windows`, as in the region plan; empty = all). With a picture on `image0` the result is a material for the region samplers: see [generate](generate.md), *A shader as the material of your regions*. |
 | pictures on `image1` - `image3` | A depth or normal pass for the presets that read one (picture with depth, glass). The report names a picture the shader does not read. |
 
 The report always says what was done with each input.
@@ -132,7 +133,7 @@ A space you look into: forms, columns, corridors, fog. They need no input; they 
 
 ### on your regions
 
-Light that follows your masks and regions: connect kubakub mask field (the sample facade without one). For projection mapping.
+Light that follows your masks and regions: connect your regions, or a field of kubakub mask field (the sample facade without one). For projection mapping.
 
 | preset | what it draws | works on | controls |
 |---|---|---|---|
@@ -141,6 +142,12 @@ Light that follows your masks and regions: connect kubakub mask field (the sampl
 | brick wave | a wall of bricks; a wave of light runs through them along the field (or left to right). Loops without a jump |  | rows, ratio, mortar, width, waves |
 | region contours | lines of light that follow the outline of every region inwards (connect kubakub mask field, edge distance). Loops without a jump |  | rings, thin, speed, outline, beat |
 | extrude | the regions rise out of the wall as blocks with sloped edges and throw shadows on it (connect the field of kubakub mask field, edge distance; nothing connected = the windows of the sample facade); a picture on image0 is painted on them. Loops without a jump; a beat can lift them. Gives a depth |  | height, bevel, round, rise, wave, sway, sun, turns, angle, dark, shade, beat, steps |
+| region colours | every region in a colour of its own between two colours, breathing at its own pace (connect your regions). Loops without a jump |  | spread, breathe, pace, edge, beat |
+| region fill | every region fills up with light from its own bottom edge, one after another, and empties again (connect your regions). Loops without a jump |  | stagger, soft, wave, sideways, beat |
+| region weave | stripes that fit every region's own box, each region at its own angle and pace (connect your regions). Loops without a jump |  | lines, thin, turn, speed, edge, beat |
+
+The last three need to know where each region is, so they take the `regions` input (from regions from masks, from
+illustrator, from id maps ...) and not a field. With nothing connected they play on the windows of the sample facade.
 
 ### picture looks
 
@@ -302,23 +309,28 @@ taken as height.
 
 ## Mixing two shaders
 
-**kubakub shader mix** takes two shaders (presets, or pasted code under *advanced*) and one **mix** value: 0 is
-shader A, 1 is shader B. In between they meet in the shaders, not as two finished pictures laid over each other.
-`how` says in which way:
+**kubakub shader mix** mixes two kubakub shaders. Connect the `images` of one to **a** and of the other to **b**,
+and set **mix**: 0 is A, 1 is B. Everything about a shader (preset, controls, size, length) is set on its own
+shader node; the mix node only says how they meet:
 
 | how | what happens between 0 and 1 |
 |---|---|
-| b works on a | B takes A's picture as its own picture, so B is an effect on A: plasma seen through eight bit, clouds on a VHS tape. Pick a B that works on a picture |
-| a bends b | A's picture pushes the places B draws at (red sideways, green up and down), strongest half way: B melts out of A. `strength` sets how far |
 | a cuts b | B shows first where A is bright and takes over from there: a wipe in the shape of A's pattern. `soft` is its edge |
+| a bends b | A's picture pushes B's places around (red sideways, green up and down), strongest half way: B melts out of A. `strength` sets how far |
 | blend | a plain fade |
 
 `curve` runs the mix over time (a ramp from A to B, a wave, the sound level, a ramp on every beat), `cycle` is its
-length and `mix_from` its low end. A picture or a clip on `image` is what both shaders work on; without one, B
-takes A's picture. `controls_a` and `controls_b` set each shader's own controls. Shaders that build on their own
-last frame (slit scan, datamosh, trails) cannot be mixed here: render them with kubakub shader and connect the
-result as `image`. Example: `example_workflows/shader_mix.json`. For your own code: a shader that is bent reads the
-pushed place in `kUV` and `fragCoord`; one that uses `gl_FragCoord` directly is not bent.
+length and `mix_from` its low end. A sets the size and the length; B is resized to it, and a shorter clip plays
+again from its start. Connect the `fps` of shader A to `fps`, so the curve runs at the clip's pace. Any two
+pictures or clips work on `a` and `b`, not only shaders.
+
+To make B an **effect on A** (plasma seen through eight bit, clouds on a VHS tape) no mix node is needed: connect
+A's `images` to `image0` of the shader that draws B.
+
+With nothing on `a` and `b` the node draws two presets itself, as it did before the two inputs were there: its
+preset lists, their controls, pasted code and the size show for a side that has nothing connected and hide when a
+cable arrives. `how` has a fourth choice for that, *b works on a* (B takes A's picture inside the shader). Saved workflows run as before. Example:
+`example_workflows/shader_mix.json`.
 
 ## Drawing the direction
 
@@ -366,7 +378,7 @@ without a buffer of that letter is the node's picture of that number (the built-
 connected). Where the Shadertoy is wired differently, say it on the tab's line: `// Buffer A: 0 = A, 1 = noise`,
 `// Image: 0 = B, 1 = image0`. The report lists what every tab reads. A tab that reads itself sees the frame
 before, as on shadertoy.com; the first frame starts from black, and `loop` closes the clip with a fade. Such a
-shader builds on its own last frames, so it does not run as a fill in the director or in kubakub shader mix:
+shader builds on its own last frames, so it does not run as a fill in the director or as a preset of kubakub shader mix (connect its images to the mix instead):
 render it with the node and bring the frames in.
 
 The report then tells you in plain words what the shader uses. The most common case: a Shadertoy expects a noise
@@ -422,6 +434,11 @@ director the layer is see-through there. The language is GLSL ES 3.00, the same 
 | `kUV` | this pixel, 0 to 1 across the picture (0, 0 is bottom left, as on Shadertoy) |
 | `kPrev(uv)` | the frame before this one (black at the first frame): trails, slit scan, datamosh, anything that builds up. Node only |
 | `kField(uv)`, `kMask(uv)` | the grey ramp and the mask connected to the node |
+| `kRegion(uv)` | which region this place is in: 0, 1, 2 ...; -1 outside every region (the `regions` input) |
+| `kRegionUV(uv)` | the place inside the region's own box: (0, 0) at its bottom left, (1, 1) at its top right |
+| `kRegionEdge(uv)` | 0 on the region's edge, 1 at its deepest point |
+| `kRegionRand(uv)` | a number from 0 to 1 that every region has for itself: a colour, a delay, an angle of its own |
+| `kRegions` | how many regions there are |
 | `kDepth`, `sdBox` ..., `kMarch` ... | for a 3D scene: see [3D scenes](#3d-scenes-raymarching) |
 | `kFrom`, `kTo`, `kDir`, `kVector` | the drawn arrow: its start and its end (0 to 1, as `kUV`), the way it points (length 1), and 1 when one is drawn. Without a connected field `kField` runs from 0 at its start to 1 at its end |
 | `uniform float name; // default min max` | a control of your own, set in `controls` |
@@ -457,6 +474,14 @@ behaviours. `loops` is counted over the timeline's length.
 The `fill` menu lists the presets under their types, and the **pictures** button next to it opens the same picker
 as on the node: small pictures by type, moving under the pointer (the type *over time* is left out: slit scan,
 datamosh, trails and growth build on their last frames, which only the node can do).
+
+**Regions in a fill.** The presets *region colours*, *region fill* and *region weave* (and your own code with
+`kRegion`) take the separate pieces of the fill as their regions: clip the layer to regions and every region is
+one, numbered from the top left. A shape that is not clipped is one region.
+
+**A stack of shaders.** **+ shader on top** in the fill's inspector puts a copy of the layer above it, with the
+same shape and the same regions and the blend *screen*: pick its shader under **fill**. With nodes the same
+is a second kubakub shader behind the first.
 
 **The shape as the field.** A shader that runs along a field (scan band, region contours, brick wave, extrude)
 has a **field** row: *left to right*, or *the shape's edges*. With the edges the field runs from the outline of

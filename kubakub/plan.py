@@ -70,7 +70,9 @@ SETTINGS: dict[str, tuple[type | tuple, object, str]] = {
     "feather_px": (int, 8, "soft edge when pasting back"),
     "color_match": (COLOR_MATCH, "mean_std", "match the region's colours to its context"),
     "blend": (bool, True, "include this region's borders in the seam pass"),
-    "reference": (str, "self", "none | self | style (the style image of kubakub versions): reference for the model"),
+    "reference": (str, "self", "none | self | style (the style image of kubakub versions) | material (the picture on "
+                               "the sampler's 'material' input, e.g. from kubakub shader, is shown to the model "
+                               "instead of being the region's start): reference for the model"),
     "lora": (str, "", "name:strength; name:strength (hook LoRA, M2)"),
     "region_mp": (float, 0.0, "work megapixels for the region crop, 0 = backend default"),
     "z": (int, 0, "stacking for frame in frame"),
@@ -89,10 +91,56 @@ SETTINGS: dict[str, tuple[type | tuple, object, str]] = {
     "t_start": (float, 0.0, "video: seconds from which the region moves"),
     "t_end": (float, -1.0, "video: seconds until which it moves; -1 = to the end"),
     "motion": (float, 1.0, "video: 0..1, how much the region may change over time"),
+    "material_repaint": (float, 0.91, "video, with a clip on the sampler's 'material' input (e.g. from kubakub "
+                                      "shader): the region moves as the clip moves, and the model repaints it from "
+                                      "this noise level: 1 = it ignores the clip, 0.91 = its movement with the "
+                                      "model's own look, lower = more of the clip's look"),
 }
 ALIASES = {"negative_prompt": "negative", "neg": "negative", "positive": "prompt",
            "context": "context_px", "dilate": "dilate_px", "feather": "feather_px"}
 PLAN_KEYS = {"order": (ORDERS, "plan", "processing order of the regions")}
+TEXT_KEYS = ("prompt", "negative", "lora", "video_prompt")       # these build on what a rule inherits ('+=')
+GONE = {"material": "connect a kubakub shader to the sampler's 'material' input",      # typed shaders, never released
+        "change": "connect a mask (e.g. the 'masks' of a kubakub shader) to the sampler's 'change' input",
+        "finish": "put a kubakub shader after the sampler, with its picture on image0"}
+
+WHICH = "which regions"                             # the label of every input that picks regions
+WHICH_HINT = "W_F1_*, group:Windows"
+WHICH_TIP = ("Written as in kubakub region plan: names with wildcards ('W_F1_*'), 'group:Windows', 'tag:front', "
+             "'region:3-7'; comma = or, space = and, '!' = not.")
+
+
+def pick_ids(table: dict | None, text: str) -> list[int]:
+    """The region ids a 'which regions' text means, in table order. '' and '*' = all. A text that is exactly one
+    region's name (also one with spaces in it) is that region. Raises PlanError for a text that cannot be read."""
+    regions = (table or {}).get("regions", [])
+    want = (text or "").strip()
+    if want in ("", "*"):
+        return [r["region_id"] for r in regions]
+    exact = [r["region_id"] for r in regions if str(r.get("name", "")).lower() == want.lower()]
+    if exact:
+        return exact
+    sec = parse_rules(f"[{want}]\ndenoise = 0.5\n")[0]
+    return [r["region_id"] for r in regions if sec.match(r) is not None]
+
+
+def pick_or_say(table: dict | None, text: str, node: str) -> list[int]:
+    """pick_ids for a node: a text that cannot be read, or that matches nothing, is a ValueError that names the
+    regions there are."""
+    try:
+        ids = pick_ids(table, text)
+    except PlanError as e:
+        raise ValueError(f"{node}: {WHICH} = '{(text or '').strip()}' cannot be read ({e}). {WHICH_TIP}") from None
+    if not ids and (table or {}).get("regions"):
+        raise ValueError(f"{node}: {no_match(table, text)}")
+    return ids
+
+
+def no_match(table: dict | None, text: str) -> str:
+    names = [str(r.get("name", "")) for r in (table or {}).get("regions", [])]
+    return (f"{WHICH} = '{(text or '').strip()}' matches no region (there are: {', '.join(names[:8])}"
+            f"{', ...' if len(names) > 8 else ''}). {WHICH_TIP}")
+
 
 _KIND_RANK = {"default": 0, "tag": 1, "group": 2, "name": 3, "region": 4}
 
@@ -204,12 +252,14 @@ def parse_rules(text: str) -> list[Section]:
         key, op, val = m.group(1).lower(), m.group(2), m.group(3).strip()
         key = ALIASES.get(key, key)
         known = PLAN_KEYS if cur.is_plan else SETTINGS
+        if key in GONE and not cur.is_plan:
+            raise PlanError(f"line {n}: '{key}' is not typed into the plan: {GONE[key]}")
         if key not in known:
             hint = difflib.get_close_matches(key, list(known), n=1)
             raise PlanError(f"line {n}: unknown setting '{key}'"
                             + (f"; did you mean '{hint[0]}'?" if hint else f". Known: {', '.join(known)}"))
-        if op == "+=" and key not in ("prompt", "negative", "lora", "video_prompt"):
-            raise PlanError(f"line {n}: '+=' only works for prompt, negative and lora")
+        if op == "+=" and key not in TEXT_KEYS:
+            raise PlanError(f"line {n}: '+=' only works for prompt, negative, lora and video_prompt")
         cur.settings.append((key, op, val, n))
     return sections
 
@@ -316,12 +366,13 @@ def resolve(table: dict, rules: str, seed: int = 0) -> dict:
         vals = {k: d for k, (_, d, _) in SETTINGS.items()}
         for _, _, s in matched:
             for key, op, raw, line in s.settings:
-                if key in ("prompt", "negative", "lora", "video_prompt"):
+                if key in TEXT_KEYS:
                     v = _convert(key, raw, line)
                     v = _fill(v, r, vals[key], rng) if key != "lora" else v
                     vals[key] = _join(vals[key], v) if op == "+=" else v
                 else:
                     vals[key] = _convert(key, raw, line)
+        vals["reference"] = str(vals["reference"]).strip().lower()      # 'Style' and 'Material' are the same words
         if vals["seed"] < 0:
             vals["seed"] = (int(seed) + rid) % (2 ** 63)
         vals["denoise"] = min(max(vals["denoise"], 0.0), 1.0)

@@ -20,7 +20,7 @@ Houdini or TouchDesigner.
 |---|---|---|
 | regions | | From any kubakub regions node. Empty (and no mask) = the windows of the sample facade. |
 | mask | | Instead of regions: a mask or a mask batch. Each mask is a region; with `split_shapes` every separate shape is one. |
-| select | `*` | Which regions, in plan syntax: `W_F1_*`, `group:Windows`, `tag:front`, comma = or, space = and, `!` = not. |
+| which regions | `*` | In plan syntax: `W_F1_*`, `group:Windows`, `tag:front`, comma = or, space = and, `!` = not. |
 | field | edge distance | See the table below. |
 | per | each region | `each region`: every region runs from black to white on its own (all windows open at once). `all together`: one ramp over all of them (a wipe across the facade). |
 | angle | 0 | direction: 0 = left to right, 90 = top to bottom, 180 = right to left. |
@@ -94,6 +94,10 @@ Things to try:
 - **One more region per beat**: field `region order`, effect `reveal`, curve `beats`, `steps` = the number of regions.
 - **Strobe**: effect `opacity`, curve `square`, a short `cycle`, `duty` 0.1 for flashes.
 - **Light running over the windows**: field `direction` with `all together`, effect `band`, curve `saw`, a `trail`.
+
+**One sound for several nodes.** Connect **kubakub sound** to `sound`: the sound, its tempo and how it is heard
+(gain, release, listen, threshold, gap, start) then come from that one node, the same for every node on the cable,
+and these settings hide here. See [director](director.md), *kubakub sound*.
 
 ## The same in the kubakub director
 

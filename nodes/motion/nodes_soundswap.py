@@ -13,6 +13,7 @@ from comfy_api.latest import io
 
 from ...kubakub import sound as so
 from ...kubakub import soundswap as sw
+from ...kubakub.io_types import SoundType
 from ...kubakub.director import motion as mo
 
 log = logging.getLogger("KUBA.regions")
@@ -89,6 +90,10 @@ class KUBA_SoundMaskSwap(io.ComfyNode):
                                tooltip="low / mid / high: the shortest time between two steps, so a roll does not flicker."),
                 io.Int.Input("seed", default=1, min=0, max=2 ** 31 - 1, optional=True, advanced=True,
                              control_after_generate=False, tooltip="order = random: another shuffle."),
+                SoundType.Input("sound", optional=True,
+                                tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release, band, threshold, gap), set "
+                                        "once for every node that listens, so all of them step on the same beat. Connected, it comes before '"
+                                        "audio' and before this node's own sound settings."),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="Every frame: the background with each picture (or colour) in the mask its layer holds."),
@@ -102,7 +107,10 @@ class KUBA_SoundMaskSwap(io.ComfyNode):
     @classmethod
     def execute(cls, audio=None, background=None, masks=None, pictures=None, order="loop", step_on="beats", nth=1,
                 fade=0.0, fade_style="crossfade", feather=0.0, threshold=0.3, fps=25.0, seconds=0.0, scale=0.5, mask_of=1,
-                signal=None, step_times="", start=0.0, bpm=0.0, every=0.5, gap=0.1, seed=1) -> io.NodeOutput:
+                signal=None, step_times="", start=0.0, bpm=0.0, every=0.5, gap=0.1, seed=1, sound=None) -> io.NodeOutput:
+        audio, heard, cabled = so.take(sound, audio, bpm=bpm, threshold=threshold, gap=gap)
+        bpm, threshold, gap = heard["bpm"], heard["threshold"], heard["gap"]
+        start = 0.0 if cabled else start             # kubakub sound has cut the sound already
         st = sw.Settings(order=order, step_on=step_on, nth=int(nth), every=float(every), threshold=float(threshold),
                          gap=float(gap), fade=float(fade), transition=FADE_STYLES.get(fade_style, "cross"),
                          feather=float(feather), bpm=float(bpm), fps=float(fps), start=float(start),

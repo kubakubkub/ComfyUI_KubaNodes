@@ -28,6 +28,19 @@ def bend(m: float, strength: float) -> float:
     return float(strength) * math.sin(math.pi * m)
 
 
+def bend_picture(a: np.ndarray, b: np.ndarray, amount: float) -> np.ndarray:
+    """B's finished picture with its places pushed around by A's red and green, as far as `amount` of the height:
+    what 'a bends b' does inside shader B, for a B that comes as a picture. [h, w, 3] float each."""
+    if amount == 0.0:
+        return b
+    import cv2
+    h, w = b.shape[:2]
+    reach = 2.0 * float(amount) * h
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    return cv2.remap(np.ascontiguousarray(b[..., :3], np.float32), xx + (a[..., 0] - 0.5) * reach, yy - (a[..., 1] - 0.5) * reach,
+                     cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+
+
 def cut(a: np.ndarray, m: float, soft: float = 0.1) -> np.ndarray:
     """Where B shows at mix m when A cuts it: [h, w, 1] 0-1. Nothing at 0, everything at 1; in between B has taken
     the places where A is brighter than a level that falls with m."""

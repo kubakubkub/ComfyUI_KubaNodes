@@ -30,6 +30,8 @@ from .director import motion as mo
 FIELD_UNIT = st.CHANNELS                             # texture units 0-3 = iChannel0-3, 4 = field + mask
 PREV_UNIT = FIELD_UNIT + 1                           # 5 = the frame before (kPrev), for shaders that feed back
 MIX_UNIT = PREV_UNIT + 1                             # 6 = the other shader's picture (kubakub shader mix: it bends this one)
+REGION_UNIT = MIX_UNIT + 1                           # 7 = the regions (kRegion and its kin): read pixel by pixel, never smoothed
+SPARE_UNIT = REGION_UNIT + 1                         # where a new picture is made, so no unit above loses its own
 _LOCK = threading.RLock()
 _PROGRAMS = {}                                       # source -> compiled program (they live as long as the GL context)
 BANDS = (("kLevel", "all"), ("kLow", "low"), ("kMid", "mid"), ("kHigh", "high"))
@@ -183,6 +185,37 @@ def noise_texture(seed=7):
     return source
 
 
+def region_picture(lab) -> np.ndarray:
+    """
+    What a shader knows of the regions (kRegion, kRegionUV, kRegionEdge), float32 [h, w, 4], top row first: red = the
+    region's number + 1 (0 outside every region), green and blue = the place inside the region's own box ((0, 0) at its
+    bottom left, (1, 1) at its top right), alpha = 0 on the region's edge to 1 at its deepest point.
+    lab = int [h, w], -1 outside, else the region's number.
+    """
+    lab = np.asarray(lab)
+    n = int(lab.max()) + 1 if lab.size else 0
+    out = np.zeros((*lab.shape, 4), np.float32)
+    if n < 1:
+        return out
+    out[..., 0] = lab + 1
+    out[..., 3] = mf.field(lab, n, "edge distance", "each region")[0]
+    for k, b in enumerate(mf.boxes(lab, n)):
+        if not b:
+            continue
+        x, y, w, h = b
+        on = lab[y:y + h, x:x + w] == k
+        part = out[y:y + h, x:x + w]
+        part[..., 1][on] = np.broadcast_to(np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :], (h, w))[on]
+        part[..., 2][on] = np.broadcast_to(np.linspace(1.0, 0.0, h, dtype=np.float32)[:, None], (h, w))[on]
+    return out
+
+
+def region_source(lab):
+    """A texture source for render() (unit REGION_UNIT) and the kRegions value that goes with it."""
+    pic = region_picture(lab)
+    return (lambda i: ("regions", pic)), float(int(np.asarray(lab).max()) + 1 if np.asarray(lab).size else 0)
+
+
 def default_field(n=256) -> np.ndarray:
     """Nothing connected: kField is a left to right ramp, kMask is 1 everywhere."""
     out = np.ones((1, n, 2), np.float32)
@@ -203,7 +236,8 @@ def render(source, width, height, frames, static=None, textures=None, on_frame=N
     frames     [{uniform name: number}]: what changes per frame (frame_times, sound_values)
     static     {uniform name: number or tuple}: set once (controls, kSeconds ...). iResolution and
                iChannelResolution are set here.
-    textures   {unit: f(i) -> (key, picture)}: unit 0-3 = iChannel0-3, 4 = field and mask. The picture is uploaded
+    textures   {unit: f(i) -> (key, picture)}: unit 0-3 = iChannel0-3, 4 = field and mask, 7 = the regions
+               (region_picture). The picture is uploaded
                again only when its key changes, so a still costs one upload and a clip one per frame.
     on_frame   f(i, rgba float32 [height, width, 4], top row first). The array is reused: copy what you keep.
     buffers    the Buffer tabs of a Shadertoy (shadertoy.Pass: name, source, inputs), drawn in this order before the
@@ -350,13 +384,15 @@ def _render(g, source, width, height, frames, static, textures, on_frame, check_
 
         textures = dict(textures or {})
         textures.setdefault(FIELD_UNIT, lambda i: ("default", default_field()))
-        names = {**{i: f"iChannel{i}" for i in range(st.CHANNELS)}, FIELD_UNIT: "kFieldTex", MIX_UNIT: "kMixTex"}
+        names = {**{i: f"iChannel{i}" for i in range(st.CHANNELS)}, FIELD_UNIT: "kFieldTex", MIX_UNIT: "kMixTex",
+                 REGION_UNIT: "kRegionTex"}
         for unit in names:                            # every sampler gets a texture: an unconnected one reads black
             tex[unit] = gl.glGenTextures(1)
             gl.glActiveTexture(gl.GL_TEXTURE0 + unit)
             gl.glBindTexture(gl.GL_TEXTURE_2D, tex[unit])
-            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
-            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+            smooth = gl.GL_NEAREST if unit == REGION_UNIT else gl.GL_LINEAR      # a region's number must not blend into its neighbour's
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, smooth)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, smooth)
             # your pictures are clamped, not repeated as on Shadertoy (a repeated picture bleeds its far edge into the
             # near one); the built-in noise repeats, shaders walk far across it
             wrap = gl.GL_REPEAT if getattr(textures.get(unit), "repeat", False) else gl.GL_CLAMP_TO_EDGE
@@ -377,7 +413,8 @@ def _render(g, source, width, height, frames, static, textures, on_frame, check_
             gl.glActiveTexture(gl.GL_TEXTURE0 + unit)
             gl.glBindTexture(gl.GL_TEXTURE_2D, tex[unit])
             # half float: enough for pictures, depth and normals, and every GL ES 3 card filters it
-            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA16F, pic.shape[1], pic.shape[0], 0, gl.GL_RGBA, gl.GL_FLOAT, pic)
+            kind = gl.GL_RGBA32F if unit == REGION_UNIT else gl.GL_RGBA16F      # region numbers and places need every bit
+            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, kind, pic.shape[1], pic.shape[0], 0, gl.GL_RGBA, gl.GL_FLOAT, pic)
             if unit < st.CHANNELS:
                 sizes[unit] = (pic.shape[1], pic.shape[0], 1.0)
                 put(f"iChannelResolution[{unit}]", sizes[unit])
@@ -385,7 +422,7 @@ def _render(g, source, width, height, frames, static, textures, on_frame, check_
         def picture(wrap=gl.GL_CLAMP_TO_EDGE, data=None, w=width, h=height):      # a float picture of the frame's size
             t = gl.glGenTextures(1)
             extra.append(t)
-            gl.glActiveTexture(gl.GL_TEXTURE0 + MIX_UNIT + 1)
+            gl.glActiveTexture(gl.GL_TEXTURE0 + SPARE_UNIT)
             gl.glBindTexture(gl.GL_TEXTURE_2D, t)
             gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA32F, w, h, 0, gl.GL_RGBA, gl.GL_FLOAT,
                             np.zeros((h, w, 4), np.float32) if data is None else data)

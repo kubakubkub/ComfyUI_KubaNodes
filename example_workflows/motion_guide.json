@@ -101,7 +101,7 @@
    "properties": {
     "Node name for S&R": "KUBA_Shader"
    },
-   "title": "1 \u00b7 the guide: any moving clip",
+   "title": "1 · the guide: any moving clip",
    "widgets_values": [
     "depth scan",
     "",
@@ -367,7 +367,7 @@
    ],
    "size": [
     440,
-    520
+    750
    ],
    "flags": {},
    "order": 7,
@@ -459,7 +459,7 @@
    "properties": {
     "Node name for S&R": "KUBA_MotionGuide"
    },
-   "title": "2 \u00b7 ltx repaints it, the motion stays",
+   "title": "2 · ltx repaints it, the motion stays",
    "widgets_values": [
     "a sandstone building facade at night, a sheet of bright warm light travels through the building from front to back and lights up columns, windows and cornices one after another, cinematic, detailed stone",
     0.91,
@@ -586,7 +586,7 @@
    "type": "PreviewAny",
    "pos": [
     900,
-    570
+    790
    ],
    "size": [
     440,

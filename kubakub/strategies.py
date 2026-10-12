@@ -162,7 +162,7 @@ def _entry_sampling(e: dict, settings: SamplerSettings) -> dict:
 
 def _inpaint_crop(adapter, canvas, changed, cp: ops.CropPlan, inpaint, alpha, prompt, negative,
                   denoise, reference, color_match, sampling, where="", key=None, cache=None, cache_extra=None,
-                  on_miss=None, style=None):
+                  on_miss=None, style=None, material=None):
     """
     One masked sample of the box cp: returns (canvas, changed). Masks are at target scale in the box.
     canvas and changed are updated in place (the callers own their copies). With a cache
@@ -187,13 +187,16 @@ def _inpaint_crop(adapter, canvas, changed, cp: ops.CropPlan, inpaint, alpha, pr
     work_img = ops.resize(src, cp.work_w, cp.work_h)             # exact uniform scale
     work_mask = ops.resize_mask(inpaint, cp.work_w, cp.work_h)
     latent = adapter.encode(work_img)
-    if reference == "self" or reference.startswith("style"):
+    if reference == "self" or reference.startswith(("style", "material")):
         if getattr(adapter, "prefetches", False):          # its conditioning was encoded up front (run_plan)
             pos, neg = adapter.conds_for(prompt, negative, work_img, latent, key=key)
         else:
             pos, neg = adapter.conds_for(prompt, negative, work_img, latent)
         if reference.startswith("style") and style is not None:
             pos = adapter.add_reference(pos, style.latent)       # crop first, style image second
+        if reference.startswith("material") and material is not None:      # ... or the material picture, where the region is
+            shown = ops.resize(ops.crop(material, cp), cp.work_w, cp.work_h)
+            pos = adapter.add_reference(pos, adapter.encode(shown))
     else:
         pos, neg = adapter.conds_for(prompt, negative)
     out = adapter.sample(latent, pos, neg, noise_mask=work_mask[:, None], denoise=float(denoise),
@@ -329,11 +332,15 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
              only: Callable[[dict], bool] | None = None,
              progress: Callable[[int, int], None] | None = None,
              check_interrupt: Callable[[], None] | None = None,
-             use_cache: bool = True):
+             use_cache: bool = True, change: torch.Tensor | None = None,
+             material: torch.Tensor | None = None):
     """
     Run every region of the plan in plan order with its strategy: inpaint (S1)
     or frame_in_frame (S4); keep is skipped. Returns (canvas, changed_mask
     [1,H,W], results). canvas is IMAGE [1,H,W,C] at the regions' size.
+    change (MASK [1,H,W], materials.before): how much each pixel of a painted region may change.
+    material (IMAGE [1,H,W,3]): the material picture; a region whose reference is 'material' is shown its
+    part of it as a second reference.
     With use_cache (and an adapter with a model and vae) every region's result
     is kept across queues (region_cache.RESULTS): an unchanged region whose
     crop pixels are unchanged is pasted from the cache instead of sampled.
@@ -365,7 +372,12 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
         if float(region.sum()) == 0:
             return None
         inpaint = ops.dilate(region, int(e["dilate_px"])) * scope
-        return inpaint, ops.feather_alpha(region, int(e["feather_px"]), limit=inpaint)
+        alpha = ops.feather_alpha(region, int(e["feather_px"]), limit=inpaint)
+        if change is not None:                        # the change map: grey = how much this place may change
+            inpaint = inpaint * _crop_zero_pad(change, cp, 0.0).float().clamp(0.0, 1.0)
+        return inpaint, alpha
+
+    mat_digest = rc.digest(material) if material is not None else ""
 
     style = StyleReference(adapter, settings.style, settings.style_mp) if settings.style is not None else None
 
@@ -375,11 +387,16 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
         ref = e.get("reference", "self")
         if ref == "style":
             return f"style:{style.digest}" if style is not None else "self"
+        if ref == "material":
+            return f"material:{mat_digest}" if material is not None else "self"
         return ref
 
     def s1_args(e):
+        sampling = _entry_sampling(e, settings)
+        if change is not None:
+            sampling["soft"] = True
         return (e["prompt"], e["negative"], e["denoise"], reference_of(e),
-                e.get("color_match", "mean_std"), _entry_sampling(e, settings))
+                e.get("color_match", "mean_std"), sampling)
 
     def prefetchable(e):
         return prefetches and e["strategy"] == "inpaint" and reference_of(e) != "none"
@@ -448,7 +465,8 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
                     rid, e["prompt"], e["negative"], pre_image(cp), need_negative=need_negative(e)))
             canvas, changed = _inpaint_crop(adapter, canvas, changed, cp, inpaint, alpha, *s1_args(e),
                                             where=f"region {rid}", key=rid, cache=cache,
-                                            cache_extra=pre_digest.get(rid), on_miss=on_miss, style=style)
+                                            cache_extra=pre_digest.get(rid), on_miss=on_miss, style=style,
+                                            material=material)
             dt = time.perf_counter() - t0
             cached = cache is not None and cache.hits > hits0 and cache.misses == misses0
             results.append(RegionResult(rid, e["name"], "done", dt, cp.to_dict(), note="cached" if cached else ""))

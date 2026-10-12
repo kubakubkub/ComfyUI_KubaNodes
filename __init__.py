@@ -31,6 +31,7 @@ _MODULES = [                        # nodes/<menu group>/<module>
     "nodes.motion.nodes_video",
     "nodes.motion.nodes_keyframes",
     "nodes.motion.nodes_soundswap",
+    "nodes.motion.nodes_sound",
     "nodes.motion.nodes_guide",
     "nodes.motion.nodes_height",
     "nodes.motion.ltxv_trim_exact_Kub",

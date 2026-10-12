@@ -605,8 +605,10 @@ class KUBA_ScenePreview(io.ComfyNode):
                                tooltip="Matrix image or frames (resized to the projection view if needed). Nothing "
                                        "connected: the clay views alone, without a picture."),
                 io.String.Input("spots", multiline=True, default=DEFAULT_SPOTS,
-                                tooltip="One audience spot per line: x along the wall from the frame centre, "
-                                        "distance from the wall, eye height (m)."),
+                                tooltip="Where the audience stands. Place the spots on the plan below: click = a new "
+                                        "spot, drag = move it, wheel over it = eye height, double click = remove. "
+                                        "The text is the same thing in numbers, one spot per line: metres along the "
+                                        "wall from its middle, metres away from the wall, eye height."),
                 io.Float.Input("lens_mm", default=20.0, min=6.0, max=300.0, step=1.0,
                                tooltip="Audience camera lens (36 mm sensor); 20 = wide, 35 = natural."),
                 io.Int.Input("width", default=1280, min=64, max=8192, step=16,
@@ -625,7 +627,7 @@ class KUBA_ScenePreview(io.ComfyNode):
                 io.Color.Input("clay_color", default=sv.CLAY_COLOR, optional=True,
                                tooltip="Colour of the clay: the building and its surroundings where no picture lands. "
                                        "Almost white by default; pick the stone's colour for a closer look."),
-                io.Combo.Input("shader", options=list(sv.SHADERS), default="clay", optional=True,
+                io.Combo.Input("shader", display_name="look", options=list(sv.SHADERS), default="clay", optional=True,
                                tooltip="How the model is drawn where no picture lands: clay, wireframe (its edges as "
                                        "lines in the clay colour, not dimmed by ambient) or clay with the edges on it."),
                 ViewerType.Input("viewer", optional=True,
@@ -685,8 +687,12 @@ class KUBA_ScenePreview(io.ComfyNode):
                             *(["with surroundings"] if scene.get("surroundings") else [])])
         log.info("[KUBA scene3d] preview: %s", report.replace("\n", "\n    "))
         out = torch.from_numpy(np.stack(previews))
+        shown = ui.PreviewImage(out, cls=cls).as_dict()
+        plan = None if viewer is not None else spot_plan(scene, s, pt, nrm, ground, fr, sv.parse_spots(spots))
+        if plan:                                           # the real top view for the plan on the node
+            shown["kubakub_spot_plan"] = [plan]
         return io.NodeOutput(out, torch.from_numpy(np.stack(shadows)), torch.from_numpy(np.stack(views)), report,
-                             dict(scene, viewpoints=viewpoints), ui=ui.PreviewImage(out, cls=cls))
+                             dict(scene, viewpoints=viewpoints), ui=shown)
 
 
 def _frames_at(matrix, W, H):
@@ -721,9 +727,12 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
                                tooltip="Matrix image or frames. Nothing connected: the walk past the clay model, "
                                        "without a picture."),
                 io.String.Input("path", multiline=True, default=DEFAULT_PATH,
-                                tooltip="Keyframes, one per line: x along the wall from the frame centre, distance "
-                                        "from the wall, eye height[, look x, look height] (m). Spread evenly over "
-                                        "the walk, smooth spline between them. No look = the frame centre."),
+                                tooltip="The walk. Draw it on the plan below: click = the next point, drag = move it, "
+                                        "wheel over it = eye height, double click = remove. The camera goes through "
+                                        "the points in their order, on a smooth curve, at an even pace. The text is "
+                                        "the same thing in numbers, one point per line: metres along the wall from "
+                                        "its middle, metres away from the wall, eye height[, look x, look height]. "
+                                        "No look = at the middle of the wall."),
                 io.Float.Input("seconds", default=8.0, min=0.1, max=600.0, step=0.5,
                                tooltip="Length of the walk in seconds (frames = seconds x fps)."),
                 io.Int.Input("fps", default=25, min=1, max=120,
@@ -749,7 +758,7 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
                 io.Color.Input("clay_color", default=sv.CLAY_COLOR, optional=True,
                                tooltip="Colour of the clay: the building and its surroundings where no picture lands. "
                                        "Almost white by default; pick the stone's colour for a closer look."),
-                io.Combo.Input("shader", options=list(sv.SHADERS), default="clay", optional=True,
+                io.Combo.Input("shader", display_name="look", options=list(sv.SHADERS), default="clay", optional=True,
                                tooltip="How the model is drawn where no picture lands: clay, wireframe (its edges as "
                                        "lines in the clay colour, not dimmed by ambient) or clay with the edges on it."),
             ],
@@ -830,8 +839,10 @@ class KUBA_SceneWalkthrough(io.ComfyNode):
             ("matrix: none" if matrix is None else f"matrix: {len(frames)} frame(s){' (looping)' if len(frames) < n else ''}")
             + "; background: " + ("none" if bgs is None else f"{len(bgs)} frame(s)"), *([resized] if resized else [])])
         log.info("[KUBA scene3d] walkthrough: %s", report.replace("\n", "\n    "))
+        plan = spot_plan(scene, s, pt, nrm, ground, fr, [k[:3] for k in sv.parse_path(path)])
         return io.NodeOutput(torch.from_numpy(np.stack(out)), report, float(fps),
-                             torch.from_numpy(np.array(shadows, np.float32)))
+                             torch.from_numpy(np.array(shadows, np.float32)),
+                             ui={"kubakub_spot_plan": [plan]} if plan else None)
 
 
 DEFAULT_LIGHTS = """// type  x  height  distance  watts  #colour  size / angle   (metres from the frame centre, the ground, the wall)
@@ -1030,17 +1041,33 @@ def light_plan(s, pt, nrm, ground, fr, lights, projector, buildings, matrix, loo
     -> (picture with the lamps, meta for the plan on the node: the same picture without lamps as a temp file, and
     where a lamp at x / distance lands on it: origin + x * ax + distance * ad, in pixels).
     """
-    V = s["mesh"]["vert"]
-    anchor, nh, ex = sr.facade_anchor(V, pt, nrm, ground)
     world = sv.lights_to_world(lights, fr)
     viewer = np.asarray(look_from["location"], float) if look_from else None
-    reach = [np.linalg.norm((np.asarray(q, float) - anchor)[:2]) for q in
-             [projector] + [L["location"] for L in world if L["type"] != "sun"] + ([viewer] if viewer is not None else [])]
+    bare, meta, (anchor, nh, ex, radius, k) = plan_base(
+        s, pt, nrm, ground, fr, projector, buildings, matrix,
+        [L["location"] for L in world if L["type"] != "sun"] + ([viewer] if viewer is not None else []), size, across_m)
+    if viewer is not None:                                  # where the camera stands, for the plan on the node
+        meta["viewer"] = [round(size / 2 + float((viewer - anchor) @ ex) * k, 2), round(size / 2 + float((viewer - anchor) @ nh) * k, 2)]
+    return sr.plan_lights(bare, world, anchor, nh, ex, radius, viewer=viewer, look_at=(look_from or {}).get("look_at"),
+                          lens_mm=(look_from or {}).get("lens")), meta
+
+
+def plan_base(s, pt, nrm, ground, fr, projector, buildings, matrix, reach=(), size=768, across_m=0.0, least_m=40.0):
+    """
+    The top view of a scene with nothing placed on it: the model, the buildings around, the projector.
+    reach: world points that have to fit on it (lamps, audience spots).
+    -> (the picture, meta for a plan drawn on a node: the picture as a temp file, and where a place x metres along
+    the wall and d metres in front of it lands on it: origin + x * ax + d * ad, in pixels; (anchor, nh, ex, radius,
+    pixels per metre) for drawing more onto the picture).
+    """
+    V = s["mesh"]["vert"]
+    anchor, nh, ex = sr.facade_anchor(V, pt, nrm, ground)
+    far = [np.linalg.norm((np.asarray(q, float) - anchor)[:2]) for q in [projector, *reach]]
     width = float((V @ ex).max() - (V @ ex).min())
     # fitted in steps of 20 m, so the plan does not change its scale with every small move of a lamp or the camera
-    radius = across_m / 2 if across_m > 0 else np.ceil(max(40.0, 1.2 * width, 1.25 * max(reach)) / 20.0) * 20.0
+    radius = across_m / 2 if across_m > 0 else np.ceil(max(least_m, 1.2 * width, 1.25 * max(far)) / 20.0) * 20.0
     bare = sr.plan(buildings, matrix, anchor, nh, ex, V[::max(1, len(V) // 4000)], radius, size=size,
-                   projector=projector)                       # no audience ring: the plan on the node draws and drags it
+                   projector=projector)                       # nothing placed: the plan on the node draws and drags it
     png = (np.clip(bare[..., ::-1], 0, 1) * 255 + 0.5).astype(np.uint8)
     temp = folder_paths.get_temp_directory()
     name = "kubakub_lightplan_" + hashlib.sha1(png.tobytes()).hexdigest()[:16] + ".png"
@@ -1053,10 +1080,22 @@ def light_plan(s, pt, nrm, ground, fr, lights, projector, buildings, matrix, loo
     meta = {"filename": name, "subfolder": "", "type": "temp",
             "origin": [round(size / 2 + origin[0], 2), round(size / 2 + origin[1], 2)], "ax": axis(fr["ex"]),
             "ad": axis(fr["normal"])}
-    if viewer is not None:                                  # where the camera stands, for the plan on the node
-        meta["viewer"] = [round(size / 2 + float((viewer - anchor) @ ex) * k, 2), round(size / 2 + float((viewer - anchor) @ nh) * k, 2)]
-    return sr.plan_lights(bare, world, anchor, nh, ex, radius, viewer=viewer, look_at=(look_from or {}).get("look_at"),
-                          lens_mm=(look_from or {}).get("lens")), meta
+    return bare, meta, (anchor, nh, ex, radius, k)
+
+
+def spot_plan(scene, s, pt, nrm, ground, fr, places):
+    """The meta of plan_base for the plan on kubakub scene preview / scene walkthrough (web/kubakub_spot_plan.js):
+    places = the (x, distance, eye) the audience stands at. None when the plan cannot be drawn (it is a help, the
+    node's pictures do not depend on it)."""
+    try:
+        sur = scene.get("surroundings") or {}
+        projector = np.asarray(s["info"]["camera"]["matrix_world"], np.float64)[:3, 3]
+        world = [sv.spot_position(fr, float(x), float(d), float(eye)) for x, d, eye in places]
+        return plan_base(s, pt, nrm, ground, fr, projector, sr.read(sur.get("file", "")) if sur else [],
+                         sur.get("matrix") or np.eye(4), world, least_m=20.0)[1]
+    except Exception as e:  # noqa: BLE001
+        log.warning("[KUBA scene3d] the top view for the plan on the node could not be drawn: %s", e)
+        return None
 
 
 _SCENE_CACHE = {}

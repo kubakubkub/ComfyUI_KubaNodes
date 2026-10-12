@@ -16,7 +16,7 @@ kubakub sample facade -> regions from matrix / masks (its mask folder) -> region
 With your own facade: a Load Image node for the matrix and the path of your mask folder in `mask_folder`
 on the regions node. The rules are the text of [rules_example.txt](rules_example.txt), pasted into the region
 plan so the workflow stands alone; rules for names your masks do not have match nothing. To iterate on a few
-regions, set `only` on one sampler (e.g. `W_F2_*`) and mute the other.
+regions, set `which regions` on one sampler (e.g. `W_F2_*`) and mute the other.
 
 ## kubakub region plan
 
@@ -73,7 +73,8 @@ region's own, `{a|b|c}` one option chosen per region from `seed` (repeatable).
 | dilate_px, feather_px | 4, 8 | inpaint mask growth, paste-back softness |
 | color_match | mean_std | none, mean_std, mkl |
 | blend | on | include the region's borders in the seam pass |
-| reference | self | none, self, style (the crop plus the style image of kubakub versions, or of the region sampler's `style` input) |
+| reference | self | none, self, style (the crop plus the style image of kubakub versions, or of the region sampler's `style` input), material (the crop plus the region's shaders, see *Shaders as the material of a region*) |
+| material, change, finish | empty | shaders of kubakub shader as the region's material: `preset (controls) : blend : amount`, `+=` puts one on top. See *Shaders as the material of a region* |
 | lora | empty | `name:strength; ...` (per-region hook LoRA) |
 | region_mp | 0 | work MP for the region crop, 0 = backend default |
 | z | 0 | stacking for frame in frame |
@@ -120,10 +121,13 @@ details like vines), `none` lets the region be freely repainted inside its mask
 | scheduler | simple | generic models only; Flux 2 uses its own schedule |
 | region_mp | 1.0 | work megapixels per region crop |
 | max_upscale | 4.0 | small regions are scaled up at most this much |
-| only | empty | process only regions matching these selectors (plan syntax), to iterate on a few |
+| which regions | empty | process only these regions (plan syntax: `W_F1_*`, `group:Windows`), to work on a few |
 | seed_offset (advanced) | 0 | added to every region seed |
 | adapter (advanced) | auto | flux2 / generic |
 | style | optional | a style image for the regions whose plan says `reference = style`: a second reference next to the region's own crop, at about 1 megapixel. Of a batch the first image is used |
+| material | optional | a picture the painted regions start from, e.g. the `images` of a kubakub shader: see *A shader as the material of your regions* below |
+| change | optional | a mask: how much each place of a painted region may change, e.g. the `masks` of a kubakub shader |
+| material_at (advanced) | 0.3 | a clip on `material` or `change`: which of its frames is used, 0 = the first, 1 = the last |
 
 Without a `style` image, regions with `reference = style` use their own crop
 (`reference = self`); the report names how many. The report also says when a
@@ -149,6 +153,57 @@ at 1 MP, so the 74 regions of a 3840x2160 facade take roughly 12 minutes.
 
 Test without a model: `tests/test_sequential.py` (a fake adapter checks crop
 planning, masks, scope, pasting and registration).
+
+## A shader as the material of your regions
+
+A [kubakub shader](shader.md) can be what the model paints from. Nothing is typed for it: the shader is set on its
+own node, with its picker and sliders, and two cables carry it to the sampler. Example workflow:
+`example_workflows/region_materials.json` (the shader part needs no model).
+
+1. Connect your `regions` to the **kubakub shader**, and the picture to its `image0`. The shader now draws in the
+   regions and the picture stays as it is everywhere else. `which regions` on the shader picks them
+   (`W_F1_*`, `group:Windows`, as in the plan); empty = all.
+2. Connect the shader's `images` to **`material`** of kubakub region sampler. Every region the plan paints starts
+   from the shader's picture instead of the plain picture, so the model paints along its forms and colours. How
+   much of the shader stays is the region's `denoise` (0.5 keeps most of it, 0.9 the composition only).
+3. Optional: connect a shader's `masks` (or any mask) to **`change`**. White = the place may change by all of the
+   region's `denoise`, black = it stays. The brightest place on the painted regions counts as white.
+
+| what you want | how |
+|---|---|
+| two shaders on top of each other | a second kubakub shader behind the first: the first one's `images` into `image0` of the second. `on_picture` of the second is the blend (screen, add, multiply ...), `picture_amount` how much |
+| another shader on other regions | the same chain, with another `which regions` on each shader |
+| the shader as a reference, not as the start | `reference = material` in the plan: the region keeps its own start and the model sees the material as a second reference picture next to the region's crop (Klein and Qwen Image 2.1) |
+| a shader over the finished picture | a kubakub shader after the sampler, with the sampler's `image` on its `image0` |
+| which moment of the shader | the shader gives a clip; `material_at` on the sampler picks the frame (0.3 = a third of the way through). A short clip at a low fps is enough: `seconds = 2`, `fps = 5` |
+
+Regions with `strategy = keep` stay as they are, whatever the material shows there. A material or mask of another
+size is resized to the picture. The three presets *on your regions* (region colours, region fill, region weave)
+give every region its own colour, pace or pattern.
+
+**In video.** kubakub region video sampler has the same `material` input, for a clip: connect the `images` of a
+kubakub shader with the same regions and the same fps. Each animated region then moves as the clip moves there, and
+LTX repaints it from the noise level `material_repaint` of the plan. At 0.91 it keeps the movement and paints its
+own look; at 1 it ignores the clip; lower keeps more of the clip's look. Such a clip does not start on the
+untouched still, its first frame is repainted too. Before a region's `t_start` it stays the still. Where the clip
+is the same as the picture, the model moves the region freely, as without a material.
+
+**What the models do with it** (tried on the first-floor windows of the sample facade, 2026-10-12):
+
+| model | material as the start | change | reference = material |
+|---|---|---|---|
+| Flux 2 Klein 4B, denoise 0.8 | strong: it paints its picture along the shader's forms | works; only the brightest band is repainted fully | weak: a trace of the forms |
+| Qwen Image 2.1 (turbo 5 step), denoise 0.9 | with the default `reference = self` it keeps the shader almost as it is; with `reference = none` and `denoise = 0.95` it paints along the forms | as the start: little | strong: the forms come back in the model's own look |
+| LTX 2.5 (video), 49 frames | at `material_repaint = 0.91` it paints its own moving light and loses the timing of small regions; at 0.8 every window follows its shader | | |
+
+So for Klein lay the material in, for Qwen show it as the reference (or take the self reference away), and for
+small regions in video go down to about 0.8.
+
+Limits to know: with a 4 or 5 step model the change map has only that many levels (a place joins the sampling at
+one of the steps), so a soft ramp becomes 4 or 5 bands, and only the brightest band is repainted fully: a place
+that joins one step later already changes much less. More steps give a finer map. In the kubakub director the
+region data of a fill is 512 pixels on its longer side, so the outline of a region can show small steps there; the
+node draws at full size.
 
 ## Qwen Image 2.1 in the region sampler
 
@@ -177,7 +232,7 @@ on facade crops: the fine checkerboard speckle on flat plaster drops 4-14x
   per inpaint region at 1 MP and about 130 s per frame-in-frame window (scene plus
   border pass), roughly 10x Klein. Frame-in-frame scenes are photographic and
   detailed; use Qwen for the few hero windows and Klein for the many small regions
-  (one backend per sampler node, chain two samplers with `only`).
+  (one backend per sampler node, chain two samplers with `which regions`).
 
 ### Qwen Image 2.1 turbo LoRA (Viggle)
 
@@ -311,7 +366,7 @@ of every rendered version, so one version can be continued by hand in a region p
 | generate | regions | **regions**: every region is repainted inside its own mask. **whole picture**: one free sample of the whole picture, see below |
 | unify | 0 | one more pass over the whole picture after the regions, at this denoise; 0 = off |
 | save_folder | kubakub/versions | where the versions are saved, inside ComfyUI's output folder (a full path needs `save_anywhere = on` in kubakub.ini); empty = nothing is saved |
-| only (advanced) | empty | paint only the regions matching these selectors (plan syntax, as in the region sampler); the others stay as they are. A whole picture is still made in one piece, only its full-size detail follows this |
+| which regions (advanced) | empty | paint only the regions matching these selectors (plan syntax, as in the region sampler); the others stay as they are. A whole picture is still made in one piece, only its full-size detail follows this |
 | cfg (advanced) | 0 | used where the plan says cfg = 0; 0 = the model's default (1) |
 
 | output | |

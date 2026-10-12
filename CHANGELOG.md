@@ -6,6 +6,55 @@ may have changed since.
 
 ## Next (not released yet)
 
+- **Shaders know your regions.** kubakub shader has a new input `regions`. Three new presets under *on your
+  regions* treat every region on its own: **region colours** (each its own colour, breathing at its own pace),
+  **region fill** (each fills up with light, one after another) and **region weave** (stripes that fit each
+  region's box, at its own angle). Every other shader shows on the regions only, and one that runs along a field
+  runs from each region's edge to its middle. Your own code reads `kRegion`, `kRegionUV`, `kRegionEdge`,
+  `kRegionRand` and `kRegions`. 74 presets. In the kubakub director a fill takes the regions its layer is clipped
+  to, and **+ shader on top** stacks a second shader on the same regions.
+- **A shader as the material of your regions.** A kubakub shader is now what the region samplers paint from,
+  with two cables and nothing to type. Connect your regions to the shader (new field `which regions` picks which of them it
+  draws in), its `images` to the new `material` input of kubakub region sampler, and the model paints from the
+  shader's picture. Its `masks` on the new `change` input say how much each place may change. `reference =
+  material` in the plan shows the picture to the model as a reference instead. For two shaders on top of each
+  other, put a second kubakub shader behind the first (`on_picture` is the blend). In kubakub region video sampler
+  a clip on the new `material` input moves the animated regions as it moves (plan: `material_repaint`, 0.91).
+  Example `region_materials.json`, page [docs/generate.md](docs/generate.md). Tried with Flux 2 Klein 4B, Qwen
+  Image 2.1 and LTX 2.5: Klein paints best from a material laid in, Qwen from a material as its reference, and
+  small regions in video follow their shader at `material_repaint = 0.8` (the table is in the docs).
+- **kubakub shader mix is a small node now.** It has two inputs, `a` and `b`: connect the images of two kubakub
+  shaders (or any two clips) and set `how` and `mix`. Everything about a shader is set on its own shader node.
+  The node's own preset lists, controls and size show only for a side with nothing connected, so saved workflows
+  run as before.
+
+- **kubakub sound: one sound for every node that listens.** A new node (2d / motion) holds your sound and how it
+  is heard: the tempo, how loud (gain), how fast a level falls (release), which frequencies, how strong a hit has to
+  be (threshold, gap), and where the sound starts. After a run it draws the sound on itself: the loudness as a line,
+  the beats as bars, the hits in the low, mid and high frequencies as dots (bright = counts). Its `sound` output
+  goes into the new `sound` input of kubakub shader, mask animate, height animate, motion guide, shader mix and
+  sound mask swap. The tempo is found once, so all of them step on the same beat, and a node with the cable hides
+  its own sound settings. Height animate, motion guide and shader mix had no sound settings before: with the cable
+  they follow gain, release, the band and the threshold too. A plain `audio` cable works as before. Example
+  `sound.json`.
+- **Audience spots and the walk are placed on a map.** kubakub scene preview and kubakub scene walkthrough draw a
+  top view on the node: click = a new spot (or the next point of the walk), drag = move it along and away from the
+  wall, wheel over it = eye height, double click = remove. After one run the map is the real one, with your model,
+  the buildings around and the projector. The `spots` and `path` text stay and say the same thing in numbers.
+  Both nodes are taller for it; the example layouts are moved apart.
+- **One way of doing a thing.** The same thing now looks and works the same on every node:
+  - *Picking regions.* The field is called **which regions** on every node that has one (region sampler,
+    versions, region video sampler, shader, mask field, regions to mask, regions to svg / pdf / dxf, scene
+    pieces; before: `only`, `select`, `selection`). All read the text the same way, and a text that matches
+    nothing names the regions there are. Saved workflows keep their values.
+  - *A value over time.* The curve drawn on kubakub mask animate (curve types as buttons, drag = faster / slower)
+    is now also on kubakub height animate, kubakub motion guide and kubakub shader mix. The ends of the curve are
+    `value_from` and `value_to` on motion guide too (before: `curve_from`, `curve_to`). A node with the curve gets
+    taller, so in an old layout it can cover the node under it: move that one down.
+  - *Colours.* `colour` on kubakub line overlay is a colour picker.
+  - kubakub scene preview and scene walkthrough: the choice between clay and wireframe is labelled **look**
+    (before: `shader`, which means something else in this pack).
+
 - **kubakub shader.** New menu group **2d / shader** with one node: moving pictures and masks drawn by a shader on
   the graphics card, with no AI model. 53 presets, all looping: clouds, fire, plasma, starfield, aurora, rings,
   a brick wave, sound bars; for mapping a line-up grid, contours that follow your regions, and the building's own

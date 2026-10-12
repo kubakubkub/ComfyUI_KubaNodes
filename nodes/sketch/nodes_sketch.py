@@ -238,7 +238,7 @@ class KUBA_LineOverlay(io.ComfyNode):
                 io.Float.Input("amount", default=0.8, min=0.0, max=1.0, step=0.05, tooltip="How much of the line shows."),
                 io.Combo.Input("mode", options=["multiply", "screen", "colour"], default="multiply",
                                tooltip="multiply = dark line, screen = light line, colour = the line in the colour below."),
-                io.String.Input("colour", default="#000000", tooltip="Line colour (hex). Black for multiply, white for screen."),
+                io.Color.Input("colour", default="#000000", tooltip="Line colour: click to pick. Black for multiply, white for screen."),
                 io.Int.Input("grow_px", default=0, min=0, max=64, tooltip="Makes the line bolder."),
                 io.Float.Input("soften_px", default=0.0, min=0.0, max=64.0, step=0.5, tooltip="Softens the line (a glow with screen)."),
             ],

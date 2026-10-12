@@ -18,6 +18,7 @@ import torch
 
 from comfy_api.latest import io, ui
 
+from ...kubakub import plan as rp
 from ...kubakub import vector as vec
 from ...kubakub.io_types import RegionsType
 
@@ -74,10 +75,9 @@ class KUBA_RegionsToVector(io.ComfyNode):
                 RegionsType.Input("regions", optional=True,
                                   tooltip="The regions to vectorise (from any kubakub regions node)."),
                 io.Mask.Input("mask", optional=True, tooltip="Vectorise a mask instead (e.g. a painted line layer)."),
-                io.String.Input("select", default="", optional=True, placeholder="W_F1_*, group:Windows",
-                                tooltip="Which regions, in plan syntax as in regions to mask: names with wildcards, "
-                                        "group:, tag:; comma = or, space = and, '!' = not. Empty = all. "
-                                        "Not used when a mask is connected."),
+                io.String.Input("select", display_name=rp.WHICH, default="", optional=True, placeholder=rp.WHICH_HINT,
+                                tooltip="The regions that are drawn. Empty = all. Not used when a mask is connected. "
+                                        + rp.WHICH_TIP),
                 io.Combo.Input("mode", options=list(MODES), default="outline",
                                tooltip="outline: filled shapes per region (Illustrator, After Effects). "
                                        "centerline: single lines through the middle (plotter, laser, engraving)."),
@@ -131,7 +131,7 @@ class KUBA_RegionsToVector(io.ComfyNode):
             table = regions.table
             ids = select_ids(table, select)
             if not ids:
-                raise ValueError(f"select '{select}' matches no region")
+                raise ValueError(f"kubakub regions to svg / pdf / dxf: {rp.no_match(table, select)}")
         formats = [f for f, on in (("svg", svg), ("pdf", pdf), ("dxf", dxf)) if on]
         if not formats:
             raise ValueError("switch on at least one of svg / pdf / dxf")

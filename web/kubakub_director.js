@@ -800,11 +800,12 @@ const SHADER_VS = `#version 300 es
 out vec2 v_texCoord;
 void main() { vec2 v[3] = vec2[](vec2(-1, -1), vec2(3, -1), vec2(-1, 3)); v_texCoord = v[gl_VertexID] * 0.5 + 0.5; gl_Position = vec4(v[gl_VertexID], 0, 1); }`;
 const SHADER_ARROW = ["kFrom", "kTo", "kDir", "kVector", "kField"];      // a shader that reads one of these follows a drawn arrow
+const SHADER_REGION = ["kRegion", "kRegionUV", "kRegionEdge", "kRegionRand", "kRegions"];      // ... works on regions (= shadertoy.REGION)
 const SHADER_NEW = "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    vec2 uv = fragCoord / iResolution.xy;\n    float v = 0.5 + 0.5 * sin(uv.x * 20.0 + 6.2831853 * kLoop);\n    fragColor = vec4(vec3(v), 1.0);\n}\n";
 const shaderGL = {
-  gl: null, cv: null, progs: new Map(), noise: [], black: null, pic: null, ramp: null, fld: null, fldId: 0,
+  gl: null, cv: null, progs: new Map(), noise: [], black: null, pic: null, ramp: null, fld: null, fldId: 0, reg: null, regId: 0,
   init() {
-    if (this.gl && this.gl.isContextLost()) { this.gl = null; this.progs.clear(); this.noise = []; this.black = this.pic = this.ramp = this.fld = null; this.fldId = 0; }   // after a GPU reset: a new one
+    if (this.gl && this.gl.isContextLost()) { this.gl = null; this.progs.clear(); this.noise = []; this.black = this.pic = this.ramp = this.fld = this.reg = null; this.fldId = this.regId = 0; }   // after a GPU reset: a new one
     if (this.gl !== null) return this.gl;
     this.cv = mkCanvas(2, 2);
     const gl = this.gl = this.cv.getContext("webgl2", { premultipliedAlpha: false, preserveDrawingBuffer: true, antialias: false }) || false;
@@ -824,6 +825,8 @@ const shaderGL = {
     const ramp = new Uint8Array(256 * 4); for (let i = 0; i < 256; i++) ramp.set([i, 255, 0, 255], i * 4);   // kField = left to right, kMask = 1
     this.ramp = tex(256, 1, ramp, gl.CLAMP_TO_EDGE);
     this.fld = tex(1, 1, new Uint8Array([0, 255, 0, 255]), gl.CLAMP_TO_EDGE);   // a fill's own field (the shape's edges), uploaded when it changes
+    this.reg = tex(1, 1, new Uint8Array([0, 0, 0, 0]), gl.CLAMP_TO_EDGE);       // a fill's pieces as the shader's regions (kRegion): read pixel by pixel
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.activeTexture(gl.TEXTURE0 + 5); gl.bindTexture(gl.TEXTURE_2D, this.black);              // kPrev: node only
     return gl;
   },
@@ -839,8 +842,8 @@ const shaderGL = {
     this.progs.set(src, p); return p;
   },
   // -> its canvas (use it before the next draw) or { error }. pictures[n] for iChannel n: a canvas (the layers below),
-  // "noise" or null (nothing there), as render.shader_source binds them. field: { id, w, h, data } (shaderField) or
-  // null = kField runs left to right and kMask is 1
+  // "noise" or null (nothing there), as render.shader_source binds them. field: { id, w, h, data, reg } (shaderField) or
+  // null = kField runs left to right and kMask is 1 (without data), and there are no regions (without reg)
   draw(src, w, h, values, pictures = [], field = null) {
     const gl = this.init(); if (!gl) return { error: "this browser has no WebGL 2" };
     const p = this.program(src); if (p.error) return p;
@@ -854,15 +857,20 @@ const shaderGL = {
       else gl.bindTexture(gl.TEXTURE_2D, this.black);
     }
     gl.activeTexture(gl.TEXTURE0 + 4);
-    if (field) { gl.bindTexture(gl.TEXTURE_2D, this.fld);
+    if (field && field.data) { gl.bindTexture(gl.TEXTURE_2D, this.fld);
       if (this.fldId !== field.id) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, field.w, field.h, 0, gl.RGBA, gl.FLOAT, field.data); this.fldId = field.id; } }
     else gl.bindTexture(gl.TEXTURE_2D, this.ramp);
+    gl.activeTexture(gl.TEXTURE0 + 8); gl.bindTexture(gl.TEXTURE_2D, this.reg);      // = shader_render.REGION_UNIT's picture
+    const rid = field && field.reg ? field.id : 0;
+    if (this.regId !== rid) { if (rid) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, field.w, field.h, 0, gl.RGBA, gl.FLOAT, field.reg);
+      else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4)); this.regId = rid; }
     gl.viewport(0, 0, w, h); gl.useProgram(p.prog); gl.disable(gl.BLEND);
     for (const u of p.uni) {
       const m = /^iChannel(\d)$/.exec(u.name), v = values[u.name];
       if (m) gl.uniform1i(u.loc, +m[1]);
       else if (u.name === "kFieldTex") gl.uniform1i(u.loc, 4);
       else if (u.name === "kPrevTex") gl.uniform1i(u.loc, 5);
+      else if (u.name === "kRegionTex") gl.uniform1i(u.loc, 8);
       else if (u.name === "iResolution") gl.uniform3f(u.loc, w, h, 1);
       else if (u.name === "iChannelResolution[0]") gl.uniform3fv(u.loc, res);
       else if (u.type === gl.INT) gl.uniform1i(u.loc, Math.round(+v || 0));
@@ -2185,11 +2193,14 @@ class Director {
   }
   // = render.shader_field: the way from the shape's outline inwards (0 on the edge, 1 at the deepest point of every
   // separate piece) and the shape as a mask, in the layer's box; a layer clipped to regions has those regions as pieces
+  // ... and = render.shader_pieces: the pieces as the shader's regions (kRegion and its kin), for a shader that reads them
   shaderField(L, info) {
-    if (this.shaderFieldMode(L, info) !== "edge" || !(info.uses || []).some(u => u === "kField" || u === "kMask")) return null;
+    const wantF = this.shaderFieldMode(L, info) === "edge" && (info.uses || []).some(u => u === "kField" || u === "kMask");
+    const wantR = (info.uses || []).some(u => SHADER_REGION.includes(u));
+    if (!wantF && !wantR) return null;
     const sh = L.shape, bw = Math.max(1, Math.abs(L.w)), bh = Math.max(1, Math.abs(L.h)), s = Math.min(1, 512 / Math.max(bw, bh));
     const fw = Math.max(2, Math.round(bw * s)), fh = Math.max(2, Math.round(bh * s)), m = L.clip && this.labels ? this.regionMask(L.clip) : null;
-    const key = JSON.stringify([sh.type, sh.type === "poly" ? sh.points : 0, fw, fh, m ? [L.clip, L.x, L.y, L.w, L.h, L.rotation, !!L.flip_h, !!L.flip_v] : 0]), e = L._fld;
+    const key = JSON.stringify([sh.type, sh.type === "poly" ? sh.points : 0, fw, fh, m ? [L.clip, L.x, L.y, L.w, L.h, L.rotation, !!L.flip_h, !!L.flip_v] : 0, wantF, wantR]), e = L._fld;
     if (e && e.key === key && e.m === m) return e;
     const c = mkCanvas(fw, fh), g = c.getContext("2d", { willReadFrequently: true });
     g.fillStyle = "#fff"; g.beginPath();
@@ -2211,10 +2222,15 @@ class Director {
           const r = yy * fw + xx; if (!seen[r] && a[r * 4 + 3] >= 128) { seen[r] = 1; stack.push(r); } } }
       rp.push({ id: rp.length, pos, box: [x0, y0, x1, y1] });
     }
-    const F = fieldRamp(rp, fw, fh, { field: "edge distance", per: "each region" }, 1), data = new Float32Array(n * 4);
-    for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) { const q = y * fw + x, o = ((fh - 1 - y) * fw + x) * 4;   // GL reads rows bottom first
+    const F = fieldRamp(rp, fw, fh, { field: "edge distance", per: "each region" }, 1), data = wantF ? new Float32Array(n * 4) : null;
+    if (wantF) for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) { const q = y * fw + x, o = ((fh - 1 - y) * fw + x) * 4;   // GL reads rows bottom first
       data[o] = F[q]; data[o + 1] = a[q * 4 + 3] >= 128 ? 1 : 0; data[o + 3] = 1; }
-    return (L._fld = { key, m, id: (this._fldN = (this._fldN || 0) + 1), w: fw, h: fh, data });
+    let reg = null;
+    if (wantR) { reg = new Float32Array(n * 4);       // = shader_render.region_picture: number + 1, the place in the piece's box, the edge distance
+      for (const r of rp) { const [x0, y0, x1, y1] = r.box, bw1 = x1 - x0 - 1, bh1 = y1 - y0 - 1;
+        for (const q of r.pos) { const x = q % fw, y = (q - x) / fw, o = ((fh - 1 - y) * fw + x) * 4;
+          reg[o] = r.id + 1; reg[o + 1] = bw1 > 0 ? (x - x0) / bw1 : 0; reg[o + 2] = bh1 > 0 ? 1 - (y - y0) / bh1 : 1; reg[o + 3] = F[q]; } } }
+    return (L._fld = { key, m, id: (shaderGL.fieldN = (shaderGL.fieldN || 0) + 1), w: fw, h: fh, data, reg, n: rp.length });      // one count for every window: the GL pictures are shared
   }
   shaderFill(L) {                                    // the shader at the layer's box size, or null (the colour shows)
     const info = this.shaderInfo(L); if (!info.source) return null;
@@ -2237,7 +2253,9 @@ class Director {
         pictures[0] = c;
       } else if (!(info.optional || []).includes(i)) pictures[i] = "noise";
     }
-    const out = shaderGL.draw(info.source, w, h, u, pictures, this.shaderField(L, info));
+    const fld = this.shaderField(L, info);
+    if (fld && fld.reg) u.kRegions = fld.n;
+    const out = shaderGL.draw(info.source, w, h, u, pictures, fld);
     if (out.error) { if (!info.glError) { const lines = out.error.split("\n").map(l => /ERROR:\s*\d+:(\d+):\s*(.*)/.exec(l)).filter(Boolean).map(m => `line ${m[1]}: ${m[2].trim()}`);
         info.glError = "the shader does not compile.\n" + (lines.slice(0, 6).join("\n") || out.error.trim()); note("shader: " + info.glError.split("\n").slice(0, 2).join(" "));
         setTimeout(() => { if (!this.closed) this.renderInspector(); }, 0); } return null; }
@@ -2816,7 +2834,8 @@ class Director {
     this.regpick.innerHTML = (f ? "" : `<button data-v="" class="none${cur ? "" : " on"}">${none}</button>`) +
       hits.slice(0, 400).map(n => `<button data-v="${esc(n)}"${n === cur ? ' class="on"' : ""}>${esc(n)}</button>`).join("") +
       (hits.length > 400 ? `<button disabled class="none">${hits.length - 400} more · type to filter</button>` : "") +
-      (!hits.length && f ? `<button disabled class="none">no region matches · Enter keeps "${esc(filter)}" as a pattern</button>` : "");
+      (!hits.length && f ? (n => `<button disabled class="none">${n ? `"${esc(filter)}" is a pattern: ${n} region${n > 1 ? "s" : ""} match${n > 1 ? "" : "es"} · Enter keeps it` : `no region matches · Enter keeps "${esc(filter)}" as a pattern`}</button>`)(
+        /[*?]/.test(f) ? (re => (this.m.regions || []).filter(r => re.test(String(r.name || "").toLowerCase())).length)(new RegExp("^" + f.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$")) : 0) : "");
     const r = input.getBoundingClientRect();
     Object.assign(this.regpick.style, { top: (r.bottom + 4) + "px", left: r.left + "px", minWidth: r.width + "px" });
     this.regpick.hidden = false; this.regpick.dataset.for = input.dataset.id; this.regHi = -1;
@@ -2840,6 +2859,8 @@ class Director {
       + ((info.uses || []).some(u => SHADER_ARROW.includes(u)) ? `<div class="kkd-field" data-tip="Drag an arrow on the layer: the shader runs from its start to its end, takes its direction, or starts at its start (what this shader does with it is in the line above)"><span>arrow</span><span style="display:flex;gap:4px"><button class="kkd-pill" data-id="sh-vec" aria-pressed="${this.armed()?.sh === true}">${arrowOf(sh.vec) ? "redraw" : "draw"}</button>${arrowOf(sh.vec) ? `<button class="kkd-pill" data-id="sh-vecx" data-tip="Remove the arrow">clear</button>` : ""}</span><span></span></div>` : "")
       + ((info.uses || []).includes("kField") ? `<div class="kkd-field" data-tip="The ramp the shader runs along (its field): left to right · or from the outline of the shape inwards, every separate piece for itself; a layer clipped to regions then has every region as a piece (extrude and region contours need this)"><span>field</span><select data-id="sh-fieldsrc"><option value="ramp" ${this.shaderFieldMode(L, info) === "ramp" ? "selected" : ""}>left to right</option><option value="edge" ${this.shaderFieldMode(L, info) === "edge" ? "selected" : ""}>the shape's edges</option></select><span></span></div>` : "")
       + (own ? `<div class="kkd-field" data-tip="How fast the shader's clock (iTime) runs"><span>speed</span><input type="number" data-id="sh-speed" step="0.1" value="${Number.isFinite(+sh.speed) ? +sh.speed : 1}"><span></span></div>` : "")
+      + ((info.uses || []).some(u => SHADER_REGION.includes(u)) ? `<div style="font-size:11px;opacity:.7;margin:2px 0 6px">${L.clip && this.labels ? "every region the layer is clipped to is a region of its own for this shader" : "this shader treats every region on its own: clip the layer to regions (the whole shape is one region now)"}</div>` : "")
+      + `<div class="kkd-field" data-tip="A material of several shaders: a copy of this layer on top, with the same shape and the same regions · pick its shader under 'fill' and how it is laid over this one under 'blend'"><span>stack</span><span><button class="kkd-pill" data-id="sh-stack">+ shader on top</button></span><span></span></div>`
       + (info.controls || []).filter(c => c.colour && c.name.endsWith("_r")).map(c => `<div class="kkd-field" data-tip="${esc(c.about || c.colour)} · a colour of the shader; its red, green and blue can have keyframes of their own"><span>${esc(c.colour.replace(/_/g, " "))}</span><input type="color" data-shcol="${esc(c.colour)}" value="#${["r", "g", "b"].map(ch => Math.round(Math.min(1, Math.max(0, num(`${c.colour}_${ch}`, (info.controls.find(q => q.name === `${c.colour}_${ch}`) || c).default))) * 255).toString(16).padStart(2, "0")).join("")}"><span></span></div>`).join("")
       + (info.controls || []).filter(c => !c.colour).map(c => `<div class="kkd-field" data-tip="${esc(c.about || c.name)} · ${c.min} to ${c.max}, ${c.default} at the start"><span>${esc(c.name.replace(/_$/, ""))}</span><input type="range" data-shc="${esc(c.name)}" min="${c.min}" max="${c.max}" step="any" value="${num(c.name, c.default)}"><span class="v" data-shcv="${esc(c.name)}">${+num(c.name, c.default).toFixed(3)}</span></div>`).join("");
   }
@@ -3693,7 +3714,9 @@ class Director {
       else if (d.id === "sh-loops") { this.once(); q.shape = { ...q.shape, loops: Math.max(1, Math.round(+e.target.value || 1)) }; this.draw(); }
       else if (d.id === "sh-speed") { this.once(); q.shape = { ...q.shape, speed: Number.isFinite(+e.target.value) ? +e.target.value : 1 }; this.draw(); } });
     $("sh-box").addEventListener("click", e => { const q = L(), id = e.target.closest("[data-id]")?.dataset.id; if (!q?.shape) return;
-      if (id === "sh-vec") { this.vecDraw = this.armed()?.sh ? null : { id: q.id, sh: true }; this.setTool("move"); this.renderInspector(); this.draw(); }
+      if (id === "sh-stack") { const c = this.duplicate(false); if (c) { c.name = q.name + " +"; c.blend = "screen"; this.refresh(); this.renderInspector();
+          note("a second shader on top: pick it under 'fill', and how it is laid over the one below under 'blend'"); } }
+      else if (id === "sh-vec") { this.vecDraw = this.armed()?.sh ? null : { id: q.id, sh: true }; this.setTool("move"); this.renderInspector(); this.draw(); }
       else if (id === "sh-vecx") { this.snap(); const { vec, ...rest } = q.shape; q.shape = rest; this.vecDraw = null; this.renderInspector(); this.draw(); } });
     $("sh-box").addEventListener("change", e => { const q = L(), id = e.target.dataset.id; if (!q?.shape) return;
       if (id === "sh-input") { this.snap(); q.shape = { ...q.shape, input: e.target.value === "noise" ? "noise" : "below" }; this.draw(); }

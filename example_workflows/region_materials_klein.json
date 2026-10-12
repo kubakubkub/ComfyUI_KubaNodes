@@ -1,0 +1,756 @@
+{
+ "id": "0d6c2f7a-93b1-4c58-8e2d-5b7f1a4c6e90",
+ "revision": 0,
+ "last_node_id": 99,
+ "last_link_id": 14,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_SampleFacade",
+   "pos": [
+    60,
+    110
+   ],
+   "size": [
+    320,
+    260
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      1,
+      3,
+      6,
+      11
+     ]
+    },
+    {
+     "name": "color_matrix",
+     "type": "IMAGE",
+     "links": []
+    },
+    {
+     "name": "silhouette",
+     "type": "MASK",
+     "links": []
+    },
+    {
+     "name": "mask_folder",
+     "type": "STRING",
+     "links": [
+      2
+     ]
+    },
+    {
+     "name": "sketch_photo",
+     "type": "IMAGE",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_SampleFacade"
+   },
+   "widgets_values": [
+    1920,
+    1080,
+    3,
+    7,
+    "night",
+    0
+   ]
+  },
+  {
+   "id": 2,
+   "type": "KUBA_FacadeMaskAtlas",
+   "pos": [
+    410,
+    110
+   ],
+   "size": [
+    360,
+    520
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "matrix",
+     "type": "IMAGE",
+     "link": 1
+    },
+    {
+     "name": "mask_folder",
+     "type": "STRING",
+     "link": 2,
+     "widget": {
+      "name": "mask_folder"
+     }
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": []
+    },
+    {
+     "name": "regions_json",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": []
+    },
+    {
+     "name": "scope",
+     "type": "MASK",
+     "links": []
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "links": [
+      4,
+      5
+     ]
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_FacadeMaskAtlas"
+   },
+   "widgets_values": [
+    "mask_folder",
+    400,
+    true,
+    24,
+    true,
+    0.08,
+    true,
+    "folder",
+    true,
+    0.5,
+    "auto",
+    1,
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  },
+  {
+   "id": 3,
+   "type": "KUBA_Shader",
+   "pos": [
+    800,
+    110
+   ],
+   "size": [
+    400,
+    1050
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "image0",
+     "type": "IMAGE",
+     "link": 3
+    },
+    {
+     "name": "image1",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "image2",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "image3",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "mask",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "field",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "link": null
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 4
+    },
+    {
+     "name": "sound",
+     "type": "KUBA_SOUND",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [
+      12
+     ]
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": []
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": []
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "links": []
+    },
+    {
+     "name": "frame_count",
+     "type": "INT",
+     "links": []
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Shader"
+   },
+   "widgets_values": [
+    "region weave",
+    "",
+    "lines = 5",
+    0,
+    0,
+    5.0,
+    2.0,
+    1.0,
+    1,
+    true,
+    0.0,
+    1.0,
+    "auto",
+    true,
+    0.0,
+    1.0,
+    0.15,
+    "auto",
+    "",
+    "screen",
+    1.0,
+    "W_F1_*"
+   ],
+   "title": "the material"
+  },
+  {
+   "id": 8,
+   "type": "KUBA_RegionPlan",
+   "pos": [
+    1240,
+    870
+   ],
+   "size": [
+    400,
+    330
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 5
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 6
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [
+      10
+     ]
+    },
+    {
+     "name": "plan_json",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPlan"
+   },
+   "widgets_values": [
+    "[default]\nstrategy = keep\n\n[W_F1_*]\nstrategy = inpaint\nprompt = a stained glass window, coloured glass in lead lines, lit from inside at night\ndenoise = 0.8\n",
+    0,
+    ""
+   ]
+  },
+  {
+   "id": 10,
+   "type": "UNETLoader",
+   "pos": [
+    60,
+    420
+   ],
+   "size": [
+    320,
+    90
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      7
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader"
+   },
+   "widgets_values": [
+    "flux-2-klein-4b.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 11,
+   "type": "CLIPLoader",
+   "pos": [
+    60,
+    550
+   ],
+   "size": [
+    320,
+    110
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      8
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen_3_4b.safetensors",
+    "flux2",
+    "default"
+   ]
+  },
+  {
+   "id": 12,
+   "type": "VAELoader",
+   "pos": [
+    60,
+    700
+   ],
+   "size": [
+    320,
+    60
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      9
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader"
+   },
+   "widgets_values": [
+    "flux2-vae.safetensors"
+   ]
+  },
+  {
+   "id": 4,
+   "type": "KUBA_RegionSampler",
+   "pos": [
+    1240,
+    110
+   ],
+   "size": [
+    380,
+    420
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 7
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 8
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 9
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": 10
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 11
+    },
+    {
+     "name": "style",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "material",
+     "type": "IMAGE",
+     "link": 12
+    },
+    {
+     "name": "change",
+     "type": "MASK",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "links": [
+      13
+     ]
+    },
+    {
+     "name": "changed",
+     "type": "MASK",
+     "links": []
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      14
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionSampler"
+   },
+   "widgets_values": [
+    0,
+    0.0,
+    "euler",
+    "simple",
+    1.0,
+    4.0,
+    "auto",
+    0,
+    "auto",
+    "",
+    0.3
+   ]
+  },
+  {
+   "id": 5,
+   "type": "SaveImage",
+   "pos": [
+    1660,
+    110
+   ],
+   "size": [
+    460,
+    420
+   ],
+   "flags": {},
+   "order": 8,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 13
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "kubakub/region_materials_klein"
+   ]
+  },
+  {
+   "id": 6,
+   "type": "PreviewAny",
+   "pos": [
+    1240,
+    580
+   ],
+   "size": [
+    380,
+    240
+   ],
+   "flags": {},
+   "order": 9,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "STRING",
+     "link": 14
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    60,
+    -330
+   ],
+   "size": [
+    900,
+    380
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## Paint from a shader (Flux 2 Klein)\n\n**You need:** Flux 2 Klein 4B: `flux-2-klein-4b.safetensors` (diffusion_models), `qwen_3_4b.safetensors`\n(text_encoders), `flux2-vae.safetensors` (vae). Other names: pick them in the three loaders.\n\nThe **kubakub shader** draws stripes in the first-floor windows (`which regions` = `W_F1_*`); its `images` go to **`material`**\nof the region sampler, so the model paints its stained glass along the stripes. Try another preset with **browse the\npresets**, move its sliders with **adjust**, and queue again.\n\n- how much of the shader stays: `denoise` in the plan (0.5 = most of it, 0.9 = the composition only)\n- which moment of the shader: `material_at` on the sampler (advanced)\n- the shader as a reference instead of the start: add `reference = material` to the plan (the way Qwen Image follows it)\n- where the model may change more: connect the shader's `masks` (or another shader's) to `change`\n"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   0,
+   "IMAGE"
+  ],
+  [
+   2,
+   1,
+   3,
+   2,
+   1,
+   "STRING"
+  ],
+  [
+   3,
+   1,
+   0,
+   3,
+   0,
+   "IMAGE"
+  ],
+  [
+   4,
+   2,
+   4,
+   3,
+   7,
+   "KUBA_REGIONS"
+  ],
+  [
+   5,
+   2,
+   4,
+   8,
+   0,
+   "KUBA_REGIONS"
+  ],
+  [
+   6,
+   1,
+   0,
+   8,
+   1,
+   "IMAGE"
+  ],
+  [
+   7,
+   10,
+   0,
+   4,
+   0,
+   "MODEL"
+  ],
+  [
+   8,
+   11,
+   0,
+   4,
+   1,
+   "CLIP"
+  ],
+  [
+   9,
+   12,
+   0,
+   4,
+   2,
+   "VAE"
+  ],
+  [
+   10,
+   8,
+   0,
+   4,
+   3,
+   "KUBA_PLAN"
+  ],
+  [
+   11,
+   1,
+   0,
+   4,
+   4,
+   "IMAGE"
+  ],
+  [
+   12,
+   3,
+   0,
+   4,
+   6,
+   "IMAGE"
+  ],
+  [
+   13,
+   4,
+   0,
+   5,
+   0,
+   "IMAGE"
+  ],
+  [
+   14,
+   4,
+   2,
+   6,
+   0,
+   "STRING"
+  ]
+ ],
+ "floatingLinks": null,
+ "groups": [],
+ "definitions": null,
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.7,
+   "offset": [
+    40,
+    420
+   ]
+  }
+ },
+ "version": 0.4
+}

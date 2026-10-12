@@ -139,7 +139,10 @@ class Adapter:
     # ---- sampling --------------------------------------------------------
     def sample(self, latent: torch.Tensor, positive: list, negative: list, *, noise_mask=None,
                seed: int = 0, steps: int = 0, cfg: float = 0.0, denoise: float = 1.0,
-               sampler_name: str = "", scheduler: str = "", pixel_size=(0, 0)) -> torch.Tensor:
+               sampler_name: str = "", scheduler: str = "", pixel_size=(0, 0), soft: bool = False) -> torch.Tensor:
+        """soft: the grey values of noise_mask say how much each place may change (a change map), instead of
+        mixing the new picture with the old one there."""
+        model = self._soft_model() if soft else self.model
         steps = steps or self.default_steps
         cfg = cfg or self.default_cfg
         sampler_name = sampler_name or self.default_sampler
@@ -152,10 +155,36 @@ class Adapter:
             if sig.numel() < 2:
                 return latent
             return comfy.sample.sample_custom(
-                self.model, noise, cfg, comfy.samplers.sampler_object(sampler_name), sig,
+                model, noise, cfg, comfy.samplers.sampler_object(sampler_name), sig,
                 positive, negative, latent, noise_mask=noise_mask, seed=seed)
-        return comfy.sample.sample(self.model, noise, steps, cfg, sampler_name, scheduler, positive,
+        return comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive,
                                    negative, latent, denoise=denoise, noise_mask=noise_mask, seed=seed)
+
+    def _soft_model(self):
+        """A copy of the model that reads the grey values of the noise mask as a change map (a setting of the
+        model, as the core node 'Differential Diffusion' makes one; nothing in ComfyUI is changed)."""
+        if getattr(self, "_soft", None) is None:
+            from . import seams
+            self._soft = seams.differential_diffusion_patch(self.model, step=change_by_steps)
+        return self._soft
+
+
+CHANGE_FLOOR = 0.02                                  # a place of the change map darker than this never changes
+
+
+def change_by_steps(sigma, denoise_mask, extra_options):
+    """
+    A change map for the sampler: the grey value of a place is the share of the steps it takes part in. The top
+    band of greys (above 1 - 1 / steps) is sampled from the first step, the next band joins at the second step (it
+    is noised to that step's level and painted from there, so it changes less), and so on; black never joins and
+    stays as it is. Counted in steps and not in noise levels, so a model of 4 or 5 steps has that many clear
+    levels (their schedules crowd at the noisy end).
+    The idea of joining step by step: github.com/exx8/differential-diffusion (in ComfyUI: Differential Diffusion).
+    """
+    steps = extra_options["sigmas"]
+    n = max(1, len(steps) - 1)
+    k = int(torch.argmin((steps[:n].to(sigma.device) - sigma.flatten()[0]).abs()))
+    return (denoise_mask >= max(1.0 - (k + 1) / n, CHANGE_FLOOR) - 1e-4).to(denoise_mask.dtype)
 
 
 # Flux 2 schedule, copied from ComfyUI core comfy_extras/nodes_flux.py

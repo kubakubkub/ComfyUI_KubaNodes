@@ -41,7 +41,7 @@
     0.05,
     ""
    ],
-   "title": "1 \u00b7 projector: 30 m from the wall, 1.5 m up"
+   "title": "1 · projector: 30 m from the wall, 1.5 m up"
   },
   {
    "id": 3,
@@ -159,7 +159,7 @@
     1.0,
     0.5
    ],
-   "title": "2 \u00b7 scene render (Blender): paste your file, or leave empty for the sample"
+   "title": "2 · scene render (Blender): paste your file, or leave empty for the sample"
   },
   {
    "id": 4,
@@ -245,7 +245,7 @@
     true,
     "auto"
    ],
-   "title": "3 \u00b7 regions: every window, column, cornice (tags: left / centre / right, floors)"
+   "title": "3 · regions: every window, column, cornice (tags: left / centre / right, floors)"
   },
   {
    "id": 5,
@@ -310,14 +310,14 @@
     0,
     ""
    ],
-   "title": "4 \u00b7 plan: a prompt per region"
+   "title": "4 · plan: a prompt per region"
   },
   {
    "id": 6,
    "type": "KUBA_SceneMeasure",
    "pos": [
     780,
-    420
+    800
    ],
    "size": [
     360,
@@ -382,7 +382,7 @@
     "pixel_mm",
     60.0
    ],
-   "title": "5 \u00b7 real distances: mm per pixel, brightness"
+   "title": "5 · real distances: mm per pixel, brightness"
   },
   {
    "id": 7,
@@ -393,7 +393,7 @@
    ],
    "size": [
     360,
-    380
+    760
    ],
    "flags": {},
    "order": 5,
@@ -455,14 +455,14 @@
     1.0,
     1.0
    ],
-   "title": "6 \u00b7 previz: the plan projected, seen from two audience spots"
+   "title": "6 · previz: the plan projected, seen from two audience spots"
   },
   {
    "id": 20,
    "type": "PreviewImage",
    "pos": [
     360,
-    600
+    980
    ],
    "size": [
     380,
@@ -497,7 +497,7 @@
    "type": "PreviewImage",
    "pos": [
     780,
-    760
+    1140
    ],
    "size": [
     360,
@@ -532,7 +532,7 @@
    "type": "PreviewImage",
    "pos": [
     1180,
-    560
+    940
    ],
    "size": [
     420,
@@ -567,7 +567,7 @@
    "type": "PreviewImage",
    "pos": [
     1180,
-    900
+    1280
    ],
    "size": [
     420,
@@ -602,7 +602,7 @@
    "type": "PreviewImage",
    "pos": [
     1640,
-    420
+    800
    ],
    "size": [
     520,
@@ -637,7 +637,7 @@
    "type": "PreviewAny",
    "pos": [
     0,
-    540
+    920
    ],
    "size": [
     320,
@@ -685,7 +685,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "## starter 07 \u00b7 3d model to regions\n\n**You need:** Blender 4.x installed (it runs in the background). No AI models.\n\n**Your own model:** paste the path of your .blend / .fbx / .obj / .abc / .glb / .usd into `file` of **scene render** (Explorer: right click the file, Copy as path). Empty = the sample building.\n\n**Do:** Queue. The sample building (a 24 x 16 m facade, every stone a part of its own) is rendered from the projector\n(30 m from the wall, 1.5 m up, the picture fitted to the model by lens shift). Scene render gives clay, depth\nand ID passes; every window, column and cornice becomes a region, tagged left / centre / right and by floor. The plan\ngives them prompts, scene measure the real size of a pixel on the wall, and the previz shows the picture on the\nbuilding from two audience spots.\n\n**Camera of your own model:** a file with a projection camera: unplug the projector node and set width / height\nto 0, then the file's camera and render size are used. A file without one: keep the projector and put your\nprojector's resolution into width / height.\n\n**Then try:** `throw_ratio` 1.2 on the projector (a real lens: the report says how much of the model the picture\ncovers); `aim = tilt`; `preview_pass = parts`; connect the plan to a **region sampler** as in starter 02\n(image = clay) to paint the facade.\n"
+    "## starter 07 · 3d model to regions\n\n**You need:** Blender 4.x installed (it runs in the background). No AI models.\n\n**Your own model:** paste the path of your .blend / .fbx / .obj / .abc / .glb / .usd into `file` of **scene render** (Explorer: right click the file, Copy as path). Empty = the sample building.\n\n**Do:** Queue. The sample building (a 24 x 16 m facade, every stone a part of its own) is rendered from the projector\n(30 m from the wall, 1.5 m up, the picture fitted to the model by lens shift). Scene render gives clay, depth\nand ID passes; every window, column and cornice becomes a region, tagged left / centre / right and by floor. The plan\ngives them prompts, scene measure the real size of a pixel on the wall, and the previz shows the picture on the\nbuilding from two audience spots.\n\n**Camera of your own model:** a file with a projection camera: unplug the projector node and set width / height\nto 0, then the file's camera and render size are used. A file without one: keep the projector and put your\nprojector's resolution into width / height.\n\n**Then try:** `throw_ratio` 1.2 on the projector (a real lens: the report says how much of the model the picture\ncovers); `aim = tilt`; `preview_pass = parts`; connect the plan to a **region sampler** as in starter 02\n(image = clay) to paint the facade.\n"
    ],
    "title": "read me"
   }

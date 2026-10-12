@@ -70,9 +70,10 @@ def only_filter(only):
 
 def clip_groups(entries, only=None):
     """
-    Animated regions grouped into clips: one clip per (video prompt, t_start, t_end, motion).
+    Animated regions grouped into clips: one clip per (video prompt, t_start, t_end, motion, material_repaint).
     entries: resolved plan entries (plan.py). only: see only_filter.
-    Returns [{"ids", "prompt", "t_start", "t_end", "motion"}].
+    Returns [{"ids", "prompt", "t_start", "t_end", "motion", "repaint"}]; repaint = the noise level the clip is
+    repainted from when a material clip guides it.
     """
     groups = {}
     wanted = only_filter(only)
@@ -82,9 +83,10 @@ def clip_groups(entries, only=None):
         if wanted is not None and not wanted(e):
             continue
         prompt = (e.get("video_prompt") or e.get("prompt") or "").strip()
-        key = (prompt, float(e.get("t_start", 0.0)), float(e.get("t_end", -1.0)), float(e.get("motion", 1.0)))
+        key = (prompt, float(e.get("t_start", 0.0)), float(e.get("t_end", -1.0)), float(e.get("motion", 1.0)),
+               float(e.get("material_repaint", 0.91)))
         groups.setdefault(key, []).append(int(e["region_id"]))
-    return [{"ids": ids, "prompt": k[0], "t_start": k[1], "t_end": k[2], "motion": k[3]}
+    return [{"ids": ids, "prompt": k[0], "t_start": k[1], "t_end": k[2], "motion": k[3], "repaint": k[4]}
             for k, ids in groups.items()]
 
 
@@ -93,6 +95,12 @@ def video_range(t_start: float, t_end: float, fps: float, n: int):
     i0 = int(round(max(0.0, float(t_start)) * fps))
     i1 = n - 1 if t_end < 0 else min(n - 1, int(round(float(t_end) * fps)))
     return None if i1 <= i0 else (i0, i1)
+
+
+def frames_in_range(frames: int, fps: float, t_start: float = 0.0, t_end: float = -1.0):
+    """Which frames of a clip lie in t_start..t_end (t_end < 0 = to the end): a bool array, one per frame."""
+    t = np.arange(int(frames), dtype=np.float64) / float(fps)
+    return (t >= float(t_start) - 1e-9) & (t <= (float("inf") if t_end < 0 else float(t_end)) + 1e-9)
 
 
 def groups_with_work(groups, label_ids, n_bg=None, fps=25.0):
@@ -139,12 +147,13 @@ def crop_plan(mask: np.ndarray, target_px: float = 450_000, context_px: int = 64
 
 def latent_mask(region_crop: np.ndarray, lat_w: int, lat_h: int, frames: int, fps: float,
                 t_start: float = 0.0, t_end: float = -1.0, motion: float = 1.0, dilate: int = 1,
-                loop: bool = False):
+                loop: bool = False, hold_first: bool = True):
     """
     Noise mask [1, 1, T_lat, lat_h, lat_w] (float32): motion inside the region during
     t_start..t_end (t_end < 0 = to the end), 0 elsewhere; latent frame 0 is always 0 (the
     first frame stays the still). loop: the last latent frame is 0 too, so the clip comes
-    back to the still (its last 8 frames) and can repeat.
+    back to the still (its last 8 frames) and can repeat. hold_first off: the first and the last
+    frame are repainted like the others (a clip that follows a moving guide: the guide is its start).
     """
     m = cv2.resize(region_crop.astype(np.float32), (lat_w, lat_h), interpolation=cv2.INTER_AREA) > 0.02
     if dilate > 0:
@@ -152,9 +161,10 @@ def latent_mask(region_crop: np.ndarray, lat_w: int, lat_h: int, frames: int, fp
     times = latent_frame_times(frames, fps)
     end = float("inf") if t_end < 0 else t_end
     active = (times >= t_start) & (times <= end)
-    active[0] = False
-    if loop and len(times) > 2:
-        active[-1] = False
+    if hold_first:
+        active[0] = False
+        if loop and len(times) > 2:
+            active[-1] = False
     out = np.zeros((1, 1, len(times), lat_h, lat_w), np.float32)
     out[0, 0, active] = m.astype(np.float32) * float(np.clip(motion, 0, 1))
     return out

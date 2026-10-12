@@ -28,6 +28,7 @@ from comfy_api.latest import io
 from ...kubakub import maskfields as mf
 from ...kubakub import sound as so
 from ...kubakub import video as vd
+from ...kubakub.io_types import SoundType
 from . import nodes_video as nv
 
 log = logging.getLogger("KUBA.regions")
@@ -108,9 +109,9 @@ class KUBA_MotionGuide(io.ComfyNode):
                 io.Float.Input("cycle", default=2.0, min=0.02, max=3600.0, step=0.01, optional=True,
                                tooltip="curve: seconds for one run (ramp: how long it takes; beats and hits: how long "
                                        "each one's ramp is)."),
-                io.Float.Input("curve_from", default=0.0, min=0.0, max=1.0, step=0.01, optional=True,
+                io.Float.Input("curve_from", display_name="value_from", default=0.0, min=0.0, max=1.0, step=0.01, optional=True,
                                tooltip="curve: the amount of repaint at its low end. 0 = the guide as it is."),
-                io.Float.Input("curve_to", default=1.0, min=0.0, max=1.0, step=0.01, optional=True,
+                io.Float.Input("curve_to", display_name="value_to", default=1.0, min=0.0, max=1.0, step=0.01, optional=True,
                                tooltip="curve: the amount at its high end. 1 = the full 'repaint'."),
                 io.Combo.Input("easing", options=list(mf.EASES), default="linear", optional=True, advanced=True,
                                tooltip="curve: how a ramp starts and stops."),
@@ -124,6 +125,10 @@ class KUBA_MotionGuide(io.ComfyNode):
                                        "picture or comes in over time. limits the change: LTX may only change things "
                                        "inside the mask and keeps your guide's look everywhere (for a guide that is a "
                                        "finished picture, when only a part should come alive)."),
+                SoundType.Input("sound", optional=True,
+                                tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release, band, threshold, gap), set "
+                                        "once for every node that listens, so all of them step on the same beat. Connected, it comes before '"
+                                        "audio' and before this node's own sound settings."),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="The video, as long as the guide."),
@@ -138,7 +143,8 @@ class KUBA_MotionGuide(io.ComfyNode):
     def execute(cls, model, clip, vae, audio_vae, prompt, repaint, seed, fps, megapixels, guide=None,
                 upscale_model=None, audio=None, max_frames=121, stage2_max_mp=0.6, guide_size=False,
                 negative=NEGATIVE, repaint_mask=None, curve="constant", cycle=2.0, curve_from=0.0, curve_to=1.0,
-                easing="linear", keep_exact=True, mask_does=MASK_DOES[0]) -> io.NodeOutput:
+                easing="linear", keep_exact=True, mask_does=MASK_DOES[0], sound=None) -> io.NodeOutput:
+        audio, heard, cabled = so.take(sound, audio)
         ops = nv._OPS
         t0 = time.perf_counter()
         notes = []
@@ -178,7 +184,8 @@ class KUBA_MotionGuide(io.ComfyNode):
                 own, mono = True, so.sample_sound(max(1.0, n / float(fps)), mf.SAMPLE_BPM, hz)
                 notes.append(f"curve = {curve} and no sound is connected: the built-in beat is used (connect yours to 'audio')")
         when, curve_lines = mf.timed_values([i / float(fps) for i in range(n)], curve, cycle, min(max(curve_from, 0.0), 1.0),
-                                            min(max(curve_to, 0.0), 1.0), easing, mono, hz, own)
+                                            min(max(curve_to, 0.0), 1.0), easing, mono, hz, own,
+                                            heard if cabled else None)
         masked = where is not None or when is not None
         limit = masked and mask_does == MASK_DOES[1]   # the noise mask; else the repainted clip is shown through the mask
         share = vd.repaint_share(where, when, n) if masked else None

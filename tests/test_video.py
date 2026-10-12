@@ -254,7 +254,7 @@ def test_only_selectors():
     assert vd.only_filter("  ,\n") is None
 
     out = _run(_plan(RULES2), _NoOps(), models={}, only="group:Doors").args
-    assert "only = 'group:Doors' matches no animated region" in out[1] and "W_F1_C01" in out[1], out[1]
+    assert "which regions = 'group:Doors' matches no animated region" in out[1] and "W_F1_C01" in out[1], out[1]
     assert torch.equal(out[0][3], STILL[0]) and float(out[4].max()) == 0, "nothing rendered, empty mask"
     nv._CLIP_CACHE.clear()
     ops = _StubOps()
@@ -386,6 +386,67 @@ def test_loop_and_sound():
     assert _run(_plan(RULES2), _StubOps(), audio=short).args[0].shape[0] == 17, "a short sound is padded with silence"
     nv._CLIP_CACHE.clear()
     return "loop holds both ends (still only); a sound is held through both stages and is part of the cache key"
+
+
+def test_material():
+    """A clip on 'material' (a kubakub shader) moves the animated regions: guided sampling from material_repaint."""
+    schema = nv.KUBA_RegionVideoSampler.define_schema()
+    assert [i.id for i in schema.inputs][-1] == "material" and schema.inputs[-1].optional and schema.inputs[-1].tooltip
+    seen = {"pixels": [], "sigmas": [], "masks": []}
+
+    class Seen(_StubOps):
+        def vae_encode(self, vae, pixels):
+            seen["pixels"].append(pixels.clone())
+            return super().vae_encode(vae, pixels)
+
+        def sample(self, model, guider, seed, sigmas, video, audio):
+            seen["sigmas"].append(sigmas)
+            seen["masks"].append(video["noise_mask"].clone())
+            return super().sample(model, guider, seed, sigmas, video, audio)
+
+    rules = "[default]\nstrategy = keep\n[W_F1_C01]\nanimate = on\nvideo_prompt = light rises\n"
+    ramp = torch.linspace(0.0, 1.0, 17)[:, None, None, None].expand(17, 192, 320, 3).clone()
+    nv._CLIP_CACHE.clear()
+    plain = _run(_plan(rules), Seen()).args
+    assert torch.equal(seen["pixels"][0][0], seen["pixels"][0][9]) and float(seen["masks"][0][0, 0, 0].max()) == 0.0, \
+        "no material: the still repeated, its first frame held"
+    for v in seen.values():
+        v.clear()
+    out = _run(_plan(rules), Seen(), material=ramp).args
+    g = seen["pixels"][0]
+    assert float((g[4] - g[12]).abs().max()) > 0.2, "the material's frames are in the crop"
+    assert torch.equal(g[4][0, 0], seen_still_corner(g, plain)), "outside the region the crop stays the still"
+    assert seen["sigmas"][0] != nv.SIGMAS_1 and seen["sigmas"][0].startswith("0.91"), seen["sigmas"]
+    assert float(seen["masks"][0][0, 0, 0].max()) > 0.0, "a guided clip is repainted from its first frame on"
+    assert "repainted from noise level 0.91" in out[1], out[1]
+    ops = Seen()
+    _run(_plan(rules), ops, material=ramp)
+    assert not any(c[0] == "sample" for c in ops.calls), "the same material: the clip comes from the cache"
+    for v in seen.values():
+        v.clear()
+    low = _run(_plan(rules + "material_repaint = 0.8\n"), Seen(), material=ramp).args
+    assert seen["sigmas"][0].startswith("0.8") and "0.8" in low[1], seen["sigmas"]
+    for v in seen.values():
+        v.clear()
+    late = _run(_plan(rules + "t_start = 1.0\n"), Seen(), material=ramp).args      # 8 fps: frame 8 on
+    g = seen["pixels"][0]
+    assert torch.equal(g[0], g[7]) and float((g[8] - g[16]).abs().max()) > 0.2, "before its start a clip is the still"
+    for v in seen.values():
+        v.clear()
+    nv._CLIP_CACHE.clear()
+    same = _run(_plan(rules), Seen(), material=STILL).args
+    assert seen["sigmas"][0] == nv.SIGMAS_1 and "moves them freely" in same[1], same[1]
+    for v in seen.values():
+        v.clear()
+    short = _run(_plan(rules), Seen(), material=torch.rand(5, 96, 160, 3)).args
+    assert "its last frame is held" in short[1] and torch.equal(seen["pixels"][0][4], seen["pixels"][0][16]), short[1]
+    nv._CLIP_CACHE.clear()
+    return "a material clip guides the animated regions (time range, repaint level, cache, another size, a short clip)"
+
+
+def seen_still_corner(g, plain):
+    """The crop's corner pixel of the still (frame 0 of a guided clip outside the region is untouched there too)."""
+    return g[0][0, 0]
 
 
 def test_cache_limits():

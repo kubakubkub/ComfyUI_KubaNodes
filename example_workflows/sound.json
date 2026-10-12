@@ -1,0 +1,582 @@
+{
+ "id": "c7e1b4a2-6d3f-4b90-a5e8-2f9d0c1b7a53",
+ "revision": 0,
+ "last_node_id": 99,
+ "last_link_id": 8,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_Sound",
+   "pos": [
+    60,
+    110
+   ],
+   "size": [
+    440,
+    480
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "name": "sound",
+     "type": "KUBA_SOUND",
+     "links": [
+      1,
+      2
+     ]
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "links": [
+      5
+     ]
+    },
+    {
+     "name": "bpm",
+     "type": "FLOAT",
+     "links": []
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": [
+      8
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Sound"
+   },
+   "widgets_values": [
+    0.0,
+    1.0,
+    0.15,
+    "everything",
+    0.3,
+    0.1,
+    0.0,
+    4.0
+   ]
+  },
+  {
+   "id": 2,
+   "type": "KUBA_Shader",
+   "pos": [
+    540,
+    110
+   ],
+   "size": [
+    400,
+    1050
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "image0",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "image1",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "image2",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "image3",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "mask",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "field",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "link": null
+    },
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": null
+    },
+    {
+     "name": "sound",
+     "type": "KUBA_SOUND",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "links": [
+      3
+     ]
+    },
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": []
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": [
+      4
+     ]
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "links": []
+    },
+    {
+     "name": "frame_count",
+     "type": "INT",
+     "links": []
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "name": "depth",
+     "type": "IMAGE",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_Shader"
+   },
+   "widgets_values": [
+    "sound bars",
+    "",
+    "",
+    1280,
+    720,
+    25.0,
+    0.0,
+    1.0,
+    1,
+    true,
+    0.0,
+    1.0,
+    "auto",
+    true,
+    0.0,
+    1.0,
+    0.15,
+    "auto",
+    "",
+    "screen",
+    1.0,
+    ""
+   ]
+  },
+  {
+   "id": 3,
+   "type": "KUBA_MaskAnimate",
+   "pos": [
+    980,
+    110
+   ],
+   "size": [
+    420,
+    1030
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "mask",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "field",
+     "type": "MASK",
+     "link": null
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "link": null
+    },
+    {
+     "name": "sound",
+     "type": "KUBA_SOUND",
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "name": "masks",
+     "type": "MASK",
+     "links": [
+      7
+     ]
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": []
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "links": []
+    },
+    {
+     "name": "frame_count",
+     "type": "INT",
+     "links": []
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_MaskAnimate"
+   },
+   "widgets_values": [
+    "reveal",
+    "beats",
+    0.4,
+    0.0,
+    1.0,
+    "linear",
+    0.05,
+    0.2,
+    3,
+    0.0,
+    25.0,
+    0.0,
+    1.0,
+    0.0,
+    0.5,
+    1,
+    "everything",
+    1.0,
+    0.15,
+    1,
+    1,
+    0.3,
+    0.1,
+    0.0,
+    0.0,
+    "mask centre",
+    false
+   ]
+  },
+  {
+   "id": 4,
+   "type": "CreateVideo",
+   "pos": [
+    1440,
+    450
+   ],
+   "size": [
+    300,
+    150
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "images",
+     "type": "IMAGE",
+     "link": 3
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "link": 4,
+     "widget": {
+      "name": "fps"
+     }
+    },
+    {
+     "name": "audio",
+     "type": "AUDIO",
+     "link": 5
+    }
+   ],
+   "outputs": [
+    {
+     "name": "VIDEO",
+     "type": "VIDEO",
+     "links": [
+      6
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CreateVideo"
+   },
+   "widgets_values": [
+    30.0,
+    "auto",
+    "sRGB",
+    "none"
+   ]
+  },
+  {
+   "id": 5,
+   "type": "SaveVideo",
+   "pos": [
+    1440,
+    640
+   ],
+   "size": [
+    300,
+    110
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "link": 6
+    },
+    {
+     "name": "format",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null,
+     "widget": {
+      "name": "format"
+     }
+    },
+    {
+     "name": "format.codec",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null,
+     "widget": {
+      "name": "format.codec"
+     }
+    },
+    {
+     "name": "codec",
+     "type": "COMFY_DYNAMICCOMBO_V3",
+     "link": null,
+     "widget": {
+      "name": "codec"
+     }
+    }
+   ],
+   "outputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "SaveVideo"
+   },
+   "widgets_values": [
+    "video/kubakub_sound",
+    "auto",
+    "auto",
+    "auto"
+   ]
+  },
+  {
+   "id": 6,
+   "type": "MaskPreview",
+   "pos": [
+    1440,
+    110
+   ],
+   "size": [
+    360,
+    300
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "mask",
+     "type": "MASK",
+     "link": 7
+    }
+   ],
+   "outputs": [
+    {
+     "name": "mask",
+     "type": "MASK",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "MaskPreview"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 7,
+   "type": "PreviewAny",
+   "pos": [
+    60,
+    640
+   ],
+   "size": [
+    440,
+    220
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "source",
+     "type": "STRING",
+     "link": 8
+    }
+   ],
+   "outputs": [
+    {
+     "name": "STRING",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": []
+  },
+  {
+   "id": 99,
+   "type": "MarkdownNote",
+   "pos": [
+    60,
+    -250
+   ],
+   "size": [
+    900,
+    300
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "## One sound for every node that listens\n\n**kubakub sound** holds the sound and how it is heard: tempo, how loud (gain), how fast a level falls (release), which\nfrequencies, how strong a hit must be (threshold). After a run it draws the sound: the orange line is the loudness,\nthe bars are the beats, the dots are the hits in the high, mid and low frequencies (bright = counts).\n\nIts `sound` output goes to the `sound` input of **kubakub shader** and **kubakub mask animate** here; height animate,\nmotion guide, shader mix and sound mask swap take it too. A node with the cable hides its own sound settings, and all\nof them step on the same beat. No audio connected = a built-in beat: connect **Load Audio** to `audio` for your music.\n"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   8,
+   "KUBA_SOUND"
+  ],
+  [
+   2,
+   1,
+   0,
+   3,
+   3,
+   "KUBA_SOUND"
+  ],
+  [
+   3,
+   2,
+   0,
+   4,
+   0,
+   "IMAGE"
+  ],
+  [
+   4,
+   2,
+   2,
+   4,
+   1,
+   "FLOAT"
+  ],
+  [
+   5,
+   1,
+   1,
+   4,
+   2,
+   "AUDIO"
+  ],
+  [
+   6,
+   4,
+   0,
+   5,
+   0,
+   "VIDEO"
+  ],
+  [
+   7,
+   3,
+   0,
+   6,
+   0,
+   "MASK"
+  ],
+  [
+   8,
+   1,
+   3,
+   7,
+   0,
+   "STRING"
+  ]
+ ],
+ "floatingLinks": null,
+ "groups": [],
+ "definitions": null,
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.7,
+   "offset": [
+    40,
+    420
+   ]
+  }
+ },
+ "version": 0.4
+}

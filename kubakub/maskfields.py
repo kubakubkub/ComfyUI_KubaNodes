@@ -283,15 +283,19 @@ def curve_values(times, curve="ramp", cycle=2.0, phase=0.0, easing="linear", dut
 TIMED = ("constant",) + CURVES                      # a node's 'curve' choice when staying put is allowed too
 
 
-def timed_values(times, curve, cycle, lo, hi, easing="linear", mono=None, sr=44100, sample=False):
+def timed_values(times, curve, cycle, lo, hi, easing="linear", mono=None, sr=44100, sample=False, heard=None):
     """A value per time for a node's 'curve' input: ([values] or None for 'constant', report lines). The curve runs
-    between lo and hi; a sound curve (sound level, beats, bars, hits) reads mono / sr (sample = the built-in beat)."""
+    between lo and hi; a sound curve (sound level, beats, bars, hits) reads mono / sr (sample = the built-in beat).
+    heard: how the sound is heard (sound.HEARD: tempo, gain, release, band, threshold, gap); None = the defaults."""
     if curve not in CURVES:
         return None, []
+    h = dict(so.HEARD, **(heard or {}))
     ctx, lines = None, []
     if needs_sound(curve):
-        ctx, lines = sound_context(mono, sr, curve, 0.0, sample)
-    values, more = curve_values(times, curve, float(cycle), 0.0, easing, lo=float(lo), hi=float(hi), ctx=ctx)
+        ctx, lines = sound_context(mono, sr, curve, float(h["bpm"]), sample, h["listen"])
+    values, more = curve_values(times, curve, float(cycle), 0.0, easing, lo=float(lo), hi=float(hi), ctx=ctx,
+                                threshold=float(h["threshold"]), gap=float(h["gap"]), listen=h["listen"],
+                                release=float(h["release"]), gain=float(h["gain"]))
     return values, lines + more
 
 

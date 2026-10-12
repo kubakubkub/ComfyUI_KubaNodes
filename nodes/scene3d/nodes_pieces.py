@@ -18,6 +18,7 @@ import torch
 from comfy_api.latest import io
 
 from . import nodes_scene3d as ns
+from ...kubakub import plan as rp
 from ...kubakub.io_types import FalloffType, PiecesType, RegionsType, SceneType, ViewerType
 from ...kubakub.scene3d import pieces as pc
 from ...kubakub.scene3d import scene_ids
@@ -74,8 +75,8 @@ class KUBA_ScenePieces(io.ComfyNode):
                                default="loose parts", optional=True,
                                tooltip="regions: one piece each = every region moves as one block (a floor, a bay, all "
                                        "windows); parts inside = only the parts in the selected regions move, each on its own."),
-                io.String.Input("selection", default="", optional=True,
-                                tooltip="Which regions (names, 'group:windows', 'tag:left', 'a, b'). Empty = all."),
+                io.String.Input("selection", display_name=rp.WHICH, default="", optional=True, placeholder=rp.WHICH_HINT,
+                                tooltip="The regions that become pieces. Empty = all. " + rp.WHICH_TIP),
             ],
             outputs=[PiecesType.Output("pieces", tooltip="The pieces that can move -> kubakub pieces transform "
                                                          "(or straight to kubakub pieces render)."),
@@ -104,10 +105,7 @@ class KUBA_ScenePieces(io.ComfyNode):
             pr = pc.part_regions(s["faceid"], lab, parts)
             wanted = None
             if (selection or "").strip():
-                from ...kubakub.director.render import select_regions
-                wanted = select_regions(regions.table, selection)
-                if not wanted:
-                    raise ValueError(f"No region matches {selection!r}.")
+                wanted = rp.pick_or_say(regions.table, selection, "kubakub scene pieces")
             labels, stats, preg = pc.pieces_from_regions(parts, pr, mesh, wanted, source.endswith("each"), keep_largest,
                                                          min_size_m, max_size_m)
             names = [str(regions.table["regions"][r].get("name", r)) for r in sorted(set(preg))[:6]]

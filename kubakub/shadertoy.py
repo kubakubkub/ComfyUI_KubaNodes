@@ -11,6 +11,9 @@ The names a shader can use:
                 kPrev(uv) (the frame before this one: trails, slit scan, datamosh; black at frame 0),
                 kBeat (1 on a beat, falling to 0 before the next), kBeats (beats so far),
                 kField(uv) and kMask(uv) (the grey ramp and the mask connected to the node), kUV,
+                kRegion(uv) (which region a place is in: 0, 1, 2 ...; -1 outside all of them), kRegionUV(uv) (the
+                place inside the region's own box, (0, 0) bottom left), kRegionEdge(uv) (0 on its edge, 1 at its
+                deepest point), kRegionRand(uv) (a number 0-1 of its own for every region), kRegions (how many),
                 kDepth (a shader writes how near this pixel is, 0 far to 1 near: the node's depth output)
     3D          distance functions and a raymarcher, added to a shader that uses their names (SDF below)
     controls    every `uniform float name; // default min max` line of the shader
@@ -31,11 +34,13 @@ MAX_CODE = 400_000                                   # characters of pasted shad
 MAX_CONTROLS = 32
 
 FLOATS = ("iTime", "iTimeDelta", "iFrameRate", "iSampleRate", "kLoop", "kSeconds", "kLevel", "kLow", "kMid", "kHigh",
-          "kBeat", "kBeats", "kAx", "kAy", "kBx", "kBy", "kVector", "kVecField", "kBend", "kDepthOut")
+          "kBeat", "kBeats", "kAx", "kAy", "kBx", "kBy", "kVector", "kVecField", "kBend", "kDepthOut", "kRegions")
 VECTOR = frozenset({"kFrom", "kTo", "kDir", "kVector"})      # a shader that reads one of these follows a drawn arrow
 SOUND = frozenset({"kLevel", "kLow", "kMid", "kHigh", "kBeat", "kBeats"})      # a shader that reads one of these listens
+REGION = frozenset({"kRegion", "kRegionUV", "kRegionEdge", "kRegionRand", "kRegions"})      # ... works on regions
+_USES = ("iMouse", "iDate", "kLoop", *sorted(SOUND), "kField", "kMask", "kPrev", "kDepth", *sorted(VECTOR), *sorted(REGION))
 _BUILTIN = set(FLOATS) | {"iResolution", "iFrame", "iMouse", "iDate", "iChannelTime", "iChannelResolution",
-                          "kFieldTex", "kPrevTex", "kClip", "u_resolution", "kFrom", "kTo", "kDir", "kDirOf", "kMixTex", "kShift", "kDepth"} | {f"iChannel{i}" for i in range(CHANNELS)}
+                          "kFieldTex", "kPrevTex", "kRegionTex", "kClip", "u_resolution", "kFrom", "kTo", "kDir", "kDirOf", "kMixTex", "kShift", "kDepth"} | {f"iChannel{i}" for i in range(CHANNELS)}
 
 HEADER = """#version 300 es
 precision highp float;
@@ -65,6 +70,8 @@ uniform float kBeat;
 uniform float kBeats;
 uniform sampler2D kFieldTex;
 uniform sampler2D kPrevTex;
+uniform sampler2D kRegionTex;                     // the regions: number + 1, the place in the region's box (x, y), edge distance
+uniform float kRegions;                           // how many regions there are (0 = none connected)
 uniform float kClip;
 uniform float kAx;                                // an arrow drawn on the picture: its start and end, 0-1, (0, 0) bottom left
 uniform float kAy;
@@ -97,6 +104,33 @@ float kField(vec2 uv) {                           // 0 at the arrow's start, 1 a
 }
 float kMask(vec2 uv) { return texture(kFieldTex, kFree ? gl_FragCoord.xy / iResolution.xy : uv).g; }
 vec4 kPrev(vec2 uv) { return texture(kPrevTex, uv); }
+vec4 kRegionAt(vec2 uv) { return texture(kRegionTex, kFree ? gl_FragCoord.xy / iResolution.xy : uv); }
+float kRegion(vec2 uv) { return floor(kRegionAt(uv).r + 0.5) - 1.0; }      // 0, 1, 2 ...; -1 outside every region
+// The place in the region's box and its edge distance. The region picture can be coarser than the frame (a fill in
+// the director): between two of its pixels the values run on along the slope to the neighbour of the same region,
+// so stripes drawn from them stay clean. At the frame's own size this is the pixel's value as it is.
+vec3 kRegionIn(vec2 uv) {
+    vec2 at = kFree ? gl_FragCoord.xy / iResolution.xy : uv;
+    ivec2 n = textureSize(kRegionTex, 0);
+    vec2 p = at * vec2(n) - 0.5;
+    ivec2 i = clamp(ivec2(floor(p + 0.5)), ivec2(0), n - 1);
+    vec4 c = texelFetch(kRegionTex, i, 0);
+    vec2 f = p - vec2(i);
+    ivec2 xa = ivec2(min(i.x + 1, n.x - 1), i.y), xb = ivec2(max(i.x - 1, 0), i.y);
+    ivec2 ya = ivec2(i.x, min(i.y + 1, n.y - 1)), yb = ivec2(i.x, max(i.y - 1, 0));
+    vec4 ax = texelFetch(kRegionTex, xa, 0), bx = texelFetch(kRegionTex, xb, 0);
+    vec4 ay = texelFetch(kRegionTex, ya, 0), by = texelFetch(kRegionTex, yb, 0);
+    vec3 dx = ax.r == c.r && xa.x != i.x ? ax.gba - c.gba : (bx.r == c.r && xb.x != i.x ? c.gba - bx.gba : vec3(0.0));
+    vec3 dy = ay.r == c.r && ya.y != i.y ? ay.gba - c.gba : (by.r == c.r && yb.y != i.y ? c.gba - by.gba : vec3(0.0));
+    return c.gba + f.x * dx + f.y * dy;
+}
+vec2 kRegionUV(vec2 uv) { return clamp(kRegionIn(uv).xy, 0.0, 1.0); }      // inside the region's box, (0, 0) bottom left
+float kRegionEdge(vec2 uv) { return clamp(kRegionIn(uv).z, 0.0, 1.0); }    // 0 on the region's edge, 1 at its deepest point
+float kRegionRand(vec2 uv) {                      // 0-1, one per region; whole numbers only, so every graphics card gives the same
+    uint h = uint(kRegion(uv) + 1.0);
+    h ^= h >> 16u; h *= 0x7feb352du; h ^= h >> 15u; h *= 0x846ca68bu; h ^= h >> 16u;
+    return float(h >> 8u) / 16777216.0;
+}
 void kStart() {                                   // red pushes sideways, green up and down; mid grey pushes nowhere
     if (kBend != 0.0) kShift = (texture(kMixTex, gl_FragCoord.xy / iResolution.xy).rg - 0.5) * 2.0 * kBend * iResolution.y;
     if (K_ARROW > 0 && kVector > 0.5) {           // a preset with an '// arrow:' line: a drawn arrow moves or turns its whole frame
@@ -274,6 +308,11 @@ class Translated:
     def depth(self) -> bool:
         """It writes how near each pixel is (kDepth): the node's depth output."""
         return "kDepth" in self.uses
+
+    @property
+    def regions(self) -> bool:
+        """It works on regions (kRegion and its kin): the node's regions input, or the sample facade's windows."""
+        return bool(self.uses & REGION)
 
     @property
     def follows(self) -> bool:
@@ -490,7 +529,7 @@ def _translate_tabs(code: str, parts: list) -> Translated:
             if src.startswith("image"):
                 channels.add(int(src[5:]))
         says.append(f"{label} reads " + (", ".join(f"iChannel{c} = {('Buffer ' + s) if len(s) == 1 else s}" for c, s in reads.items()) or "no picture"))
-        uses |= {n for n in ("iMouse", "iDate", "kLoop", "kLevel", "kLow", "kMid", "kHigh", "kBeat", "kBeats", "kField", "kMask", "kPrev", "kDepth", *VECTOR)
+        uses |= {n for n in _USES
                  if re.search(rf"\b{n}\b", used)}
         built[name] = (HEADER + picked + helpers(body) + body + (FOOTER_TOY if name == "image" else FOOTER_BUFFER), reads)
     if "kPrev" in uses:
@@ -560,7 +599,7 @@ def translate(code: str) -> Translated:
 
     used = _no_comments(body)
     channels = [i for i in range(CHANNELS) if re.search(rf"\b(?:iChannel|u_image){i}\b", used)]
-    uses = {n for n in ("iMouse", "iDate", "kLoop", "kLevel", "kLow", "kMid", "kHigh", "kBeat", "kBeats", "kField", "kMask", "kPrev", "kDepth", *VECTOR)
+    uses = {n for n in _USES
             if re.search(rf"\b{n}\b", used)}
     if turns:
         uses.add("kVector")                           # it follows a drawn arrow, with its whole frame
@@ -602,7 +641,7 @@ TYPES = (
     ("mine", "my presets", "Presets you saved yourself (adjust, then save as my preset). They are files in ComfyUI's user folder, under kubakub/shaders."),
     ("pattern", "patterns", "Moving pictures made from nothing: smoke, cells, stripes, light. They need no input; a picture on image0 goes under them (on_picture)."),
     ("space", "3d scenes", "A space you look into: forms, columns, corridors, fog. They need no input (a picture on image0 goes under them); they cost more to draw, and some give a depth."),
-    ("regions", "on your regions", "Light that follows your masks and regions: connect kubakub mask field (the sample facade without one). For projection mapping."),
+    ("regions", "on your regions", "Light that follows your masks and regions: connect your regions, or a field of kubakub mask field (the sample facade without one). For projection mapping."),
     ("look", "picture looks", "Your picture on image0, redrawn: cartoon, blueprint, dots, big pixels (the sample facade without one)."),
     ("signal", "screen and tape", "Your picture on image0 as on old video gear: a VHS tape, a tube television, a composite cable."),
     ("lens", "grade and lens", "Your picture on image0, finished: blur, colour grading, glow, and what a lens does to it (bend, swirl, mirrors). Most hold still unless you ask them to move."),

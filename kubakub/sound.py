@@ -298,3 +298,60 @@ def sample_sound(seconds=8.0, bpm=120.0, sr=44100):
             put(k * beat, clap)
         k += 1
     return np.clip(out, -1.0, 1.0)
+
+
+# --------------------------------------------------------------------------
+# the sound cable: a sound and how it is heard, set once (kubakub sound) for every node that listens
+# --------------------------------------------------------------------------
+
+HEARD = {"bpm": 0.0, "gain": 1.0, "release": 0.15, "listen": "everything", "threshold": 0.3, "gap": 0.1}
+
+
+def bundle(audio, **heard) -> dict:
+    """What travels on a 'sound' cable: {"audio": ComfyUI's AUDIO dict, and every key of HEARD}."""
+    out = {"audio": audio}
+    for k, d in HEARD.items():
+        out[k] = type(d)(heard.get(k, d))
+    return out
+
+
+def take(sound, audio=None, **own):
+    """(audio, heard, from_cable): a connected sound cable comes first, with its sound and every setting of HEARD;
+    without one the node's own audio and its own settings (`own`, the rest from HEARD). A cable's sound is cut
+    already, so a node's own 'start' does not apply to it."""
+    if sound:
+        return sound.get("audio"), {k: sound.get(k, d) for k, d in HEARD.items()}, True
+    return audio, {k: own.get(k, d) for k, d in HEARD.items()}, False
+
+
+def picture(mono, sr, beat=None, heard=None, width=640, height=200) -> np.ndarray:
+    """The sound as the nodes hear it, float32 [height, width, 3]: its loudness (after gain and release), the beats
+    as lines and the hits of the three bands as dots (bright = strong enough to count, dim = under the threshold)."""
+    import cv2
+    from .director import motion as mo
+    h = dict(HEARD, **(heard or {}))
+    img = np.full((height, width, 3), 0.063, np.float32)
+    total = len(mono) / float(sr)
+    if total <= 0:
+        return img
+    e = band_energy(mono, sr)
+    band = h["listen"] if h["listen"] in BANDS else "all"
+    ctx = {"level": mo.level_curve(mono, sr), "bands": {b: _curve(v) for b, v in e.items()}, "offset": 0.0}
+    top, bot, pad = 14, height - 44, 6
+    X = lambda t: int(round(pad + t / total * (width - 2 * pad)))      # noqa: E731
+    if beat:
+        for k, t in enumerate(mo.beat_times(beat, 0.0, total)):
+            cv2.line(img, (X(t), top), (X(t), bot), (0.33, 0.33, 0.33) if k % 4 == 0 else (0.16, 0.16, 0.16), 1)
+    pts = [(x, int(round(bot - min(1.0, max(0.0, h["gain"] * mo._level(ctx, (x - pad) / (width - 2 * pad) * total, h["release"], band)))
+                         * (bot - top)))) for x in range(pad, width - pad)]
+    cv2.polylines(img, [np.asarray(pts, np.int32)], False, (0.945, 0.541, 0.345), 1, cv2.LINE_AA)
+    rows = {"high": bot + 10, "mid": bot + 21, "low": bot + 32}
+    for b, y in rows.items():
+        last = None
+        for t, s in _hits(e[b]):
+            counts = s >= h["threshold"] and (last is None or t - last >= h["gap"] - 1e-9)
+            if counts:
+                last = t
+            cv2.circle(img, (X(t), y), 2, (0.631, 0.529, 0.718) if counts else (0.25, 0.22, 0.28), -1, cv2.LINE_AA)
+        cv2.putText(img, b, (width - 30, y + 3), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0.45, 0.45, 0.45), 1, cv2.LINE_AA)
+    return img

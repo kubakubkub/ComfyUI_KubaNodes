@@ -413,7 +413,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "# regions to svg / pdf / dxf\n\n- **outline**: every region as a filled path (straight edges stay straight, curves become Beziers). SVG: groups =\n  region groups, ids = region names (Illustrator layers, AE shape layers via import). PDF: one layer per group.\n  DXF R12: one layer per group, curves flattened.\n- **centerline**: the skeleton as single lines, ordered for short travel (plotter, laser, engraving). Connect a\n  MASK (e.g. the line output of From Illustrator via Image To Mask) instead of regions.\n- `width_mm` > 0: real millimetres (the facade here ~40 m = 40000 mm); `kerf_mm` offsets outlines for cutting.\n- `select`: which regions (`W_F1_*`, `group:Windows`, `tag:...`); empty = all. Files go to output/kuba_vector\n  unless `folder` is set; the counter never overwrites.\n"
+    "# regions to svg / pdf / dxf\n\n- **outline**: every region as a filled path (straight edges stay straight, curves become Beziers). SVG: groups =\n  region groups, ids = region names (Illustrator layers, AE shape layers via import). PDF: one layer per group.\n  DXF R12: one layer per group, curves flattened.\n- **centerline**: the skeleton as single lines, ordered for short travel (plotter, laser, engraving). Connect a\n  MASK (e.g. the line output of From Illustrator via Image To Mask) instead of regions.\n- `width_mm` > 0: real millimetres (the facade here ~40 m = 40000 mm); `kerf_mm` offsets outlines for cutting.\n- `which regions` (`W_F1_*`, `group:Windows`, `tag:...`); empty = all. Files go to output/kuba_vector\n  unless `folder` is set; the counter never overwrites.\n"
    ],
    "title": "Read me"
   }

@@ -3,6 +3,7 @@ a sound, a field and pictures as inputs (text side kubakub/shadertoy.py, picture
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import os
@@ -19,9 +20,12 @@ import folder_paths
 from comfy_api.latest import io
 
 from ...kubakub import maskfields as mf
+from ...kubakub import materials as ma
+from ...kubakub import plan as rp
 from ...kubakub import shader_render as sr
 from ...kubakub import shadertoy as st
 from ...kubakub import sound as so
+from ...kubakub.io_types import RegionsType, SoundType
 
 log = logging.getLogger("KUBA.shader")
 st.USER_DIR = os.path.join(folder_paths.get_user_directory(), "kubakub", "shaders")      # presets saved from the node
@@ -30,7 +34,7 @@ PREVIEW_PX, PREVIEW_FRAMES = 384, 240
 SLOW = 0.25                                          # seconds a frame may take before the report says how to make it faster
 MASK_FROM = ("auto", "alpha", "brightness")
 UNCONNECTED = ("auto", "noise", "sample facade", "black")
-LUMA = (0.2126, 0.7152, 0.0722)
+LUMA = ma.LUMA
 ON_PICTURE = ("screen", "add", "multiply", "overlay", "difference", "displace", "off")
 
 
@@ -81,33 +85,7 @@ def _ram_check(name, frames, w, h, per_pixel):
                          f"{free / 2 ** 30:.0f} GB are free. Lower 'seconds' or the size.")
 
 
-def lay_over(shader, picture, how="screen", amount=1.0, mask=None):
-    """A shader that does not read the picture, laid over it: float32 [h, w, 3] each -> the shader's array, changed in
-    place. amount 0 = the picture alone, 1 = all of the blend; mask [h, w]: the picture stays as it is outside it.
-    multiply = the shader as light on the picture; displace = the shader's light and dark bend the picture like glass."""
-    p, s = picture[..., :3], shader
-    if how == "add":
-        out = np.minimum(p + s, 1.0)
-    elif how == "multiply":
-        out = p * s
-    elif how == "overlay":
-        out = np.where(p < 0.5, 2.0 * p * s, 1.0 - 2.0 * (1.0 - p) * (1.0 - s))
-    elif how == "difference":
-        out = np.abs(p - s)
-    elif how == "displace":
-        import cv2
-        h, w = s.shape[:2]
-        lum = cv2.GaussianBlur((s * np.asarray(LUMA, np.float32)).sum(-1), (0, 0), max(1.0, w / 160.0))
-        reach = 0.25 * w                              # soft slopes of light push the picture a few pixels, like glass
-        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-        out = cv2.remap(np.ascontiguousarray(p), xx + cv2.Sobel(lum, cv2.CV_32F, 1, 0, ksize=3) * reach / 8.0,
-                        yy + cv2.Sobel(lum, cv2.CV_32F, 0, 1, ksize=3) * reach / 8.0, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-    else:                                             # screen
-        out = 1.0 - (1.0 - p) * (1.0 - s)
-    k = float(min(max(amount, 0.0), 1.0))
-    k = k * mask[..., None] if mask is not None else k
-    shader[...] = p + (out - p) * k
-    return shader
+lay_over = ma.blend                                  # a shader that does not read the picture, laid over it
 
 
 def _luma_masks(images):
@@ -138,7 +116,8 @@ class KUBA_Shader(io.ComfyNode):
             description=(
                 "Moving pictures and masks drawn by a shader: pick a preset, or paste the code of a Shadertoy (the "
                 "Image tab) or your own GLSL fragment shader. The node gives it the time, a loop, the sound (level, "
-                "low / mid / high, beats), a field and a mask from kubakub mask field, and up to four pictures. Every "
+                "low / mid / high, beats), a field and a mask from kubakub mask field, your regions, and up to four "
+                "pictures. Every "
                 "'uniform float name; // default min max' line of the shader is a control you set in 'controls'. "
                 "A shader can be a 3D scene: distance functions and a raymarcher are built in, and such a "
                 "shader gives its depth. Nothing connected runs a preset. No AI model."),
@@ -237,6 +216,24 @@ class KUBA_Shader(io.ComfyNode):
                                        "and tape, picture with depth) do not use this."),
                 io.Float.Input("picture_amount", default=1.0, min=0.0, max=1.0, step=0.05, optional=True, advanced=True,
                                tooltip="on_picture: how much of the shader is laid over the picture. 0 = the picture alone."),
+                RegionsType.Input("regions", optional=True,
+                                  tooltip="Your regions (from kubakub regions from masks, from illustrator, from id maps "
+                                          "...). The presets 'on your regions' treat every region on its own: its own "
+                                          "colour, its own pace, a pattern that fits its box. Every other shader shows "
+                                          "on the regions only (they are its mask when no mask is connected) and runs "
+                                          "from each region's edge to its middle when it follows a field and none is "
+                                          "connected. Your own code reads kRegion, kRegionUV, kRegionEdge, kRegionRand "
+                                          "and kRegions. With image0 connected too, the picture stays as it is outside "
+                                          "the regions: that picture is a material for kubakub region sampler ('material') "
+                                          "and kubakub region video sampler."),
+                io.String.Input("only", display_name=rp.WHICH, default="", optional=True, placeholder=rp.WHICH_HINT,
+                                tooltip="With regions connected: the shader draws in these regions only. Empty = all "
+                                        "regions. For another shader on other regions, put a second kubakub shader "
+                                        "behind this one (its images into image0 of the next). " + rp.WHICH_TIP),
+                SoundType.Input("sound", optional=True,
+                                tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release, band, threshold, gap), set "
+                                        "once for every node that listens, so all of them step on the same beat. Connected, it comes before '"
+                                        "audio' and before this node's own sound settings."),
             ],
             outputs=[
                 io.Image.Output("images", tooltip="One picture per frame."),
@@ -267,8 +264,11 @@ class KUBA_Shader(io.ComfyNode):
     def execute(cls, preset, code="", controls="", width=0, height=0, fps=25.0, seconds=0.0, speed=1.0, loops=1, loop=True,
                 image0=None, image1=None, image2=None, image3=None, mask=None, field=None, audio=None,
                 time_offset=0.0, loop_fade=1.0, mask_from="auto", clip=True, bpm=0.0, gain=1.0,
-                release=0.15, unconnected="auto", vector="", on_picture="screen", picture_amount=1.0) -> io.NodeOutput:
+                release=0.15, unconnected="auto", vector="", on_picture="screen", picture_amount=1.0,
+                regions=None, only="", sound=None) -> io.NodeOutput:
         notes = []
+        audio, heard, cabled = so.take(sound, audio, bpm=bpm, gain=gain, release=release)
+        bpm, gain, release = heard["bpm"], heard["gain"], heard["release"]
         try:
             arrow = mf.parse_vector(vector)
         except ValueError as e:
@@ -289,9 +289,33 @@ class KUBA_Shader(io.ComfyNode):
         ms = ms[None] if ms is not None and ms.ndim == 2 else ms
         fs = fs[None] if fs is not None and fs.ndim == 2 else fs
         first = next(iter(pics.values()), None)
-        size_of = first if first is not None else (ms if ms is not None else fs)
+        lab = regions.labels[0].cpu().numpy() if regions is not None and regions.labels.numel() else None
+        if (only or "").strip() not in ("", "*"):
+            if lab is None:
+                notes.append(f"{rp.WHICH}: no regions are connected, so there is nothing to choose from (connect 'regions')")
+            else:
+                ids = rp.pick_or_say(regions.table, only, NAME)
+                lab = np.where(np.isin(lab, ids), lab, -1)
+                notes.append(f"{rp.WHICH}: the shader draws in {len(ids)} of your regions")
+        size_of = first if first is not None else (ms if ms is not None else (fs if fs is not None else (lab[None] if lab is not None else None)))
         w = int(width) or (size_of.shape[2] if size_of is not None else 1280)
         h = int(height) or (size_of.shape[1] if size_of is not None else 720)
+        if lab is None and t.regions:
+            lab = mf.sample_regions(w, h)[0]
+            notes.append("the shader works on regions and none are connected: the windows of the sample facade are used "
+                         "(connect yours to 'regions')")
+        elif lab is not None:
+            if lab.shape != (h, w):
+                import cv2
+                lab = cv2.resize(lab.astype(np.int32), (w, h), interpolation=cv2.INTER_NEAREST)
+            if ms is None:                            # whatever is connected does something: the regions are where it shows
+                ms = (lab >= 0).astype(np.float32)[None]
+                notes.append("regions: the shader shows on your regions (connect a mask to choose another place)"
+                             + ("" if t.regions else "; the presets 'on your regions' treat each one on its own"))
+            if fs is None and not arrow and "kField" in t.uses:
+                fs = mf.field(lab, int(lab.max()) + 1, "edge distance", "each region")[0][None]
+                notes.append("regions: the shader runs from each region's edge to its middle (connect a field of kubakub "
+                             "mask field for another path)")
 
         wave, sr_hz, mono = _sound_in(audio)
         sample_sound = False
@@ -385,6 +409,8 @@ class KUBA_Shader(io.ComfyNode):
                                                  float(release), float(gain))
             for i, d in enumerate(per_frame):
                 d.update({k: v[i % frames] for k, v in heard.items()})
+        if lab is not None:
+            textures[sr.REGION_UNIT], values["kRegions"] = sr.region_source(lab)
         static = {"iFrameRate": fps, "iSampleRate": float(sr_hz or 44100), "kSeconds": secs, "kDepthOut": 1.0 if t.depth else 0.0,
                   "kClip": 1.0 if clip and ms is not None else 0.0, **sr.vector_values(arrow, as_field=fs is None), **values}
         if arrow:
@@ -550,6 +576,8 @@ def preset_tags(name) -> list:
         tags.append("a depth pass" if "depth pass" in st.about(text) else "a normal pass")
     if st.sample_field(text) or "kField" in t.uses:
         tags.append("a field")
+    if t.regions:
+        tags.append("your regions")
     if t.depth:
         tags.append("gives a depth")
     if _builds_up(t):
@@ -562,6 +590,12 @@ PREVIEW, PREVIEW_FRAMES, PREVIEW_FPS = (320, 180), 36, 12
 _SHEET = {}
 _PREVIEWS = {}
 _HEARD = {"kLoop": 0.3, "iTime": 1.2, "kLevel": 0.8, "kLow": 0.9, "kMid": 0.5, "kHigh": 0.7, "kBeat": 0.6, "kBeats": 3.0}
+
+
+@functools.lru_cache(maxsize=4)
+def _sample_region_source(w, h):
+    """The windows of the sample facade as a shader's regions, at one size (the pickers ask again and again)."""
+    return sr.region_source(mf.sample_regions(w, h)[0])
 
 
 def _preset_setup(name, w, h, facade, text=None, values=None):
@@ -578,6 +612,9 @@ def _preset_setup(name, w, h, facade, text=None, values=None):
         lab, n_regions, _ = mf.sample_regions()
         pair = np.stack([mf.field(lab, n_regions)[0], np.ones(lab.shape, np.float32)], -1)
         pictures = {**(pictures or {}), sr.FIELD_UNIT: lambda k, pair=pair: ("field", pair)}
+    if t.regions:
+        source, static["kRegions"] = _sample_region_source(w, h)
+        pictures = {**(pictures or {}), sr.REGION_UNIT: source}
     return t, static, pictures
 
 

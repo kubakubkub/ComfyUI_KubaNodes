@@ -519,7 +519,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "## starter 02 \u00b7 one prompt per region\n\n**You need:** Flux 2 Klein 4B: `flux-2-klein-4b.safetensors` (diffusion_models), `qwen_3_4b.safetensors`\n(text_encoders), `flux2-vae.safetensors` (vae) - about 8 GB VRAM. Other names: pick them in nodes 10-12.\n\n**Do:** Queue. The sampler repaints only the first floor windows (`only = W_F1_*`) - about half a minute.\nQueue again after changing one prompt: only the regions whose prompt changed are sampled again (region cache).\n\n**Then try:** empty `only` for the whole facade (a few minutes); `[default] denoise` lower = closer to the\noriginal; your own matrix and rules as in starter 01.\n"
+    "## starter 02 \u00b7 one prompt per region\n\n**You need:** Flux 2 Klein 4B: `flux-2-klein-4b.safetensors` (diffusion_models), `qwen_3_4b.safetensors`\n(text_encoders), `flux2-vae.safetensors` (vae) - about 8 GB VRAM. Other names: pick them in nodes 10-12.\n\n**Do:** Queue. The sampler repaints only the first floor windows (`which regions` = `W_F1_*`) - about half a minute.\nQueue again after changing one prompt: only the regions whose prompt changed are sampled again (region cache).\n\n**Then try:** empty `which regions` for the whole facade (a few minutes); `[default] denoise` lower = closer to the\noriginal; your own matrix and rules as in starter 01.\n"
    ],
    "title": "read me"
   }

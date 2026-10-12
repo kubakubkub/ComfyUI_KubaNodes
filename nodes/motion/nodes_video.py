@@ -12,6 +12,10 @@ by frame. The LTX steps call core's own node implementations.
 loop: the last latent frame is held like the first, so every clip returns to the still.
 audio: a sound becomes each clip's audio latent, held as it is (noise mask 0), so the
 picture is sampled together with it (for the audio-reactive LoRA).
+material: a clip on the 'material' input (a kubakub shader with the regions connected) moves the
+animated regions: its frames are laid into each clip's crop where the regions are (kubakub/materials.py),
+and the clip is sampled from the noise level material_repaint instead of from pure noise, so LTX keeps
+the movement and paints the look (the way of kubakub motion guide).
 The clips run in phases (VAE encode all, enhance all, text encode all, stage 1 all, upsample + stage 2 all, decode
 all), so each model is loaded once per run, not once per clip; rendered clips are cached (clip_cache.py), so an
 unchanged clip is not rendered again. The models are lazy inputs: without an animated region (or while the
@@ -33,6 +37,8 @@ import torch
 from comfy_api.latest import io, ui
 
 from ...kubakub import clip_cache as cc
+from ...kubakub import materials as ma
+from ...kubakub import plan as rp
 from ...kubakub import save_paths as sp
 from ...kubakub import video as vd
 from ...kubakub.io_types import PlanType
@@ -46,6 +52,10 @@ SIGMAS_2 = "0.85, 0.7250, 0.4219, 0.0"                                          
 
 def _sigmas(text):
     return torch.tensor([float(v) for v in text.replace(",", " ").split()], dtype=torch.float32)
+
+
+def _text(sigmas) -> str:
+    return ", ".join(f"{float(s):g}" for s in sigmas)
 
 
 def _ltx():
@@ -190,7 +200,9 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 "Regions sharing video_prompt, t_start / t_end and motion form one clip; each clip runs on its "
                 "crop (LTX grid), the rest of the crop is held by the noise mask, the first frame is the still, "
                 "and the result is pasted back into the untouched still frame by frame, so the facade stays "
-                "pixel exact. Plan keys: animate, video_prompt, t_start, t_end, motion."),
+                "pixel exact. Plan keys: animate, video_prompt, t_start, t_end, motion. With a clip on "
+                "'material' (a kubakub shader) the animated regions move as it moves, and the model repaints "
+                "them (plan: material_repaint)."),
             inputs=[
                 io.Model.Input("model", lazy=True, tooltip="LTX 2.5 22B distilled (UNETLoader)."),
                 io.Clip.Input("clip", lazy=True, tooltip="Gemma text encoder for LTX (CLIPLoader, type ltxv)."),
@@ -220,9 +232,9 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 io.String.Input("negative", advanced=True, multiline=True, optional=True,
                                 default="camera movement, zoom, pan, shaky, morphing facade, blurry, low quality, text, watermark",
                                 tooltip="What the clips should avoid (one negative prompt for all clips)."),
-                io.String.Input("only", advanced=True, default="", optional=True, placeholder="W_F1_*",
-                                tooltip="Only these animated regions, in plan syntax: names with wildcards "
-                                        "('W_F1_*'), 'group:Windows', 'tag:front', comma = or; empty = all."),
+                io.String.Input("only", display_name=rp.WHICH, advanced=True, default="", optional=True,
+                                placeholder=rp.WHICH_HINT,
+                                tooltip="Only these animated regions. Empty = all. " + rp.WHICH_TIP),
                 io.Float.Input("output_scale", default=0.5, min=0.05, max=1.0, step=0.05,
                                tooltip="Size of the IMAGE output (a 4K batch of 121 frames needs 12 GB RAM); use "
                                        "save_folder for the full-size frames. Ignored when background is connected "
@@ -253,6 +265,13 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                                tooltip="A sound the clips are sampled with (held as it is). With an audio-reactive LoRA on "
                                        "the model and its trigger words in video_prompt the regions move with the sound. "
                                        "The frames carry no sound: add the same audio in Create Video."),
+                io.Image.Input("material", optional=True,
+                               tooltip="A clip the animated regions follow, e.g. the images of a kubakub shader with "
+                                       "the same regions connected: each region moves as the clip moves there, and the "
+                                       "model repaints it in its own look (plan: material_repaint, 0.91; about 0.8 "
+                                       "holds small regions closer to the clip). Frame by frame at this node's fps; a "
+                                       "shorter clip holds its last frame. Where the clip is the same as the picture "
+                                       "the model moves the region freely."),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="The video at output_scale."),
@@ -284,7 +303,7 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
     def execute(cls, model, clip, vae, audio_vae, plan, frames, fps, seed, stage1_mp, context_px,
                 feather_px, output_scale, image=None, upscale_model=None, negative="", only="", save_folder="",
                 filename_prefix="region_video", stage2_max_mp=0.6, background=None, enhance_prompt=False,
-                enhance_clip=None, loop=False, audio=None) -> io.NodeOutput:
+                enhance_clip=None, loop=False, audio=None, material=None) -> io.NodeOutput:
         ops = _OPS
         t0 = time.perf_counter()
         if image is None and background is None:
@@ -303,6 +322,11 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
             still = image[0, ..., :3].cpu().float().numpy()
             if still.shape[:2] != (H, W):
                 still = cv2.resize(still, (W, H), interpolation=cv2.INTER_AREA)
+        mat = None
+        if material is not None and len(material):   # the clip the animated regions follow, at the frames' size
+            mat = material[..., :3].cpu().float().numpy()
+            if mat.shape[1:3] != (H, W):
+                mat = np.stack([cv2.resize(m, (W, H), interpolation=cv2.INTER_AREA) for m in mat])
         groups = vd.clip_groups(plan.plan["regions"], only)
         if upscale_model is not None and stage1_mp * 4 > stage2_max_mp:
             stage1_mp = stage2_max_mp / 4              # the second stage is 2x per side: keep it inside the cap
@@ -313,7 +337,7 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
         rows, jobs = [], []
         if not groups and (only or "").strip() and vd.clip_groups(plan.plan["regions"]):
             names = [str(e.get("name", "")) for e in plan.plan["regions"] if e.get("animate")]
-            rows.append(f"only = '{only.strip()}' matches no animated region: frames passed through, no LTX model "
+            rows.append(f"{rp.WHICH} = '{only.strip()}' matches no animated region: frames passed through, no LTX model "
                         f"loaded (animated regions: {', '.join(names[:8])}{', ...' if len(names) > 8 else ''})")
         elif not groups:
             rows.append("no animated regions: frames passed through (set 'animate = on' and a video_prompt in the "
@@ -350,13 +374,35 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 if seg.shape[-1] < an:
                     seg = torch.nn.functional.pad(seg, (0, an - seg.shape[-1]))
                 sound = (seg, sr)
+            sig1, sig2, said, guided = SIGMAS_1, SIGMAS_2, [], False
+            if mat is not None:                        # the material clip moves the regions: it is laid into the crop
+                idx_m = [min(i0 + k, len(mat) - 1) for k in range(pixels.shape[0])]
+                held = {}                              # a still material is cut and scaled once
+                for k in idx_m:
+                    if k not in held:
+                        held[k] = cv2.resize(mat[k, y0:y1, x0:x1], (w1, h1), interpolation=cv2.INTER_AREA)
+                small = cv2.resize(region_crop.astype(np.uint8), (w1, h1), interpolation=cv2.INTER_NEAREST) > 0
+                guide = ma.guide(pixels.numpy(), [held[k] for k in idx_m], small,
+                                 vd.frames_in_range(pixels.shape[0], fps, ts, te))
+                if 1 < len(mat) < i0 + pixels.shape[0]:
+                    said.append(f"it has {len(mat)} frames, the clip runs to frame {i0 + pixels.shape[0]}: its last frame is held")
+                if guide is None:
+                    said = [f"clip {gi + 1} material: it does not differ from the picture on these regions, so the model moves them freely"]
+                else:
+                    guided, pixels = True, torch.from_numpy(guide)
+                    sig1 = _text(vd.guide_sigmas(g["repaint"]))
+                    sig2 = _text(vd.guide_sigmas(min(float(g["repaint"]), vd.GUIDE_SIGMAS_2[0]), vd.GUIDE_SIGMAS_2))
+                    said = [f"clip {gi + 1} material: {m}" for m in said] + [
+                        f"clip {gi + 1} material: the regions move as the material clip moves, repainted from noise "
+                        f"level {float(g['repaint']):g} (plan: material_repaint)"]
             key = _digest("ltx", pixels, region_crop, g["prompt"], negative or "", bool(enhance_prompt), int(seed) + gi,
-                          float(fps), n, float(ts), float(te), float(g["motion"]), SIGMAS_1,
-                          SIGMAS_2 if upscale_model is not None else None, loop,
+                          float(fps), n, float(ts), float(te), float(g["motion"]), sig1,
+                          sig2 if upscale_model is not None else None, loop,
                           *(sound if sound is not None else ()))
             job = {"gi": gi, "g": g, "box": (x0, y0, x1, y1), "mask": mask, "region_crop": region_crop, "i0": i0,
                    "n": n, "ts": ts, "te": te, "Fc": pixels.shape[0], "key": key, "hit": _CLIP_CACHE.get(key, objs),
-                   "text": g["prompt"], "enhanced": None, "rows": [], "sound": sound}
+                   "text": g["prompt"], "enhanced": None, "rows": list(said), "sound": sound, "sig1": sig1, "sig2": sig2,
+                   "guided": guided}
             rows.append(job["rows"])
             if enhance_prompt and enhance_clip is None:
                 job["rows"].append(f"clip {gi + 1}: enhance_prompt needs enhance_clip (a text encoder that can write), plan prompt used")
@@ -395,13 +441,13 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
             latent, Fc = j.pop("latent"), j["Fc"]
             lat_h, lat_w = latent["samples"].shape[3:]
             latent["noise_mask"] = torch.from_numpy(vd.latent_mask(j["region_crop"], lat_w, lat_h, Fc, fps, j["ts"], j["te"],
-                                                                   j["g"]["motion"], loop=loop))
+                                                                   j["g"]["motion"], loop=loop, hold_first=not j["guided"]))
             if j["sound"] is not None:                 # the sound, held: both stages get this same latent
                 clip_audio = j["sound_latent"] = ops.sound_audio(audio_vae, *j.pop("sound"))
             else:
                 clip_audio = ops.empty_audio(audio_vae, Fc, fps)
             j["guider"] = ops.guider(model, conds[j["text"]], conds[negative or ""], fps)
-            j["video"], j["audio"] = ops.sample(model, j["guider"], int(seed) + j["gi"], SIGMAS_1, latent, clip_audio)
+            j["video"], j["audio"] = ops.sample(model, j["guider"], int(seed) + j["gi"], j["sig1"], latent, clip_audio)
             del latent
             ops.free()                                 # stage 1 activations out before the next clip / stage 2
             j["t"] += time.perf_counter() - tg
@@ -412,13 +458,13 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 video = ops.upsample(j["video"], upscale_model, vae)
                 h2, w2 = video["samples"].shape[3:]
                 video["noise_mask"] = torch.from_numpy(vd.latent_mask(j["region_crop"], w2, h2, j["Fc"], fps, j["ts"], j["te"],
-                                                                      j["g"]["motion"], loop=loop))
+                                                                      j["g"]["motion"], loop=loop, hold_first=not j["guided"]))
                 j["video"] = video
                 j["t"] += time.perf_counter() - tg
             for j in todo:
                 tg = time.perf_counter()
                 stage1_audio = j.pop("audio")
-                j["video"], _ = ops.sample(model, j["guider"], int(seed) + 1000 + j["gi"], SIGMAS_2, j["video"],
+                j["video"], _ = ops.sample(model, j["guider"], int(seed) + 1000 + j["gi"], j["sig2"], j["video"],
                                            j.pop("sound_latent", None) or stage1_audio)
                 ops.free()
                 j["t"] += time.perf_counter() - tg

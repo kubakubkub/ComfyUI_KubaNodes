@@ -95,7 +95,7 @@ check("shader uniforms: y counts from the bottom", sr.vector_values((0.2, 0.9, 0
       and sr.vector_values(None) == {} and sr.vector_values((0, 0, 1, 1), as_field=False)["kVecField"] == 0.0)
 t = st.translate("void mainImage(out vec4 c, in vec2 f){ c = vec4(kFrom, kDir.y, 1.0); }")
 check("shader text: a shader that reads the arrow or the field follows it", t.follows and st.translate(st.preset_code("scan band")).follows
-      and st.translate(st.preset_code("stripes")).follows and not st.translate(st.preset_code("plasma")).follows)
+      and st.translate(st.preset_code("stripes")).follows and not st.translate(st.preset_code("grade")).follows)
 try:
     PROBE = "void mainImage(out vec4 c, in vec2 f){ c = vec4(kField(kUV), kFrom.x, kDir.y * 0.5 + 0.5, 1.0); }"
     i1 = ns.KUBA_Shader.execute("rings", code=PROBE, width=200, height=100, seconds=0.04, loop=False, vector="0.25, 0.5, 0.75, 0.5").result
@@ -113,7 +113,7 @@ try:
     own = ns.KUBA_Shader.execute("rings", code=PROBE, width=200, height=100, seconds=0.04, loop=False, field=ramp, vector="0.25, 0.5, 0.75, 0.5").result[0][0]
     check("shader node: a connected field comes first, the arrow still gives its start and direction",
           float(own[50, 20, 0]) > 0.85 and abs(float(own[3, 3, 1]) - 0.25) < 0.01)
-    plain = ns.KUBA_Shader.execute("plasma", width=64, height=32, seconds=0.04, vector="0.25, 0.5, 0.75, 0.5").result[5]
+    plain = ns.KUBA_Shader.execute("grade", width=64, height=32, seconds=0.04, vector="0.25, 0.5, 0.75, 0.5").result[5]
     check("shader node: a shader without a direction says that it does not use the arrow", "does not use it" in plain, plain)
     a0 = ns.KUBA_Shader.execute("stripes", width=120, height=120, seconds=0.04, controls="angle = 0, stripes = 4").result[0][0]
     a1 = ns.KUBA_Shader.execute("stripes", width=120, height=120, seconds=0.04, controls="angle = 0, stripes = 4", vector="0.5, 0.9, 0.5, 0.1").result[0][0]

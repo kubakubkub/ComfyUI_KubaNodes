@@ -283,7 +283,8 @@ if gpu:
             continue
         if tr.channels:                                                                   # these work on a picture
             pictures.append(n)
-        a, b, c = run(st.preset_code(n), [{"kLoop": 0.0, "iTime": 0.0}, {"kLoop": 1.0, "iTime": 4.0}, {"kLoop": 0.37, "iTime": 1.5}])
+        tex = {sr.REGION_UNIT: ns._sample_region_source(160, 90)[0]} if tr.regions else None      # the sample facade's windows
+        a, b, c = run(st.preset_code(n), [{"kLoop": 0.0, "iTime": 0.0}, {"kLoop": 1.0, "iTime": 4.0}, {"kLoop": 0.37, "iTime": 1.5}], textures=tex)
         lit = n in pictures or float(max(a.max(), c.max())) > 0.2
         loops = n == "mapping grid" or float(np.abs(a - b).max()) < 3e-3                  # its scan line ends on the other side
         moves = n in pictures or n == "sound bars" or float(np.abs(a - c).max()) > 0.02   # sound bars move with a sound
@@ -292,6 +293,71 @@ if gpu:
     check(f"all {len(names)} presets draw, close their loop and move", len(names) >= 48 and not worst, "; ".join(worst))
     check("which presets work on a picture, which on their own last frame", {"contour lines", "wireframe", "point cloud", "eight bit", "characters"} <= set(pictures)
           and feedback == ["slit scan", "datamosh", "trails", "growth"] and ns.node_only() == feedback, f"{pictures} {feedback}")
+    # ---- regions: a shader knows which region a place is in, where in its box, and how deep
+    _lab = np.full((40, 80), -1, np.int32)
+    _lab[4:24, 8:28] = 0                                  # a square top left
+    _lab[10:38, 50:74] = 1                                # a taller box to the right
+    _rp = sr.region_picture(_lab)
+    check("region picture: number + 1, the place in the box from its bottom left, the edge distance",
+          _rp.shape == (40, 80, 4) and _rp[0, 0, 0] == 0 and _rp[5, 9, 0] == 1 and _rp[20, 60, 0] == 2
+          and _rp[23, 8, 1] == 0.0 and _rp[23, 8, 2] == 0.0 and _rp[4, 27, 1] == 1.0 and _rp[4, 27, 2] == 1.0
+          and _rp[4, 8, 3] == 0.0 and abs(float(_rp[..., 3].max()) - 1.0) < 1e-6 and float(_rp[_lab < 0].max()) == 0.0)
+    _src, _n = sr.region_source(_lab)
+    reg = "void mainImage(out vec4 c, in vec2 f){ c = vec4((kRegion(kUV) + 1.0) / 4.0, kRegionUV(kUV), 1.0); }"
+    px = run(reg, [{}], 80, 40, static={"kRegions": _n}, textures={sr.REGION_UNIT: _src})[0]
+    check("regions in a shader: the number is exact at every pixel, the box runs from bottom left to top right",
+          _n == 2.0 and np.array_equal(np.round(px[..., 0] * 4).astype(int) - 1, _lab) and px[23, 8, 1] < 0.01 and px[23, 8, 2] < 0.01
+          and px[4, 27, 1] > 0.99 and px[4, 27, 2] > 0.99, str(px[5, 9]))
+    px = run("void mainImage(out vec4 c, in vec2 f){ c = vec4(kRegion(kUV) + 1.0, kRegionEdge(kUV), kRegions, 1.0); }", [{}], 80, 40)[0]
+    _small = _rp[::2, ::2].copy()                         # a region picture at half the frame's size (a fill in the director)
+    _small[..., 1:3] = sr.region_picture(_lab[::2, ::2])[..., 1:3]
+    fine = "void mainImage(out vec4 c, in vec2 f){ c = vec4(kRegionUV(kUV), kRegionEdge(kUV), 1.0); }"
+    px_s = run(fine, [{}], 80, 40, textures={sr.REGION_UNIT: lambda i: ("s", sr.region_picture(_lab[::2, ::2]))})[0]
+    px_f = run(fine, [{}], 80, 40, textures={sr.REGION_UNIT: _src})[0]
+    _row = px_s[14, 10:26, 0]
+    check("regions: a coarser region picture is read smoothly (no steps between its pixels), a full one as it is",
+          float(np.abs(np.diff(_row)).min()) > 1e-3 and float(np.abs(np.diff(_row, 2)).max()) < 5e-3 and np.allclose(px_f[..., 1], np.flipud(np.flipud(_rp[..., 2])), atol=1e-5), f"{np.round(_row, 3)}")
+    check("no regions connected: every place is outside (-1), and a render before does not leak in", float(np.abs(px[..., :3]).max()) == 0.0)
+    rand = "void mainImage(out vec4 c, in vec2 f){ c = vec4(vec3(kRegionRand(kUV)), 1.0); }"
+    px = run(rand, [{}], 80, 40, textures={sr.REGION_UNIT: _src})[0]
+    check("every region has a number of its own, the same all over it", float(px[4:24, 8:28, 0].std()) < 1e-6 and float(px[10:38, 50:74, 0].std()) < 1e-6
+          and abs(float(px[5, 9, 0]) - float(px[20, 60, 0])) > 0.05)
+    check("which presets work on regions", [n for n in names if st.translate(st.preset_code(n)).regions] == ["region colours", "region fill", "region weave"]
+          and ns.preset_tags("region fill") == ["your regions"])
+    from kubakub.types import Regions  # noqa: E402
+    _regs = Regions.from_numpy(_lab, {"regions": [{"region_id": 0}, {"region_id": 1}]})
+    _rr = ns.KUBA_Shader.execute("region colours", fps=5.0, seconds=0.4, regions=_regs).result
+    check("node: regions set the size, the shader shows on them only, each in its own colour", _rr[0].shape == (2, 40, 80, 3)
+          and float(_rr[0][0][torch.from_numpy(_lab < 0)].max()) == 0.0 and float(_rr[0][0, 12, 16].max()) > 0.1
+          and float((_rr[0][0, 12, 16] - _rr[0][0, 20, 60]).abs().max()) > 0.02 and "sample facade" not in _rr[5], _rr[5])
+    _named = Regions.from_numpy(_lab, {"regions": [{"region_id": 0, "name": "W_1", "group_id": "Windows"}, {"region_id": 1, "name": "door", "group_id": "Door"}]})
+    _ro = ns.KUBA_Shader.execute("region colours", fps=5.0, seconds=0.2, regions=_named, only="W_*").result
+    check("node, only: the shader draws in the chosen regions, the others are outside",
+          float(_ro[0][0][torch.from_numpy(_lab == 0)].max()) > 0.1 and float(_ro[0][0][torch.from_numpy(_lab != 0)].max()) == 0.0
+          and "1 of your regions" in _ro[5], _ro[5])
+    _under = torch.full((1, 40, 80, 3), 0.25)
+    _rp2 = ns.KUBA_Shader.execute("region colours", fps=5.0, seconds=0.2, regions=_named, only="W_*", image0=_under, on_picture="normal").result
+    check("node, only + a picture: the picture stays as it is outside the chosen regions (a material for the samplers)",
+          torch.allclose(_rp2[0][0][torch.from_numpy(_lab != 0)], torch.tensor(0.25)) and float((_rp2[0][0][torch.from_numpy(_lab == 0)] - 0.25).abs().max()) > 0.05)
+    try:
+        ns.KUBA_Shader.execute("region colours", fps=5.0, seconds=0.2, regions=_named, only="nothing_*")
+        check("node, only: a selector that matches nothing is an error", False)
+    except ValueError as e:
+        check("node, only: a selector that matches nothing names the regions there are", "W_1" in str(e) and "door" in str(e), str(e))
+    _rn = ns.KUBA_Shader.execute("warped noise", fps=5.0, seconds=0.2, regions=_regs).result
+    check("node: a shader that knows no regions shows on them (they are its mask), and the report says so",
+          float(_rn[0][0][torch.from_numpy(_lab < 0)].max()) == 0.0 and float(_rn[0][0][torch.from_numpy(_lab >= 0)].max()) > 0.1
+          and "shows on your regions" in _rn[5], _rn[5])
+    _rc = ns.KUBA_Shader.execute("region contours", fps=5.0, seconds=0.2, regions=_regs).result
+    check("node: a shader that follows a field runs from each region's edge to its middle", "edge to its middle" in _rc[5]
+          and float(_rc[0][0][torch.from_numpy(_lab >= 0)].max()) > 0.2, _rc[5])
+    _rs = ns.KUBA_Shader.execute("region fill", width=160, height=90, fps=5.0, seconds=0.4).result
+    check("node: a region preset with nothing connected plays on the sample facade's windows", "sample facade" in _rs[5] and float(_rs[0].max()) > 0.2
+          and float(_rs[0][0, 0, 0].max()) == 0.0, _rs[5])
+    _big = ns.KUBA_Shader.execute("region colours", width=160, height=80, fps=5.0, seconds=0.2, regions=_regs).result
+    check("node: regions of another size are fitted to the picture", _big[0].shape == (1, 80, 160, 3) and float(_big[0][0, 24, 32].max()) > 0.1
+          and float(_big[0][0, 2, 2].max()) == 0.0)
+
     # ---- a picture under a shader that does not read it
     _pic = torch.zeros((1, 48, 64, 3)); _pic[..., 0] = 0.5; _pic[:, :, 32:, 1] = 1.0
     _run = lambda **kw: ns.KUBA_Shader.execute("stripes", width=64, height=48, fps=5.0, seconds=0.4, **kw).result      # noqa: E731
@@ -628,6 +694,26 @@ if gpu:
           and float(f_c[25, 40, 1]) == 0.0 and float(f_c[25, 40, 0]) == 0.0 and float(f_c[5, 17, 1]) == 0.0, f"{f_c[25, 17]} {f_c[25, 62]} {f_c[25, 40]}")
     turned = rd.shader_field(dict(Lr, rotation=90.0), two_r, (160, 90))
     check("field: the regions follow a turned layer into its box", float(turned[..., 1].sum()) > 0 and not np.array_equal(turned[..., 1], f_c[..., 1]))
+    # ---- a fill's pieces are the shader's regions (kRegion and its kin)
+    lab_p, n_p, in_p = rd.shader_pieces(Lr, two_r, (160, 90))
+    check("pieces: the regions a layer is clipped to, numbered in reading order", n_p == 2 and int(lab_p[25, 17]) == 0 and int(lab_p[25, 62]) == 1
+          and int(lab_p[25, 40]) == -1 and np.array_equal(in_p, lab_p >= 0) and rd.shader_pieces(Lr)[1] == 1, f"{n_p} {lab_p[25, 17]} {lab_p[25, 62]}")
+    low_first = np.zeros((90, 160), bool)
+    low_first[50:60, 45:70] = True                          # the left piece starts lower than the right one
+    low_first[30:60, 90:115] = True
+    lab_q = rd.shader_pieces(Lr, low_first, (160, 90))[0]
+    check("pieces: the one whose first pixel comes first in reading order is number 0", int(lab_q[12, 62]) == 0 and int(lab_q[35, 17]) == 1)
+    reg_probe = "void mainImage(out vec4 c, in vec2 f){ c = vec4((kRegion(kUV) + 1.0) / 4.0, kRegionUV(kUV).x, kRegions / 4.0, 1.0); }"
+    reg_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(type="rect", code=reg_probe)), doc["layers"][1]])
+    irg = rd.render(rd.animate(reg_doc, 0.0), base, {}, image_only=True)["image"]
+    check("director: a fill that reads regions gets its pieces; an unclipped shape is one region, its box the shape's",
+          abs(float(irg[45, 80, 0]) - 0.25) < 0.01 and abs(float(irg[45, 80, 2]) - 0.25) < 0.01 and float(irg[45, 42, 1]) < 0.05 and float(irg[45, 118, 1]) > 0.95, f"{irg[45, 80]} {irg[45, 42]}")
+    rc_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(type="rect", shader="region colours", c_breathe=0, c_edge=0)), doc["layers"][1]])
+    irc = rd.render(rd.animate(rc_doc, 0.0), base, {}, image_only=True)["image"]
+    check("director: a region preset is in the fill menu and draws", "region colours" not in ns.node_only() and float(irc[45, 80].max()) > 0.2
+          and ns.shader_info("region colours")["uses"] and "kRegion" in ns.shader_info("region colours")["uses"])
+    check("window: the pieces reach the shader as its regions, and a second shader can be stacked on a fill",
+          all(x in js for x in ("SHADER_REGION.includes(u)", "gl.RGBA32F, field.w, field.h", 'u.name === "kRegionTex"', "u.kRegions = fld.n", 'data-id="sh-stack"', 'c.blend = "screen"')))
     edge_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(type="rect", code=probe, field="edge")), doc["layers"][1]])
     ie_ = rd.render(rd.animate(edge_doc, 0.0), base, {}, image_only=True)["image"]
     ramp_doc = dict(doc, layers=[dict(doc["layers"][0], shape=dict(type="rect", code=probe)), doc["layers"][1]])

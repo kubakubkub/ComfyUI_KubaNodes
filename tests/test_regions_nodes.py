@@ -108,7 +108,7 @@ try:
     ns.KUBA_RegionsMask.execute(regions, "*", 0, 0, False, per_region_masks=True)
     check("regions to mask: too many region masks are refused", False)
 except ValueError as e:
-    check("regions to mask: too many region masks are refused, in plain words", "Narrow 'select'" in str(e) and "GB" in str(e), str(e))
+    check("regions to mask: too many region masks are refused, in plain words", "Narrow 'which regions'" in str(e) and "GB" in str(e), str(e))
 check("regions to mask: under the limit after a narrower select",
       ns.KUBA_RegionsMask.execute(regions, "W_F1_01", 0, 0, False, per_region_masks=True).result[2].shape == (1, H, W))
 check("regions to mask: over the limit but switched off still runs",

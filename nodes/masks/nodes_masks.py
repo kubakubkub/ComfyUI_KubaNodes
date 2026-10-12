@@ -15,9 +15,10 @@ import comfy.utils
 import folder_paths
 from comfy_api.latest import io, ui
 
+from ...kubakub import plan as rp
 from ...kubakub import maskfields as mf
 from ...kubakub import sound as so
-from ...kubakub.io_types import RegionsType
+from ...kubakub.io_types import RegionsType, SoundType
 
 log = logging.getLogger("KUBA.masks")
 PREVIEW_PX, PREVIEW_FRAMES = 384, 240
@@ -48,9 +49,8 @@ class KUBA_MaskField(io.ComfyNode):
                 io.Mask.Input("mask", optional=True,
                               tooltip="Instead of regions: a mask or a mask batch. Each mask is a region; with "
                                       "split_shapes each separate shape is one."),
-                io.String.Input("select", default="*",
-                                tooltip="Which regions, in plan syntax: 'W_F1_*', 'group:Windows', 'tag:front', "
-                                        "comma = or, space = and, '!' = not. * = all."),
+                io.String.Input("select", display_name=rp.WHICH, default="*", placeholder=rp.WHICH_HINT,
+                                tooltip="The regions the field is made for. * = all. " + rp.WHICH_TIP),
                 io.Combo.Input("field", options=list(mf.FIELDS), default="edge distance",
                                tooltip="edge distance: black on the edge of a region, white at its deepest point. "
                                        "direction: black to white along 'angle'. radial: black at the centre, white "
@@ -102,12 +102,7 @@ class KUBA_MaskField(io.ComfyNode):
         except ValueError as e:
             raise ValueError(f"kubakub mask field: {e}") from e
         if regions is not None:
-            from ...kubakub.director.render import select_regions
-            ids = [r["region_id"] for r in regions.table.get("regions", [])]
-            if select.strip() not in ("", "*"):
-                ids = select_regions(regions.table, select)
-                if not ids:
-                    raise ValueError(f"kubakub mask field: select '{select.strip()}' matches no region.")
+            ids = rp.pick_or_say(regions.table, select, "kubakub mask field")
             lab, n = mf.compact(regions.labels[0].cpu().numpy(), ids)
             if mask is not None:
                 notes.append("regions and mask are both connected: the regions are used")
@@ -223,6 +218,10 @@ class KUBA_MaskAnimate(io.ComfyNode):
                                tooltip="rotate / scale: around the mask's own centre or the middle of the picture."),
                 io.Boolean.Input("wrap", default=False, optional=True, advanced=True,
                                  tooltip="move: what leaves on one side comes back in on the other."),
+                SoundType.Input("sound", optional=True,
+                                tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release, band, threshold, gap), set "
+                                        "once for every node that listens, so all of them step on the same beat. Connected, it comes before '"
+                                        "audio' and before this node's own sound settings."),
             ],
             outputs=[
                 io.Mask.Output("masks", tooltip="One mask per frame."),
@@ -237,7 +236,11 @@ class KUBA_MaskAnimate(io.ComfyNode):
     def execute(cls, mask=None, field=None, effect="reveal", curve="ramp", cycle=2.0, value_from=0.0, value_to=1.0,
                 easing="linear", soft=0.05, width=0.2, rings=3, trail=0.0, fps=25.0, seconds=0.0, scale=1.0, audio=None,
                 phase=0.0, duty=0.5, seed=1, listen="everything", gain=1.0, release=0.15, nth=1, steps=1, threshold=0.3,
-                gap=0.1, bpm=0.0, start=0.0, pivot="mask centre", wrap=False) -> io.NodeOutput:
+                gap=0.1, bpm=0.0, start=0.0, pivot="mask centre", wrap=False, sound=None) -> io.NodeOutput:
+        audio, heard, cabled = so.take(sound, audio, bpm=bpm, gain=gain, release=release, listen=listen,
+                                       threshold=threshold, gap=gap)
+        bpm, gain, release, listen, threshold, gap = (heard[k] for k in ("bpm", "gain", "release", "listen", "threshold", "gap"))
+        start = 0.0 if cabled else start             # kubakub sound has cut the sound already
         import cv2
         name, notes = "kubakub mask animate", []
         fps = float(min(max(fps, 1.0), 120.0))

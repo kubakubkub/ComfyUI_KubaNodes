@@ -303,8 +303,9 @@ def _dd_forward(sigma, denoise_mask, extra_options, strength):
     return binary
 
 
-def differential_diffusion_patch(model, strength: float = 1.0):
-    """A clone of the MODEL whose soft denoise mask becomes a per-step threshold (soft edges)."""
+def differential_diffusion_patch(model, strength: float = 1.0, step=None):
+    """A clone of the MODEL whose soft denoise mask becomes a per-step threshold (soft edges).
+    step: another rule for the threshold, f(sigma, denoise_mask, extra_options) (adapters.change_by_steps)."""
     m = model.clone()
-    m.set_model_denoise_mask_function(lambda *a, **k: _dd_forward(*a, **k, strength=strength))
+    m.set_model_denoise_mask_function(step or (lambda *a, **k: _dd_forward(*a, **k, strength=strength)))
     return m

@@ -189,10 +189,10 @@ class KUBA_Versions(io.ComfyNode):
                                        "nothing, with the image only as reference image 1 and the style image as "
                                        "image 2, no masks: forms may grow across the facade and out of it. "
                                        "Per-region rules then only add their words to the one prompt."),
-                io.String.Input("only", default="", optional=True, advanced=True,
-                                placeholder="W_F1_*, group:M_Pilasters",
-                                tooltip="Paint only the regions matching these selectors (plan syntax: space = "
-                                        "AND, comma = OR); the others stay as they are. Empty = all. A whole "
+                io.String.Input("only", display_name=rp.WHICH, default="", optional=True, advanced=True,
+                                placeholder=rp.WHICH_HINT,
+                                tooltip="Paint only these regions (" + rp.WHICH_TIP + "); "
+                                        "the others stay as they are. Empty = all. A whole "
                                         "picture is still made in one piece; only its full-size detail follows "
                                         "this."),
                 io.Float.Input("cfg", default=0.0, min=0.0, max=30.0, step=0.1, round=0.01, optional=True,

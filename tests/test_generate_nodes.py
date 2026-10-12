@@ -87,9 +87,10 @@ def plan_of(rules, regions=None):
 
 def test_region_sampler():
     schema = nsm.KUBA_RegionSampler.define_schema()
-    check("sampler: style is the last input, optional", ids(schema.inputs)[-1] == "style"
-          and schema.inputs[-1].optional and bool(schema.inputs[-1].tooltip))
-    check("sampler: the old inputs keep their order", ids(schema.inputs)[:-1] == [
+    check("sampler: style, material_at, material and change are the last inputs, optional",
+          ids(schema.inputs)[-4:] == ["style", "material_at", "material", "change"]
+          and all(i.optional and bool(i.tooltip) for i in schema.inputs[-4:]))
+    check("sampler: the old inputs keep their order", ids(schema.inputs)[:-4] == [
         "model", "clip", "vae", "plan", "image", "steps", "cfg", "sampler_name", "scheduler", "region_mp",
         "max_upscale", "schedule", "only", "seed_offset", "adapter"])
     check("sampler: outputs unchanged", ids(schema.outputs) == ["image", "changed", "report"])
@@ -121,6 +122,97 @@ def test_region_sampler():
     ad, report = run("[default]\nprompt = red\n", image=seq.canvas_img().repeat(3, 1, 1, 1))
     check("sampler: an image batch is named in the report",
           "batch of 3 images: only the first one is used" in report, report)
+
+
+def test_material():
+    """A picture and a mask from a kubakub shader as the material of the regions (kubakub/materials.py)."""
+    from kubakub import materials as ma
+
+    def run(rules, **kw):
+        NodeAdapter.made.clear()
+        out = nsm.KUBA_RegionSampler.execute(None, None, None, plan_of(rules), seq.canvas_img(), 0, 0.0, "euler",
+                                             "simple", 0.25, 4.0, **kw).args
+        return NodeAdapter.made[0], out
+
+    lab = seq.make_regions().labels[0].numpy()
+    w1, w2, wall = torch.from_numpy(lab == 1), torch.from_numpy(lab == 2), torch.from_numpy(lab == 0)
+    green = torch.zeros(1, 270, 480, 3)
+    green[..., 1] = 1.0
+    rules = "[default]\nstrategy = keep\n[W_*]\nstrategy = inpaint\nprompt = red\n"
+    pre = ma.before(plan_of(rules), seq.canvas_img(), green)
+    check("material: it is the start picture of the painted regions, keep regions stay as they are",
+          float(pre.canvas[0][w1][:, 1].min()) == 1.0 and float(pre.canvas[0][w2][:, 0].max()) == 0.0
+          and torch.equal(pre.canvas[0][wall], seq.canvas_img()[0][wall]) and pre.reference is None and pre.change is None,
+          str(pre.lines))
+    one = ma.before(plan_of(rules), seq.canvas_img(), green, pick=lambda e: e["name"] == "W_1")
+    check("material: only the regions of this run", float(one.canvas[0][w1][:, 1].min()) == 1.0
+          and torch.equal(one.canvas[0][w2], seq.canvas_img()[0][w2]))
+    ref = ma.before(plan_of(rules + "reference = material\n"), seq.canvas_img(), green)
+    check("material: reference = material keeps the region's own start and shows the material instead",
+          torch.equal(ref.canvas, seq.canvas_img()[..., :3]) and torch.equal(ref.reference, green)
+          and "shown as the reference to 2 regions" in "\n".join(ref.lines), str(ref.lines))
+    clip = torch.zeros(5, 135, 240, 3)
+    clip[3, ..., 2] = 1.0
+    moved = ma.before(plan_of(rules), seq.canvas_img(), clip, at=0.75)
+    check("material: of a clip the frame at material_at, resized to the picture",
+          float(moved.canvas[0][w1][:, 2].min()) == 1.0 and "frame 4 is used" in "\n".join(moved.lines)
+          and "resized to the picture's 480x270" in "\n".join(moved.lines), str(moved.lines))
+    check("material: which frame a still takes", [ma.frame_at(n, a) for n, a in ((1, 0.3), (5, 0.0), (5, 1.0), (5, 0.5), (101, 0.3))] == [0, 0, 4, 2, 30])
+
+    grey = torch.zeros(1, 270, 480)
+    grey[0, 60:100] = 0.25
+    grey[0, 100:140] = 0.5
+    chg = ma.before(plan_of(rules), seq.canvas_img(), None, grey)
+    check("change: its brightest place on the painted regions counts as white",
+          abs(float(chg.change[0, 120, 100]) - 1.0) < 1e-6 and abs(float(chg.change[0, 80, 100]) - 0.5) < 1e-6
+          and "counted as white" in "\n".join(chg.lines), str(chg.lines))
+    none = ma.before(plan_of(rules), seq.canvas_img(), None, torch.zeros(1, 270, 480))
+    check("change: a black mask is said", "nothing changes" in "\n".join(none.lines))
+    kept = ma.before(plan_of("[default]\nstrategy = keep\n"), seq.canvas_img(), green, grey)
+    check("material and change with nothing painted: not used, and said", torch.equal(kept.canvas, seq.canvas_img()[..., :3])
+          and kept.change is None and "not used" in "\n".join(kept.lines))
+
+    ad, out = run(rules, material=green)
+    check("sampler: the regions are painted on the material (their crops start from it)", len(ad.calls) == 2
+          and "material: the start picture of 2 regions" in out[2], out[2])
+    ad, out = run(rules + "reference = material\n", material=green)
+    check("sampler: reference = material is a second reference of the region", len(ad.refs) == 4, str(ad.refs))
+    ad, out = run(rules + "reference = material\n")
+    check("sampler: reference = material with nothing connected falls back, and says so",
+          len(ad.refs) == 2 and "nothing is connected to 'material'" in out[2], out[2])
+    seen = []
+    keep = NodeAdapter.sample
+
+    def spy(self, latent, pos, neg, **kw):
+        seen.append((bool(kw.get("soft")), kw.get("noise_mask")))
+        return keep(self, latent, pos, neg, **kw)
+    NodeAdapter.sample = spy
+    try:
+        run(rules, change=grey)
+        check("sampler: a change map is sampled softly, with its grey values in the mask",
+              len(seen) == 2 and all(s for s, _ in seen) and 0.0 < float(seen[0][1].unique()[1]) < 1.0, str([s for s, _ in seen]))
+        seen.clear()
+        run(rules)
+        check("sampler: without one the mask is plain", not any(s for s, _ in seen))
+    finally:
+        NodeAdapter.sample = keep
+    for key in ("material", "change", "finish"):
+        try:
+            rp.resolve(seq.make_regions().table, f"[default]\n{key} = plasma\n")
+            check(f"plan: '{key}' is not a plan key", False)
+        except rp.PlanError as e:
+            check(f"plan: '{key}' typed into the plan says where it goes", "kubakub shader" in str(e) and "line 2" in str(e), str(e))
+    check("plan: reference is read whatever its capitals", rp.resolve(seq.make_regions().table, "[default]\nprompt = x\nreference = Material\n")["regions"][0]["reference"] == "material")
+
+    pixels = np.zeros((4, 8, 8, 3), np.float32)
+    mat = [np.full((8, 8, 3), 0.1 * (i + 1), np.float32) for i in range(4)]
+    region = np.zeros((8, 8), bool)
+    region[2:5, 2:5] = True
+    g = ma.guide(pixels, mat, region, np.array([False, True, True, True]))
+    check("guide: the material inside the region on the frames of the time range, the crop everywhere else",
+          g is not None and float(g[0].max()) == 0.0 and abs(float(g[2, 3, 3, 0]) - 0.3) < 1e-6 and float(g[2, 0, 0, 0]) == 0.0
+          and float(pixels.max()) == 0.0)
+    check("guide: a material that is the picture guides nothing", ma.guide(pixels, [pixels[0]] * 4, region, np.ones(4, bool)) is None)
 
 
 def test_seam_pass_schema():

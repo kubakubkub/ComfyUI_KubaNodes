@@ -626,7 +626,7 @@
    ],
    "size": [
     420,
-    380
+    760
    ],
    "flags": {},
    "order": 12,
@@ -766,11 +766,11 @@
    "type": "KUBA_SceneWalkthrough",
    "pos": [
     0,
-    2300
+    2680
    ],
    "size": [
     420,
-    420
+    790
    ],
    "flags": {},
    "order": 15,
@@ -828,7 +828,7 @@
    "type": "PreviewAny",
    "pos": [
     460,
-    2300
+    2680
    ],
    "size": [
     420,
@@ -863,7 +863,7 @@
    "type": "KUBA_BrightnessCompensation",
    "pos": [
     0,
-    2800
+    3550
    ],
    "size": [
     420,
@@ -931,7 +931,7 @@
    "type": "PreviewImage",
    "pos": [
     460,
-    2800
+    3550
    ],
    "size": [
     420,
@@ -966,7 +966,7 @@
    "type": "PreviewImage",
    "pos": [
     900,
-    2800
+    3550
    ],
    "size": [
     420,
@@ -1001,7 +1001,7 @@
    "type": "PreviewAny",
    "pos": [
     1340,
-    2800
+    3550
    ],
    "size": [
     440,
@@ -1299,7 +1299,7 @@
     -20,
     1270,
     1820,
-    980
+    1360
    ],
    "color": "#b58b2a"
   },
@@ -1307,9 +1307,9 @@
    "title": "Walkthrough video (-> Create Video / Save Video)",
    "bounding": [
     -20,
-    2250,
+    2630,
     920,
-    500
+    870
    ],
    "color": "#a1309b"
   }
