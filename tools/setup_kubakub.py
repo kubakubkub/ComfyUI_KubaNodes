@@ -63,15 +63,15 @@ MODEL_SETS = [
     {"key": "qwen21", "title": "Qwen Image 2.1 (photographic windows, frame in frame)",
      "used_by": "facade_regions_diffusion",
      "files": [
-         ("qwen_image_2.1_int8_convrot.safetensors", "diffusion_models",
-          HF + "Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors"),
+         ("qwen_image_2.1_turbo_int8_convrot.safetensors", "diffusion_models",
+          HF + "Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors"),
          ("qwen3vl_8b_int8_convrot.safetensors", "text_encoders",
           HF + "Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors"),
          ("qwen_image_2.1_vae_bf16.safetensors", "vae",
           HF + "Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors"),
      ],
-     "note": "The workflows also use the Viggle turbo LoRA and the texture-fix VAE (see docs/MODELS.md); pick these "
-             "files in the loaders where a workflow names another variant."},
+     "note": "This is the 8 step turbo model. The workflows also use the texture-fix VAE (see docs/MODELS.md); pick "
+             "these files in the loaders where a workflow names another variant."},
     {"key": "ltx", "title": "LTX 2.5 (animate regions, director video)",
      "used_by": "04 animate the windows, director_video_ltx",
      "files": [

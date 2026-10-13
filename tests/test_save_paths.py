@@ -40,6 +40,11 @@ with tempfile.TemporaryDirectory() as tmp:
          "save_anywhere = on" in raises(sp.save_folder, os.path.join(tmp, "elsewhere"), out))
     step("'..' out of output is refused", bool(raises(sp.save_folder, "../elsewhere", out)))
     step("a network path is refused", bool(raises(sp.save_folder, r"\\server\share\x", out)))
+    from kubakub import facade_core as fc
+    step("a file or folder field: a network path is refused, with or without %VARIABLES%, a drive path is not",
+         all("drive letter" in raises(f, p) for f in (fc.clean_folder_path, bridge.clean_path, sp.local)
+             for p in (r"\\server\share\masks", "//server/share/masks"))
+         and fc.clean_folder_path('"masks/in"') == "masks/in" and sp.local("") == "")
     sp.anywhere = lambda: True
     step("save_anywhere = on: any folder", sp.save_folder(os.path.join(tmp, "elsewhere"), out) == os.path.realpath(os.path.join(tmp, "elsewhere"))
          and sp.save_folder(r"\\server\share\x", out) == os.path.normpath(r"\\server\share\x"))

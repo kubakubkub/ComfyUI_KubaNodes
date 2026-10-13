@@ -21,6 +21,8 @@ import re
 import cv2
 import numpy as np
 
+from . import save_paths
+
 ATLAS_FORMAT = "kubakub.facade.atlas"
 ATLAS_VERSION = 1
 
@@ -226,9 +228,7 @@ def clean_folder_path(path: str) -> str:
     """Accept paths pasted from Explorer's 'Copy as path', which adds quotes."""
     raw = (path or "").strip().strip('"').strip("'")
     out = os.path.expandvars(os.path.expanduser(raw))
-    if ("%" in raw or "$" in raw) and out.replace("/", "\\").startswith("\\\\"):
-        raise ValueError("a path with %VARIABLES% must not lead to a network share (\\\\server\\...): type the share's path itself.")
-    return out
+    return save_paths.local(out)
 
 
 def list_mask_files(folder: str, recursive: bool = False):

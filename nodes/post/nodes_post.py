@@ -16,6 +16,7 @@ from comfy_api.latest import io
 
 from ...kubakub import align as al
 from ...kubakub import post as pp
+from ...kubakub import save_paths
 
 log = logging.getLogger("KUBA.regions")
 
@@ -45,48 +46,6 @@ def _masked(fn, fr, mask):
     return lambda i: pp.mask_blend(fr[i], fn(i), m[min(i, len(m) - 1)])
 
 
-class KUBA_ColourMatch(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="KUBA_ColourMatch",
-            display_name="kubakub colour match",
-            category="kubakub/2d/post",
-            search_aliases=['color match', 'grade', 'look', 'reference', 'lut'],
-            description=("Gives your frames the colours of a reference picture (a still you like, a frame of "
-                         "another scene). One transform for all frames, so nothing flickers. save_lut writes it as "
-                         "a .cube for After Effects, Resolume, MadMapper, Resolve."),
-            inputs=[
-                io.Image.Input("images", tooltip="The frames to grade."),
-                io.Image.Input("reference", tooltip="The look to match (any size, any content)."),
-                io.Combo.Input("method", options=["mkl", "mean_std"], default="mkl",
-                               tooltip="mkl = colours and their mix (richer); mean_std = per channel brightness and contrast."),
-                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05,
-                               tooltip="How much of the reference look: 1 = all of it, 0 = the frames as they are."),
-                io.String.Input("save_lut", default="", placeholder="my_look",
-                                tooltip="Name for a .cube file in output/kubakub_luts/ (empty = no file)."),
-                io.Mask.Input("mask", optional=True,
-                              tooltip="Grades only inside this mask (white = full, grey = partly); outside the frames "
-                                      "stay as they are. One mask serves every frame; another size is resized."),
-            ],
-            outputs=[io.Image.Output("images"), io.String.Output("lut_file", tooltip="The written .cube (or empty).")],
-        )
-
-    @classmethod
-    def execute(cls, images, reference, method, strength, save_lut, mask=None) -> io.NodeOutput:
-        fr = _frames(images)
-        pick = sorted({0, len(fr) // 2, len(fr) - 1})
-        src = np.concatenate([fr[i].reshape(-1, 3) for i in pick])[None]
-        fit = pp.colour_fit(src, reference[0, ..., :3].cpu().float().numpy(), method)
-        out = _map(_masked(lambda i: pp.colour_apply(fr[i], fit, strength), fr, mask), len(fr))
-        path = ""
-        name = re.sub(r"[^\w\-]+", "_", (save_lut or "").strip())
-        if name:
-            path = pp.write_cube(os.path.join(folder_paths.get_output_directory(), "kubakub_luts", name + ".cube"),
-                                 lambda g: pp.colour_apply(g, fit, strength), title=name)
-        return io.NodeOutput(out, path)
-
-
 def lut_dirs():
     return [os.path.join(folder_paths.get_input_directory(), "luts"), os.path.join(folder_paths.models_dir, "luts"),
             os.path.join(folder_paths.get_output_directory(), "kubakub_luts")]
@@ -100,13 +59,108 @@ def list_luts():
     return names or ["(none: put .cube files in input/luts)"]
 
 
+NO_LUT = "none"
+
+
+def lut_file(lut, lut_path=""):
+    """The .cube a node means: the typed path wins over the list; '' = none chosen."""
+    path = save_paths.local((lut_path or "").strip().strip('"'))
+    if path or not lut or lut == NO_LUT or lut.startswith("("):
+        return path
+    return next((os.path.join(d, lut) for d in lut_dirs() if os.path.isfile(os.path.join(d, lut))), lut)
+
+
+def read_lut(path, node):
+    if not os.path.isfile(path):
+        raise ValueError(f"{node}: no .cube file '{path}'")
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return pp.parse_cube(f.read())
+
+
+class KUBA_ColourMatch(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="KUBA_ColourMatch",
+            display_name="kubakub colour match",
+            category="kubakub/2d/post",
+            search_aliases=['color match', 'grade', 'look', 'reference', 'lut', 'cube', 'apply lut'],
+            description=("Gives your frames a look, from one of two places. A reference picture (a still you like, "
+                         "a frame of another scene): the frames get its colours, with one transform for all frames, "
+                         "so nothing flickers. Or a .cube file (1D or 3D) from input/luts, models/luts or "
+                         "output/kubakub_luts. Both at once: the reference first, the .cube on top. save_lut writes "
+                         "the result as a .cube for After Effects, Resolume, MadMapper, Resolve."),
+            inputs=[
+                io.Image.Input("images", tooltip="The frames to grade."),
+                io.Image.Input("reference", optional=True,
+                               tooltip="The look to match (any size, any content). Nothing connected: pick a .cube in 'lut'."),
+                io.Combo.Input("method", options=["mkl", "mean_std"], default="mkl",
+                               tooltip="reference: mkl = colours and their mix (richer); mean_std = per channel "
+                                       "brightness and contrast."),
+                io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.05,
+                               tooltip="How much of the look: 1 = all of it, 0 = the frames as they are."),
+                io.String.Input("save_lut", default="", placeholder="my_look",
+                                tooltip="Name for a .cube file in output/kubakub_luts/ (empty = no file)."),
+                io.Mask.Input("mask", optional=True,
+                              tooltip="Grades only inside this mask (white = full, grey = partly); outside the frames "
+                                      "stay as they are. One mask serves every frame; another size is resized."),
+                io.Combo.Input("lut", options=[NO_LUT, *[n for n in list_luts() if not n.startswith("(")]], default=NO_LUT,
+                               optional=True,
+                               tooltip="A .cube look from input/luts, models/luts or output/kubakub_luts (none = only "
+                                       "the reference). New files show after a refresh of the page."),
+                io.String.Input("lut_path", default="", optional=True, placeholder="looks/film.cube",
+                                tooltip="Any .cube file by its path; wins over the list."),
+            ],
+            outputs=[io.Image.Output("images"), io.String.Output("lut_file", tooltip="The written .cube (or empty).")],
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, lut=NO_LUT, lut_path="", **kw):
+        path = lut_file(lut, lut_path)                    # a .cube saved again under the same name is read again
+        try:
+            return f"{path}|{os.path.getmtime(path)}" if path else ""
+        except OSError:
+            return path
+
+    @classmethod
+    def execute(cls, images, reference=None, method="mkl", strength=1.0, save_lut="", mask=None, lut=NO_LUT,
+                lut_path="") -> io.NodeOutput:
+        fr = _frames(images)
+        path_in = lut_file(lut, lut_path)
+        if reference is None and not path_in:
+            raise ValueError("kubakub colour match: connect a 'reference' picture or pick a .cube in 'lut' (files in "
+                             "input/luts, models/luts or output/kubakub_luts, or a path in 'lut_path').")
+        steps = []
+        if reference is not None:
+            pick = sorted({0, len(fr) // 2, len(fr) - 1})
+            src = np.concatenate([fr[i].reshape(-1, 3) for i in pick])[None]
+            fit = pp.colour_fit(src, reference[0, ..., :3].cpu().float().numpy(), method)
+            steps.append(lambda g: pp.colour_apply(g, fit, strength))
+        if path_in:
+            table = read_lut(path_in, "kubakub colour match")
+            steps.append(lambda g: pp.apply_lut(g, table, strength))
+
+        def look(g):
+            for step in steps:
+                g = step(g)
+            return g
+        out = _map(_masked(lambda i: look(fr[i]), fr, mask), len(fr))
+        path = ""
+        name = re.sub(r"[^\w\-]+", "_", (save_lut or "").strip())
+        if name:
+            path = pp.write_cube(os.path.join(folder_paths.get_output_directory(), "kubakub_luts", name + ".cube"),
+                                 look, title=name)
+        return io.NodeOutput(out, path)
+
+
 class KUBA_ApplyLUT(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="KUBA_ApplyLUT",
-            display_name="kubakub apply lut",
+            display_name="kubakub apply lut (old)",
             category="kubakub/2d/post",
+            is_deprecated=True,                              # now 'lut' of kubakub colour match; kept for saved workflows
             search_aliases=['lut', 'cube', 'grade', 'look'],
             description="A .cube look (1D or 3D) on the frames. Files from input/luts, models/luts or output/kubakub_luts, or a path.",
             inputs=[
@@ -125,13 +179,7 @@ class KUBA_ApplyLUT(io.ComfyNode):
 
     @classmethod
     def execute(cls, images, lut, strength, lut_path="", mask=None) -> io.NodeOutput:
-        path = (lut_path or "").strip().strip('"')
-        if not path:
-            path = next((os.path.join(d, lut) for d in lut_dirs() if os.path.isfile(os.path.join(d, lut))), "")
-        if not os.path.isfile(path):
-            raise ValueError(f"kubakub apply lut: no .cube file '{path or lut}'")
-        with open(path, encoding="utf-8", errors="replace") as f:
-            table = pp.parse_cube(f.read())
+        table = read_lut(lut_file(lut, lut_path) or lut, "kubakub apply lut")
         fr = _frames(images)
         return io.NodeOutput(_map(_masked(lambda i: pp.apply_lut(fr[i], table, strength), fr, mask), len(fr)))
 
@@ -358,6 +406,6 @@ class KUBA_AlignToSource(io.ComfyNode):
 
 NODE_CLASS_MAPPINGS = {"KUBA_AlignToSource": KUBA_AlignToSource, "KUBA_ColourMatch": KUBA_ColourMatch, "KUBA_ApplyLUT": KUBA_ApplyLUT,
                        "KUBA_Deflicker": KUBA_Deflicker, "KUBA_Retime": KUBA_Retime, "KUBA_BurnIn": KUBA_BurnIn}
-NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_AlignToSource": "kubakub align to source", "KUBA_ColourMatch": "kubakub colour match", "KUBA_ApplyLUT": "kubakub apply lut",
+NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_AlignToSource": "kubakub align to source", "KUBA_ColourMatch": "kubakub colour match", "KUBA_ApplyLUT": "kubakub apply lut (old)",
                               "KUBA_Deflicker": "kubakub deflicker", "KUBA_Retime": "kubakub retime",
                               "KUBA_BurnIn": "kubakub burn in"}

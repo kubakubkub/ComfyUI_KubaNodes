@@ -267,7 +267,21 @@ python_embeded\python.exe ComfyUI\custom_nodes\ComfyUI_KubaNodes\tests\test_illu
 ## kubakub regions to mask
 
 A mask of chosen regions (all windows, one floor) for any effect or core node,
-or as a layer mask for the director.
+or as a layer mask for the director. After a run the node shows the chosen regions lit up
+among the others.
+
+**pick regions.** Under the `which regions` field of this node, and of every other node that has
+the field (shader, region sampler, region video sampler, versions, mask field, scene pieces,
+regions to svg / pdf / dxf), there is a button. It opens a list of what the connected regions
+hold: their groups (windows, columns ...), their floors and sections, and single regions by name,
+each with the number of regions. A click writes the text into the field. Within a row any
+choice counts (windows or columns); across rows all of them (windows on floor 1). In kubakub
+region plan the same button adds a `[section]` for the chosen regions to the rules. The names are
+known once the regions node has run in this session; until then the list says so. Typing still
+works, and a text typed by hand stays until you click a name.
+
+To make one choice for several nodes, connect the `which regions` output of this node to their
+`which regions` fields.
 
 | input | default | what it does |
 |---|---|---|
@@ -283,6 +297,7 @@ or as a layer mask for the director.
 | mask | 1 on the selected regions, after grow, feather and invert. |
 | names | The matching region names, one per line. |
 | region_masks | MASK batch, one per selected region in the order of `names`, before grow, feather and invert. Needs `per_region_masks` on; while it is off, a node connected here stops with a message that says so. Above 4 GB the node stops and asks for a narrower `select`. |
+| which regions | The text of the `which regions` field as it is, for the same field of other nodes. |
 
 ## kubakub regions to svg / pdf / dxf
 

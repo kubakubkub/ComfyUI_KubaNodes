@@ -78,7 +78,7 @@ class LoadImagesFromDirWithNames:
         # the settings and the folder's files (name, size, mtime): new or edited images trigger a rerun
         h = hashlib.sha256(repr(sorted((k, str(v)) for k, v in kwargs.items())).encode("utf-8", "replace"))
         directory = kwargs.get("directory", "")
-        if os.path.isdir(directory):
+        if not str(directory).replace("/", "\\").startswith("\\\\") and os.path.isdir(directory):
             for path, _, _ in cls._gather_files(cls, directory, kwargs.get("include_subfolders", True)):
                 try:
                     st = os.stat(path)
@@ -134,7 +134,9 @@ class LoadImagesFromDirWithNames:
                     load_always=False, include_subfolders=True,
                     subfolder_prefix=True, name_filter="", skip_existing_in="", batch_fit="resize_to_first"):
 
-        if not str(directory or "").strip():                       # an empty field runs the built-in sample
+        from ...kubakub import save_paths
+        directory = save_paths.local(str(directory or "").strip().strip('"'))
+        if not directory:                                          # an empty field runs the built-in sample
             import folder_paths
             from ...kubakub import samples
             directory = samples.frames(folder_paths.get_temp_directory())

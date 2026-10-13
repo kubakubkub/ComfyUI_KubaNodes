@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from comfy_api.latest import io
+import torch
+
+from comfy_api.latest import io, ui
 
 from ...kubakub import project as pj
 from ...kubakub.io_types import ViewerType
@@ -20,7 +22,8 @@ class KUBA_Project(io.ComfyNode):
             search_aliases=['settings', 'matrix size', 'fps', 'template', 'show'],
             description=("Set the show once and link it everywhere: width / height into scene render, preview or "
                          "walkthrough, fps into export, the video sampler or keyframe clips, name into export, "
-                         "viewer into frame in frame. A connected matrix gives the size by itself."),
+                         "viewer into frame in frame, scene preview, scene relight or pieces render. A connected "
+                         "matrix gives the size by itself and shows where the audience's eyes meet the facade."),
             inputs=[
                 io.String.Input("name", default="my show", tooltip="Project name; export folders and files use it."),
                 io.Combo.Input("preset", options=list(pj.PRESETS), default="uhd 3840x2160",
@@ -46,11 +49,14 @@ class KUBA_Project(io.ComfyNode):
                 io.Int.Output("height", tooltip="Matrix height in pixels."),
                 io.Float.Output("fps", tooltip="Frames per second."),
                 io.String.Output("name", tooltip="The project name, safe for folders and files."),
-                ViewerType.Output("viewer", tooltip="The audience viewpoint (same as kubakub audience viewpoint)."),
+                ViewerType.Output("viewer", tooltip="The audience viewpoint: where the audience stands, for frame in "
+                                                    "frame, scene preview, scene relight and pieces render."),
                 io.String.Output("report", tooltip="Size, fps, millimetres per pixel and the audience position."),
                 io.Float.Output("facade_width_m", tooltip="Real width of the whole matrix on the building, in metres."),
                 io.Float.Output("mm_per_px", tooltip="Millimetres of facade one matrix pixel covers: the facade "
                                                      "width in mm / the matrix width in px."),
+                io.Image.Output("preview", tooltip="The matrix (a dark frame without one) with a red dot where the "
+                                                   "audience's eye line meets the facade."),
             ],
         )
 
@@ -59,8 +65,11 @@ class KUBA_Project(io.ComfyNode):
                 distance_m, matrix=None) -> io.NodeOutput:
         p = pj.build(name, preset, width, height, fps, facade_width_m, bottom_m, viewer_x_m, eye_height_m, distance_m,
                      None if matrix is None else tuple(matrix.shape))
+        pic = matrix[0, ..., :3].cpu().float().numpy() if matrix is not None else None
+        preview = torch.from_numpy(pj.eye_preview(p["viewer"], pic))[None]
         return io.NodeOutput(p["width"], p["height"], p["fps"], p["name"], p["viewer"], p["report"],
-                             float(facade_width_m), float(facade_width_m) * 1000.0 / p["width"])
+                             float(facade_width_m), float(facade_width_m) * 1000.0 / p["width"], preview,
+                             ui=ui.PreviewImage(preview, cls=cls) if matrix is not None else None)
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_Project": KUBA_Project}

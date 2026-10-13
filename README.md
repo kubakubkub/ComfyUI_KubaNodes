@@ -1,8 +1,8 @@
 # kubakub nodes
 
 **Projection mapping inside ComfyUI.** Tools to turn a building facade into a show: split it into its parts,
-give every part its own prompt, compose and animate layers on it in a timeline window, and export the result
-for the projector.
+give every part its own material and its own prompt, move it with curves and sound, compose it in a timeline
+window, and export the result for the projector.
 
 ![the kubakub director window](docs/images/director.png)
 
@@ -13,42 +13,64 @@ regions of starter 01 connected):
 
 ## What's new
 
-**0.3.0**, masks that move:
-- **A mask can run across the building.** *kubakub mask field* turns your regions into a grey ramp (from each
-  edge inwards, along a direction, out from a point, region after region, or as noise) and *kubakub mask animate*
-  moves a reveal, a band or rings along it, or moves, turns, scales and flashes the mask itself, with a trail if
-  you like. The curve is drawn on the node: buttons for its type, drag on it for the speed.
-- **Masks follow the music.** Any of these moves can run on the beats, the bars, the kick or the hats of a sound.
-  With *swap masks* several layers trade their masks on every step while the pictures stay where they are on the
-  facade; *kubakub sound mask swap* does the same as one node.
-- **The same in the kubakub director.** A layer clipped to regions gets a **field** behaviour (wipe, iris, region
-  by region, dissolve, running band, rings), a soft edge for its clip, and the sound can now come from the graph.
-- **One EXR with many layers** is enough for *render passes*: the node shows a button for every layer in the file.
-- **Inputs and outputs of every node were reviewed.** Many nodes give more out (fps, sound, masks, raw data,
-  reports) and take more in; some old settings that did nothing now work. Saved workflows keep their links; what
-  behaves differently is listed in the changelog.
+**0.4.0**, shaders, and less to type:
+- **Shaders.** *kubakub shader* draws moving pictures and masks: 74 presets sorted by type, each with sliders
+  under **adjust**, your own code or a pasted Shadertoy, 3D scenes with a depth output. Draw an arrow on the node
+  for the direction. *kubakub shader mix* fades between two of them.
+- **A shader as the material of your regions.** Connect a shader to the region sampler and Flux 2 Klein or Qwen
+  Image paints along its forms; in video each region moves as its shader moves. Shaders can read your regions:
+  a colour, a pace or a pattern per window.
+- **A prompt per region with nothing to type but the prompt.** *kubakub region prompt*: pick the regions, write
+  the prompt, set strategy and denoise as fields; chain several. The **pick regions** button under every
+  `which regions` field lists your groups, floors and names.
+- **One sound for every node that listens.** *kubakub sound* holds the sound and its tempo; masks, shaders and
+  mask swaps step on the same beat.
+- **From a generated 3D model to the wall.** *kubakub align 3d model*, *kubakub form height* and *kubakub height
+  animate*: place a model from an image-to-3D workflow on your facade and let its forms grow out of the wall.
+- **Fewer nodes, faster Qwen.** Six small nodes became settings of another (saved workflows still run), and the
+  Qwen example uses the 8 step turbo model.
 
 Everything that changed, version by version: [CHANGELOG.md](CHANGELOG.md). Updates arrive through ComfyUI Manager
 (*Update*) or `git pull`; a problem or a wish: [open an issue](https://github.com/kubakubkub/ComfyUI_KubaNodes/issues).
 
-## What the nodes do
+## How the parts fit together
 
-- **kubakub director**: a compositing window inside ComfyUI, made for facades. Layers (images, video, colour,
-  shapes, paint, light) that you move, mask and clip to parts of the building ("only the floor 1 windows"), a
-  timeline with keyframes, behaviours (orbit, breathe, spin ...), markers and sound, and export as stills, video or
-  ProRes. Any layer can be re-diffused from inside the window.
-- **Regions**: the facade split into every window, door, cornice and floor, each with a name. From a colour
-  matrix, a folder of After Effects masks, an Illustrator file, a hand sketch, SAM 3, or straight from 3D.
-- **From a 3D file to regions**: *scene render* reads a `.fbx` / `.blend` / `.glb` with Blender and renders the
-  projector's view as clay, depth and ID passes; every stone, window and column of the model becomes a region by
-  itself. A file without a camera works: *projector* places one in metres from the wall, and several projectors
-  get their blend masks. A cryptomatte, an ID render or plain render passes from Houdini or any renderer work too.
-- **A prompt per region**: a short rule text gives each region (or group, or floor) its own prompt and settings;
-  the *region sampler* diffuses them one by one with Flux 2 Klein or Qwen Image, and the facade around them stays
-  pixel exact. *versions* makes a numbered sheet of looks from one queue.
-- **Motion**: LTX 2.5 and MiniMax H3 animate chosen regions while the building stays still, as loops and with
-  sound; 3D pieces of the model can be pushed, tilted and turned by waves and beats.
-- **Finishing**: colour match, deflicker, retime, burn in, delivery export; even brightness on the real building.
+The pack answers five questions, and each one has one place where you answer it.
+
+**Where? Regions.** The facade split into every window, door, cornice and floor, each with a name. From a colour
+matrix, a folder of After Effects masks, an Illustrator file, a hand sketch, SAM 3, a cryptomatte or ID render, or
+straight from a 3D file. Every other node works on these regions, and wherever you choose some of them the field
+is called **which regions** and reads the same way (`W_F1_*`, `group:Windows`).
+
+**What? A shader is the material.** *kubakub shader* draws moving pictures and masks on the graphics card, with no
+AI model: 74 presets picked by their moving picture and adjusted with sliders and colours, or a shader pasted from
+shadertoy.com. Connect your regions and it draws in them, each window with its own colour, pace or pattern. A
+second shader node behind the first is a second layer. Its picture is then a material:
+- for the eye, as it is, on the facade or as the fill of a shape in the director;
+- for a model: one cable into the *region sampler* and Flux 2 Klein or Qwen Image paints along its forms;
+- for video: the same cable into the *region video sampler* and LTX moves the windows as the shader moves.
+
+**When? Curves and sound.** A value that runs over time is a curve drawn on the node: buttons for its type, drag
+for its speed. *mask animate* runs a reveal, a band or rings across the building, *height animate* lets forms grow
+out of the wall. *kubakub sound* holds your music and how it is heard (tempo, loudness, hits) and carries it on
+one cable to every node that listens, so all of them step on the same beat.
+
+**Who paints it? A prompt per region.** A short rule text gives each region, group or floor its own prompt and
+settings. The *region sampler* diffuses them one by one and the facade around them stays pixel exact; *versions*
+makes a numbered sheet of looks from one queue; LTX 2.5 and MiniMax H3 animate chosen regions while the building
+stays still.
+
+**How does it come together? The director.** A compositing window inside ComfyUI, made for facades: layers
+(images, video, colour, shapes with shader fills, paint, light) that you move, mask and clip to parts of the
+building, a timeline with keyframes, behaviours, markers and sound, and export as stills, video or ProRes. Any
+layer can be re-diffused from inside the window.
+
+Around these:
+- **3D.** *scene render* reads a `.fbx` / `.blend` / `.glb` with Blender and renders the projector's view as clay,
+  depth and ID passes; every stone, window and column becomes a region by itself. *projector* places a projector
+  in metres from the wall, several projectors get their blend masks. Audience spots and a walk are placed on a
+  map on the node for the previz, and the model's pieces can be pushed, tilted and turned by waves and beats.
+- **Finishing.** Colour match, deflicker, retime, burn in, delivery export; even brightness on the real building.
 
 ![a facade and its regions](docs/images/facade_to_regions.jpg)
 
@@ -61,8 +83,9 @@ Masks that move: *mask field* turns the windows into a grey ramp, *mask animate*
 
 ![masks running over the windows of a facade, and the same on the facade](docs/images/masks.gif)
 
-*kubakub shader* draws moving pictures on the graphics card: 71 presets in eight types, picked by their moving picture and adjusted with sliders and colour swatches, or a shader pasted
-from shadertoy.com (workflow shader, no AI model):
+*kubakub shader* draws moving pictures on the graphics card: 74 presets in eight types, picked by their moving
+picture and adjusted with sliders and colour swatches, or a shader pasted from shadertoy.com (workflow shader, no AI
+model):
 
 ![six shader presets: clouds, grid flight, endless zoom, a facade as a wire mesh and in 8 bit, datamosh](docs/images/shader.gif)
 
@@ -96,13 +119,16 @@ model works (bf16, fp8, int8, NVFP4, GGUF ...): pick your file in the loader whe
    the **kubakub sample facade** node draws a facade to try everything on.
 3. **03** opens the director window on that facade: add a layer, clip it to a floor, give it a behaviour, press
    play. Still no models.
-4. Then **02** (a prompt per region, Klein 4B), **04** (LTX animates the windows), **05** (a hand sketch rendered
-   region by region), **06** (finishing a clip: colour match, deflicker, retime, burn in).
-5. 3D, with Blender installed and still no files: **07** (a sample building in metres, rendered from a projector
+4. Still no models: **shader** (pick a preset by its picture, adjust it), **region_materials** (two shaders
+   stacked in the windows of the facade), **sound** (one sound for a shader and a mask), **mask_animate**.
+5. Then **02** (a prompt per region, Klein 4B), **region_materials_klein** (Klein paints from a shader), **04**
+   (LTX animates the windows), **05** (a hand sketch rendered region by region), **06** (finishing a clip: colour
+   match, deflicker, retime, burn in).
+6. 3D, with Blender installed and still no files: **07** (a sample building in metres, rendered from a projector
    you place: regions from the model, real distances, previz from the audience) and **08** (its stones moved by a
    wave). **projector_blend**: two projectors and their blend masks. Your own model: paste its path into `file` of
    scene render.
-6. With your own 3D: **clay_to_final** (scene file → clay → regions → Klein → seam pass → even light),
+7. With your own 3D: **clay_to_final** (scene file → clay → regions → Klein → seam pass → even light),
    **scene3d_to_regions**, **render_passes_to_final** (your own render and its mask passes: only the masked parts
    are repainted) and **regions_from_cryptomatte** (a cryptomatte EXR from any renderer). **versions**
    makes many versions of the facade from one queue: a numbered contact sheet of drafts, then your picks at full size.
@@ -111,10 +137,10 @@ model works (bf16, fp8, int8, NVFP4, GGUF ...): pick your file in the loader whe
 
 Most of the pack runs on a plain ComfyUI. Add the rest when you get there:
 
-- **Nothing extra:** regions, the region plan, masks, shader, sketch, post and the director with still layers.
-  Workflows 01 and 03, mask_animate and shader.
+- **Nothing extra:** regions, the region plan, masks, shader, sound, sketch, post and the director with still
+  layers. Workflows 01 and 03, mask_animate, shader, shader_mix, region_materials and sound.
 - **Image models** (Klein 4B is the smallest, see [docs/MODELS.md](docs/MODELS.md)): region sampler, seam pass,
-  versions, frame in frame, sketch to render. Workflows 02 and 05.
+  versions, frame in frame, sketch to render. Workflows 02, 05 and region_materials_klein.
 - **Video models** (LTX 2.5, MiniMax H3; tested on a 12 GB GPU): region video sampler, motion guide, keyframe clips. Workflows 04 and motion_guide.
 - **Blender 4.x:** everything under 3d / scene and 3d / pieces, and light layers in the director. Workflows 07 and
   08 use the sample model; your own file needs no camera (kubakub projector). Workflow clay_to_final.
@@ -133,18 +159,18 @@ The menu is split into **2d** (images, masks, video) and **3d** (anything that n
 | group | nodes |
 |---|---|
 | **project** | project settings (matrix size, fps, name, audience: link them into the other nodes), sample facade, sample model (the same facade as a 3D file) |
-| **2d / regions** | regions from matrix / masks (colours, line drawing, After Effects mask folders), regions from masks, regions from sam3, regions from illustrator (.ai / .pdf layers), regions to mask, regions to svg / pdf / dxf; canvas plan / to work / restore |
+| **2d / regions** | regions from matrix / masks (colours, line drawing, After Effects mask folders), regions from masks, regions from sam3, regions from illustrator (.ai / .pdf layers), regions to mask (shows the chosen regions lit up, passes the choice on as text), regions to svg / pdf / dxf; canvas plan / to work / restore. Every `which regions` field has a **pick regions** button: the groups, floors and sections your regions hold, as a list to click |
 | **2d / masks** | mask field (regions as a grey ramp: distance from the edge, a direction, from a point, one step per region, noise; the direction can be drawn as an arrow on the node), mask animate (a mask per frame: reveal, band, rings along a field, or move, rotate, scale, strobe, with a trail; on a ramp, sine, saw, square, random, noise or a sound; the curve is drawn on the node) |
-| **2d / shader** | shader (moving pictures and masks drawn on the graphics card: 59 presets picked by their picture: contours, wire mesh and point cloud of the building, raymarched 3D scenes with a depth output (melting forms, a colonnade, the facade as a relief, regions extruded, light in fog), endless travel, 8 bit and pixels, VHS tape and composite video, slit scan and datamosh, clouds, fire, a mapping grid; or paste a shader from shadertoy.com; follows a loop, a field, a mask and the sound), shader mix (two kubakub shaders on its inputs a and b and one mix value: A cuts B in, A bends B, or a fade; on a curve or with the sound) |
+| **2d / shader** | shader (moving pictures and masks drawn on the graphics card: 74 presets picked by their picture: light that knows your regions (each its own colour, pace or pattern), contours, wire mesh and point cloud of the building, raymarched 3D scenes with a depth output (melting forms, a colonnade, the facade as a relief, regions extruded, light in fog), endless travel, 8 bit and pixels, VHS tape and composite video, slit scan and datamosh, clouds, fire, a mapping grid; or paste a shader from shadertoy.com; follows a loop, a field, a mask, your regions and the sound; its picture is the material the region samplers paint from), shader mix (two kubakub shaders on its inputs a and b and one mix value: A cuts B in, A bends B, or a fade; on a curve or with the sound) |
 | **2d / sketch** | scan to line (a phone photo of a drawing, straightened and cleaned), regions from sketch (closed shapes, coloured dots as names), line overlay (your line back on the render) |
-| **2d / generate** | region plan (rules: a prompt and settings per region), region sampler (Klein, Qwen Image 2.1), seam pass, versions (a sheet of looks, ideas per region, prompt rotation, LoRAs and style images: fast numbered drafts, then the picks at full size), audience viewpoint, frame in frame (rooms and worlds behind windows) |
+| **2d / generate** | region prompt (a prompt for chosen regions from fields: pick the regions from a list, write the prompt, set strategy and denoise; chain several), region plan (the same as written rules, with every setting), region sampler (Klein, Qwen Image 2.1; paints from a shader's picture on `material`, changes as much as a mask on `change` allows), seam pass, versions (a sheet of looks, ideas per region, prompt rotation, LoRAs and style images: fast numbered drafts, then the picks at full size), frame in frame (rooms and worlds behind windows) |
 | **2d / director** | kubakub director (the window), director sequence (every frame, sound), director diffuse |
-| **2d / motion** | sound (your sound and how it is heard, set once and carried on one cable to every node that listens; draws the loudness, the beats and the hits), region video sampler (ltx), motion guide (ltx: a rough moving clip from the director, a shader or a previz becomes a finished video that keeps its motion), keyframe clips (h3, video with sound), height animate (a height map or any depth map grows out of the wall: all together, peaks first, in layers or along a field, on a curve or with the sound; also as a lit relief), sound mask swap (layers trade their masks on beats, on low / high hits, or on a control signal), trim to exact duration (audio clips of a constant length for LTX AV) |
-| **2d / post** | align to source (an edited picture back onto the picture it was made from, to the pixel), colour match (to a reference, as .cube too), apply lut, deflicker, retime (optical flow), burn in, export video / frames |
-| **3d / scene** | scene render (Blender: clay, depth, ID passes), projector (where it stands: metres from the wall, height, throw ratio, lens shift or tilt), projector blend (soft-edge masks for several projectors), scene relight (Cycles), scene measure, scene preview and walkthrough (previz from the audience), scene surroundings (the street around the building, from a place on the map or your own model), align 3d model (a model from image-to-3D, moved, turned and scaled onto the real one; written as .glb or .obj with textures), form height (how far that model stands out of the real wall, as a height map in the projection view), brightness compensation |
-| **3d / pieces** | scene pieces, pieces falloff, pieces beat falloff, pieces transform, pieces render: the model's parts (or whole regions) moved like MOPS in Houdini (a wave, a pulse, a stagger, noise or the beats of the director's timeline push, tilt, turn and scale stones, windows and cornices), rendered in Cycles as clay or with the matrix projected on them, from the projector or from the audience |
+| **2d / motion** | sound (your sound and how it is heard, set once and carried on one cable to every node that listens; draws the loudness, the beats and the hits), region video sampler (ltx; a shader clip on `material` moves the regions), motion guide (ltx: a rough moving clip from the director, a shader or a previz becomes a finished video that keeps its motion), keyframe clips (h3, video with sound), height animate (a height map or any depth map grows out of the wall: all together, peaks first, in layers or along a field, on a curve or with the sound; also as a lit relief), sound mask swap (layers trade their masks on beats, on low / high hits, or on a control signal), trim to exact duration (audio clips of a constant length for LTX AV) |
+| **2d / post** | align to source (an edited picture back onto the picture it was made from, to the pixel), colour match (to a reference picture or a .cube look, saved as .cube too), deflicker, retime (optical flow), burn in, export video / frames |
+| **3d / scene** | scene render (Blender: clay, depth, ID passes), projector (where it stands: metres from the wall, height, throw ratio, lens shift or tilt), projector blend (soft-edge masks for several projectors), scene relight (Cycles), scene measure, scene preview and walkthrough (previz from the audience; the spots and the walk are placed on a map on the node), scene surroundings (the street around the building, from a place on the map or your own model), align 3d model (a model from image-to-3D, moved, turned and scaled onto the real one; written as .glb or .obj with textures), form height (how far that model stands out of the real wall, as a height map in the projection view), brightness compensation |
+| **3d / pieces** | scene pieces, pieces falloff, pieces transform, pieces render: the model's parts (or whole regions) moved like MOPS in Houdini (a wave, a pulse, a stagger, noise or the beats of the director's timeline push, tilt, turn and scale stones, windows and cornices), rendered in Cycles as clay or with the matrix projected on them, from the projector or from the audience |
 | **3d / from renders** | render passes (a folder of your passes: picture, depth, normals, every other pass as a mask), regions from cryptomatte (every object by its name from the 3D scene), regions from id renders (Houdini, Blender, any ID pass) |
-| **3d / fabricate** | relief panels in millimetres (mould prep, safety check, STL / OBJ), mesh to relief field, save GLB |
+| **3d / fabricate** | relief panels in millimetres (mould prep with anti perch, safety check, mass, export as STL panel or OBJ prow), mesh to relief field, save GLB |
 | **lab** | experiments: mosaic illusion, onnx style transfer, frame guide (old) |
 | **utils** | load images from a folder, timecode filename prefix (clip start in seconds -> `name_mm-ss-ff`) |
 
@@ -209,11 +235,11 @@ One page per menu group, with every input, the rule syntax, speeds and tests:
 |---|---|
 | [regions](docs/regions.md) | regions from a matrix, a line drawing, mask folders, any masks, SAM 3, Illustrator; regions to SVG / PDF / DXF; canvas plan / to work / restore |
 | [masks](docs/masks.md) | mask field, mask animate: effects, curves, things to try |
-| [shader](docs/shader.md) | shader: the 71 presets by type, adjusting one with sliders and colours and saving your own, pasting a shader from shadertoy.com step by step (also with Buffer tabs), 3D scenes (raymarching) and the depth output, the names a shader can use, speed |
+| [shader](docs/shader.md) | shader: the 74 presets by type, your regions in a shader, mixing two shaders, adjusting one with sliders and colours and saving your own, pasting a shader from shadertoy.com step by step (also with Buffer tabs), 3D scenes (raymarching) and the depth output, the names a shader can use, speed |
 | [sketch](docs/sketch.md) | scan to line, regions from sketch, line overlay |
-| [generate](docs/generate.md) | region plan (the rule text), region sampler (Klein, Qwen Image 2.1 and its LoRAs), seam pass, audience viewpoint, frame in frame |
-| [director](docs/director.md) | the director window: layers, timeline, sound, LTX and H3 clips, diffuse, light layers, video mapping, behaviours, export |
-| [post](docs/post.md) | colour match, apply lut, deflicker, retime, burn in |
+| [generate](docs/generate.md) | region prompt (fields, no rule text), region plan (the rule text), region sampler (Klein, Qwen Image 2.1 and its LoRAs), a shader as the material of your regions, seam pass, frame in frame |
+| [director](docs/director.md) | kubakub sound; the director window: layers, timeline, sound, LTX and H3 clips, diffuse, light layers, video mapping, behaviours, export |
+| [post](docs/post.md) | colour match (a reference picture or a .cube), deflicker, retime, burn in |
 | [3d scene](docs/scene3d.md) | scene render and its ID passes, architecture passes, scene measure, preview, walkthrough, brightness compensation, moving pieces |
 | [from renders](docs/from-renders.md) | regions from ID renders (Houdini, Blender, any ID pass), regions from cryptomatte |
 | [fabricate](docs/fabricate.md) | relief panels in millimetres, safety check, STL / OBJ |

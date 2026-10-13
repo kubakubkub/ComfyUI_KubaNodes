@@ -147,6 +147,10 @@ try:
           np.abs(mheight[0].numpy() * (hi - lo) + lo - mf["height_mm"]).max() < 0.11, f"{lo} .. {hi}")
     af, aprev, aheight = rf.ReliefAntiPerchKub().run(mf, 45.0, 400.0)
     check("anti perch: height is the treated field 0..1", tuple(aheight.shape) == (1, 60, 80) and torch.allclose(aheight, aprev[..., 0]))
+    both, _, brep, _ = rf.ReliefMouldKub().run(field, 20.0, 4.0, 1024, anti_perch=True, sill_angle_deg=45.0, max_span_mm=400.0)
+    check("mould prep with anti_perch on = mould prep, then the old anti perch node",
+          np.allclose(both["height_mm"], af["height_mm"], atol=1e-4) and json.loads(brep)["anti_perch"] is True
+          and json.loads(mrep)["anti_perch"] is False and rf.ReliefAntiPerchKub.DEPRECATED)
     flat = rf._make_field(np.full((8, 8), 5.0, np.float32), 10.0)
     check("a flat field gives an all zero height, no NaN", float(rf._height(flat).abs().max()) == 0.0)
 
@@ -167,6 +171,15 @@ try:
     check("prow: resampling keeps the heights in mm", abs(float(rf._to_px_mm(ramp, 10.0).max()) - 50.0) < 1.0
           and rf._to_px_mm(ramp, 10.0).shape == (40, 60) and rf._to_px_mm(ramp, 5.0) is not None
           and rf._to_px_mm(ramp, 5.0).shape == (80, 120))
+    one = rf.ReliefExportPanelKub()
+    via = obj_verts(one.run(a, "kub_test/prow", 0.0, 1, shape=rf.SHAPES[1], interior_angle_deg=180.0, field_b=b_fine)[0])
+    check("relief export, shape = prow: the same file as the old prow node",
+          all(np.allclose(via[k], p_fine[k], atol=1e-4) for k in p_fine) and rf.ReliefExportProwKub.DEPRECATED)
+    named = one.run(a, "reliefforge/panel", 0.0, 1, shape=rf.SHAPES[1], interior_angle_deg=90.0)[0]
+    check("relief export: a prow with the name left as it came is called prow, not panel",
+          os.path.basename(named).startswith("prow_") and named.endswith(".obj"), named)
+    stl = one.run(a, "kub_test/panel", 0.0, 1)[0]
+    check("relief export: a panel is still an .stl", stl.endswith(".stl") and os.path.getsize(stl) > 84)
     p_one = obj_verts(node.run(a, 90.0, "kub_test/prow", 0.0, 1)[0])
     check("prow: one field is still mirrored onto both wings", np.allclose(size(p_one["wing_0"]), size(p_one["wing_1"]), atol=1e-3))
 finally:

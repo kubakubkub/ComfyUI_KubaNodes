@@ -165,6 +165,25 @@ try:
           and "metres" in ins(npc.KUBA_PiecesFalloff)["width"].tooltip and "seconds" in ins(npc.KUBA_PiecesFalloff)["spread"].tooltip
           and "seconds" in ins(npc.KUBA_PiecesFalloff)["start"].tooltip and described(outs(npc.KUBA_PiecesFalloff), "falloff"))
 
+    import json as _json
+    doc = _json.dumps({"timeline": {"duration": 4, "markers": [{"t": 0.5}, {"t": 1.5}, {"t": 2.5}]}})
+    beat = npc.KUBA_PiecesFalloff.execute(**dict(fkw, type="beat", document=doc, trigger="markers")).args
+    rip = npc.KUBA_PiecesFalloff.execute(**dict(fkw, type="beat", document=doc, trigger="markers", ripple=0.5)).args[0]
+    check("falloff: beat kicks all pieces at once unless 'ripple' is set (stagger's 'spread' is not read)",
+          beat[0]["spread"] == 0.0 and rip["spread"] == 0.5)
+    old = npc.KUBA_PiecesBeatFalloff.execute(doc, "markers", 1, 0.03, 0.3, 0.0, "left to right", 1, 1.0).args
+    same = np.allclose(pc.falloff(beat[0], 0.55, u, v, 10.0, 6.0), pc.falloff(old[0], 0.55, u, v, 10.0, 6.0))
+    check("falloff: type = beat is the old beat falloff node", beat[0]["times"] == [0.5, 1.5, 2.5] and same
+          and pc.falloff(beat[0], 0.55, u, v, 10.0, 6.0).all() and beat[1] == old[1], str(beat[1]))
+    try:
+        npc.KUBA_PiecesFalloff.execute(**dict(fkw, type="beat"))
+        said = ""
+    except ValueError as e:
+        said = str(e)
+    check("falloff: beat without the timeline says what to connect", "document" in said, said)
+    check("falloff: the old beat node is hidden from the menu, not gone",
+          npc.KUBA_PiecesBeatFalloff.define_schema().is_deprecated and "KUBA_PiecesBeatFalloff" in npc.NODE_CLASS_MAPPINGS)
+
     # --- scene pieces: the mask of what can move --------------------------------------------------------------------
     sp_out = npc.KUBA_ScenePieces.execute(scene, 0.2, 0.0, True).args
     pieces, mask = sp_out[0], sp_out[3].numpy()

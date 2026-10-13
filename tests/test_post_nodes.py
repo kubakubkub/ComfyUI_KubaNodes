@@ -54,9 +54,9 @@ try:
 
     # --- colour match
     ins, outs, sch = sockets(npo.KUBA_ColourMatch)
-    check("colour match: old sockets in place, mask added last",
-          ins == ["images", "reference", "method", "strength", "save_lut", "mask"] and outs == ["images", "lut_file"],
-          f"{ins} {outs}")
+    check("colour match: old sockets in place, mask, lut and lut_path added last",
+          ins == ["images", "reference", "method", "strength", "save_lut", "mask", "lut", "lut_path"]
+          and outs == ["images", "lut_file"], f"{ins} {outs}")
     check("colour match: mask is optional, strength has a tooltip",
           sch.inputs[5].optional and bool(sch.inputs[3].tooltip) and bool(sch.inputs[5].tooltip))
     full = npo.KUBA_ColourMatch.execute(frames, ref, "mkl", 1.0, "").result[0]
@@ -87,6 +87,28 @@ try:
     full = npo.KUBA_ApplyLUT.execute(frames, "", 1.0, cube).result[0]
     part = npo.KUBA_ApplyLUT.execute(frames, "", 1.0, cube, mask=left).result[0]
     check("apply lut: without a mask as before", torch.allclose(full, 1 - frames, atol=1e-5))
+    check("apply lut: an old node, hidden from the menu", sch.is_deprecated)
+    # the same .cube through colour match (the one node for a look now)
+    via = npo.KUBA_ColourMatch.execute(frames, lut_path=cube).result[0]
+    check("colour match: a .cube without a reference = apply lut", torch.allclose(via, full, atol=1e-6))
+    both = npo.KUBA_ColourMatch.execute(frames, ref, "mkl", 1.0, "", lut_path=cube).result[0]
+    matched = npo.KUBA_ColourMatch.execute(frames, ref, "mkl", 1.0, "").result[0]
+    check("colour match: reference and .cube = the reference first, the .cube on top",
+          torch.allclose(both, 1 - matched, atol=1e-5))
+    try:
+        npo.KUBA_ColourMatch.execute(frames)
+        said = ""
+    except ValueError as e:
+        said = str(e)
+    check("colour match: neither a reference nor a .cube says what to connect", "reference" in said and ".cube" in said, said)
+    stamp = npo.KUBA_ColourMatch.fingerprint_inputs(lut_path=cube)
+    os.utime(cube, (os.path.getmtime(cube) + 5, os.path.getmtime(cube) + 5))
+    check("colour match: a .cube saved again is read again", npo.KUBA_ColourMatch.fingerprint_inputs(lut_path=cube) != stamp
+          and npo.KUBA_ColourMatch.fingerprint_inputs() == "")
+    saved = npo.KUBA_ColourMatch.execute(frames, None, "mkl", 1.0, "kk_test_invert", lut_path=cube).result[1]
+    back = npo.KUBA_ColourMatch.execute(frames, lut_path=saved).result[0]
+    os.remove(saved)
+    check("colour match: save_lut writes the look of a .cube too", torch.allclose(back, full, atol=2e-2))
     check("apply lut: only inside the mask", torch.allclose(part[:, :, :32], full[:, :, :32], atol=1e-6)
           and torch.allclose(part[:, :, 32:], frames[:, :, 32:], atol=1e-6))
 
@@ -128,7 +150,7 @@ try:
     # --- project settings
     ins, outs, sch = sockets(npr.KUBA_Project)
     check("project settings: old outputs in place, facade_width_m and mm_per_px added last",
-          outs == ["width", "height", "fps", "name", "viewer", "report", "facade_width_m", "mm_per_px"]
+          outs == ["width", "height", "fps", "name", "viewer", "report", "facade_width_m", "mm_per_px", "preview"]
           and all(o.tooltip for o in sch.outputs), str(outs))
     r = npr.KUBA_Project.execute("show", "uhd 3840x2160", 0, 0, 25.0, 40.0, 0.0, -1.0, 1.7, 30.0).result
     check("project settings: 40 m over 3840 px = 10.4 mm per px", r[0] == 3840 and r[6] == 40.0
@@ -136,6 +158,11 @@ try:
     r = npr.KUBA_Project.execute("show", "hd 1920x1080", 0, 0, 25.0, 40.0, 0.0, -1.0, 1.7, 30.0,
                                  matrix=torch.zeros((1, 100, 2000, 3))).result
     check("project settings: a connected matrix sets the width for mm per px", abs(r[7] - 20.0) < 1e-9, str(r[7]))
+    red = (r[8][0, ..., 0] > 0.9) & (r[8][0, ..., 1] < 0.3)
+    check("project settings: preview = the matrix with the audience's eye as a red dot (was audience viewpoint)",
+          tuple(r[8].shape) == (1, 100, 2000, 3) and bool(red.any()) and abs(float(red.nonzero()[:, 1].float().mean()) - 1000) < 2)
+    r = npr.KUBA_Project.execute("show", "uhd 3840x2160", 0, 0, 25.0, 40.0, 0.0, -1.0, 1.7, 30.0).result
+    check("project settings: preview without a matrix is a small dark frame of its shape", tuple(r[8].shape) == (1, 540, 960, 3))
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

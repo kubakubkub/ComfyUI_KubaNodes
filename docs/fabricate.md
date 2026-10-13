@@ -17,16 +17,14 @@ wants, and it makes the rules of the call into parameters you can turn.
                         |
       kubakub relief field (from depth)     panel_width_mm, max_relief_mm, panel_bottom_mm
                         |
-      kubakub relief mould prep             min_edge_radius_mm, draft_angle_deg
-                        |
-      kubakub relief anti perch             sill_angle_deg
+      kubakub relief mould prep / anti perch     min_edge_radius_mm, draft_angle_deg, anti_perch, sill_angle_deg
                         |
             +-----------+-----------+
             |           |           |
-   Safety Check   Mass Estimate   Export Prow (OBJ) / Export Panel (STL)
+   Safety Check   Mass Estimate   kubakub relief export (shape: STL panel or OBJ prow)
 ```
 
-Run Safety Check twice, once before Anti Perch and once after. The two overlays
+Run Safety Check twice, once with `anti_perch` off and once with it on. The two overlays
 side by side are a strong page in a submission: here is every surface a person
 could stand on, and here is the same facade after the geometry fixed it.
 
@@ -36,7 +34,7 @@ could stand on, and here is the same facade after the geometry fixed it.
 give the true panel width and the deepest relief; the pixel size follows. The
 field carries its own scale from here on, so you never type a dimension twice.
 
-**kubakub relief mould prep** does two things.
+**kubakub relief mould prep / anti perch** does two things, and a third when `anti_perch` is on.
 *Minimum edge radius* is a grayscale closing then opening with a spherical
 structuring element, so a ball of that radius can touch the surface from both
 sides. That is precisely what "no sharp or pointed elements" means to an
@@ -46,7 +44,8 @@ surface below yours that is Lipschitz with constant cot(draft). No undercuts,
 one piece mould, clean release. The report tells you how much relief depth the
 two operations cost you.
 
-**kubakub relief anti perch** is the one that saves the entry. It applies the same
+**`anti_perch`** (a switch on the same node; a node of its own before 0.4.0, saved workflows with it still run)
+is the one that saves the entry. It applies the same
 convolution but only upward, so the relief may grow outward as it descends and
 never the other way. Vertical reveals and cornice undersides survive; the flat
 top faces a foot needs are gone. On a test facade with protruding window sills
@@ -65,8 +64,8 @@ flat projection, multiplies by shell thickness and density, adds a frame
 allowance, and divides by footprint. That last number is the one a call
 usually caps.
 
-**Relief Export Panel** writes a binary STL in millimetres.
-**Relief Export Prow** folds one or two panels around a shared vertical edge at
+**kubakub relief export** with `shape` = panel writes a binary STL in millimetres.
+With `shape` = prow (a node of its own before 0.4.0) it folds one or two panels around a shared vertical edge at
 a given interior angle and writes an OBJ. With a single field it mirrors it
 onto both wings. Read the angle off the site plan. A `field_b` with another
 pixel size (another image resolution or panel width) is resampled to
@@ -87,8 +86,7 @@ elsewhere (a depth or displacement map, a mask for a region), take `height`:
 | Node | Output | What it is | Range in mm |
 |---|---|---|---|
 | kubakub relief field (from depth) | `height` (MASK) | the relief, 0 = the back, 1 = the highest point | 0 to `max_relief_mm` |
-| kubakub relief mould prep | `height` (MASK) | the mould-ready relief, 0 = lowest, 1 = highest | `height_range_mm` in the report |
-| kubakub relief anti perch | `height` (MASK) | the relief with sloped sills, 0 = lowest, 1 = highest | printed in the console |
+| kubakub relief mould prep / anti perch | `height` (MASK) | the mould-ready relief (with sloped sills when `anti_perch` is on), 0 = lowest, 1 = highest | `height_range_mm` in the report |
 | kubakub mesh to relief field | `height` (MASK) | the mesh seen from the chosen side, 0 = the back, 1 = nearest | `height_range_mm` in the report |
 
 ## Turntable check: what was added

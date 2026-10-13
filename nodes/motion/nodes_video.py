@@ -268,8 +268,8 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 io.Image.Input("material", optional=True,
                                tooltip="A clip the animated regions follow, e.g. the images of a kubakub shader with "
                                        "the same regions connected: each region moves as the clip moves there, and the "
-                                       "model repaints it in its own look (plan: material_repaint, 0.91; about 0.8 "
-                                       "holds small regions closer to the clip). Frame by frame at this node's fps; a "
+                                       "model repaints it in its own look (plan: material_repaint, 0.8; 0.91 is "
+                                       "freer, small regions can lose the timing). Frame by frame at this node's fps; a "
                                        "shorter clip holds its last frame. Where the clip is the same as the picture "
                                        "the model moves the region freely."),
             ],
@@ -324,9 +324,7 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 still = cv2.resize(still, (W, H), interpolation=cv2.INTER_AREA)
         mat = None
         if material is not None and len(material):   # the clip the animated regions follow, at the frames' size
-            mat = material[..., :3].cpu().float().numpy()
-            if mat.shape[1:3] != (H, W):
-                mat = np.stack([cv2.resize(m, (W, H), interpolation=cv2.INTER_AREA) for m in mat])
+            mat = material[..., :3].cpu().float().numpy()   # another size stays as it is: only each clip's crop is scaled
         groups = vd.clip_groups(plan.plan["regions"], only)
         if upscale_model is not None and stage1_mp * 4 > stage2_max_mp:
             stage1_mp = stage2_max_mp / 4              # the second stage is 2x per side: keep it inside the cap
@@ -380,7 +378,11 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 held = {}                              # a still material is cut and scaled once
                 for k in idx_m:
                     if k not in held:
-                        held[k] = cv2.resize(mat[k, y0:y1, x0:x1], (w1, h1), interpolation=cv2.INTER_AREA)
+                        mh, mw = mat.shape[1:3]        # the crop's box in the material's own pixels
+                        mx0, my0 = min(x0 * mw // W, mw - 1), min(y0 * mh // H, mh - 1)
+                        cut = mat[k, my0:max(my0 + 1, -(-y1 * mh // H)), mx0:max(mx0 + 1, -(-x1 * mw // W))]
+                        held[k] = cv2.resize(cut, (w1, h1),
+                                             interpolation=cv2.INTER_AREA if cut.shape[1] >= w1 else cv2.INTER_LINEAR)
                 small = cv2.resize(region_crop.astype(np.uint8), (w1, h1), interpolation=cv2.INTER_NEAREST) > 0
                 guide = ma.guide(pixels.numpy(), [held[k] for k in idx_m], small,
                                  vd.frames_in_range(pixels.shape[0], fps, ts, te))

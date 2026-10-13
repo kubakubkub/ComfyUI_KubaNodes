@@ -100,8 +100,9 @@ def clean_path(path: str) -> str:
     """A path as typed (quotes from 'Copy as path', %VAR%, ~) -> the file path the export uses."""
     raw = (path or "").strip().strip('"').strip("'")
     out = os.path.expandvars(os.path.expanduser(raw))
-    if ("%" in raw or "$" in raw) and out.replace("/", "\\").startswith("\\\\"):
-        raise ValueError("a path with %VARIABLES% must not lead to a network share (\\\\server\\...): type the share's path itself.")
+    if out.replace("/", "\\").startswith("\\\\"):     # as save_paths.local (this file also runs on its own)
+        raise ValueError("a network path (\\\\server\\share) is not opened from a node. Give the share a drive letter "
+                         "in Windows (Map network drive) and use that path.")
     return out
 
 

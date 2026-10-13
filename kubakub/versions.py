@@ -57,6 +57,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from . import save_paths
+
 MODES = ("rotate", "combine", "one by one")
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 NOTHING = ("", "-", "none", "off")
@@ -396,7 +398,7 @@ def only_regions(plan: dict, only: str) -> tuple[dict, int]:
     if not only:
         return plan, len(plan["order"])
     try:
-        section = rp.parse_rules(f"[{only}]\n")[0]
+        section = rp.selector(only)
     except rp.PlanError as e:
         raise SheetError(f"only: {e}") from None
     hit = {e["region_id"] for e in plan["regions"] if section.match(e) is not None}
@@ -470,6 +472,10 @@ def next_run(names) -> int:
 
 def pick_files(folder: str) -> list[str]:
     """The images of a picks folder (not of its subfolders), by name."""
+    try:
+        save_paths.local(folder)
+    except ValueError as e:
+        raise SheetError(f"picks_folder: {e}") from None
     if not os.path.isdir(folder):
         raise SheetError(f"picks_folder: '{folder}' is not a folder")
     files = sorted(f for f in os.listdir(folder)

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import weakref
 from collections import OrderedDict
@@ -303,7 +304,9 @@ class KUBA_Versions(io.ComfyNode):
         only = (only or "").strip()
         painted = None                      # with 'only': how many regions of a version are painted
         for v in todo:
-            rules = base_of[v.number].rstrip("\n") + "\n" + v.rules
+            base = base_of[v.number].rstrip("\n")
+            # a plan stacked from kubakub region prompt nodes: the version goes on top of all of them
+            rules = base + ("\n[then]\n" if re.search(r"(?mi)^\s*\[then\]\s*$", base) else "\n") + v.rules
             plan_seed = seed_of[v.number]
             start_of(v)                     # an image of another shape stops the queue here, too
             try:

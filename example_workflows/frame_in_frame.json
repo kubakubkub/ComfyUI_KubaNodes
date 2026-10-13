@@ -397,7 +397,7 @@
   },
   {
    "id": 3,
-   "type": "KUBA_Viewer",
+   "type": "KUBA_Project",
    "pos": [
     400,
     598
@@ -418,30 +418,71 @@
    ],
    "outputs": [
     {
+     "name": "width",
+     "type": "INT",
+     "links": [],
+     "slot_index": 0
+    },
+    {
+     "name": "height",
+     "type": "INT",
+     "links": [],
+     "slot_index": 1
+    },
+    {
+     "name": "fps",
+     "type": "FLOAT",
+     "links": [],
+     "slot_index": 2
+    },
+    {
+     "name": "name",
+     "type": "STRING",
+     "links": [],
+     "slot_index": 3
+    },
+    {
      "name": "viewer",
      "type": "KUBA_VIEWER",
      "links": [
       10
      ],
-     "slot_index": 0
-    },
-    {
-     "name": "preview",
-     "type": "IMAGE",
-     "links": [],
-     "slot_index": 1
+     "slot_index": 4
     },
     {
      "name": "report",
      "type": "STRING",
      "links": [],
-     "slot_index": 2
+     "slot_index": 5
+    },
+    {
+     "name": "facade_width_m",
+     "type": "FLOAT",
+     "links": [],
+     "slot_index": 6
+    },
+    {
+     "name": "mm_per_px",
+     "type": "FLOAT",
+     "links": [],
+     "slot_index": 7
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": [],
+     "slot_index": 8
     }
    ],
    "properties": {
-    "Node name for S&R": "KUBA_Viewer"
+    "Node name for S&R": "KUBA_Project"
    },
    "widgets_values": [
+    "frame in frame",
+    "custom",
+    1920,
+    1080,
+    25.0,
     40.0,
     0.0,
     -1.0,
@@ -1111,7 +1152,7 @@
   [
    10,
    3,
-   0,
+   4,
    5,
    1,
    "KUBA_VIEWER"

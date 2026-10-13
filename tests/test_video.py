@@ -416,16 +416,16 @@ def test_material():
     g = seen["pixels"][0]
     assert float((g[4] - g[12]).abs().max()) > 0.2, "the material's frames are in the crop"
     assert torch.equal(g[4][0, 0], seen_still_corner(g, plain)), "outside the region the crop stays the still"
-    assert seen["sigmas"][0] != nv.SIGMAS_1 and seen["sigmas"][0].startswith("0.91"), seen["sigmas"]
+    assert seen["sigmas"][0] != nv.SIGMAS_1 and seen["sigmas"][0].startswith("0.8"), seen["sigmas"]
     assert float(seen["masks"][0][0, 0, 0].max()) > 0.0, "a guided clip is repainted from its first frame on"
-    assert "repainted from noise level 0.91" in out[1], out[1]
+    assert "repainted from noise level 0.8" in out[1], out[1]
     ops = Seen()
     _run(_plan(rules), ops, material=ramp)
     assert not any(c[0] == "sample" for c in ops.calls), "the same material: the clip comes from the cache"
     for v in seen.values():
         v.clear()
-    low = _run(_plan(rules + "material_repaint = 0.8\n"), Seen(), material=ramp).args
-    assert seen["sigmas"][0].startswith("0.8") and "0.8" in low[1], seen["sigmas"]
+    free = _run(_plan(rules + "material_repaint = 0.91\n"), Seen(), material=ramp).args
+    assert seen["sigmas"][0].startswith("0.91") and "0.91" in free[1], seen["sigmas"]
     for v in seen.values():
         v.clear()
     late = _run(_plan(rules + "t_start = 1.0\n"), Seen(), material=ramp).args      # 8 fps: frame 8 on

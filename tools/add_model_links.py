@@ -32,8 +32,6 @@ EXTRA = [
      HF + "Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_w4a8.safetensors"),
     ("qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors", "text_encoders",
      HF + "Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors"),
-    ("Qwen-Image-2.1-viggle-turbo-v0.2-5step-lora-r256.safetensors", "loras",
-     HF + "Viggle/Qwen-Image-2.1-viggle-turbo/resolve/main/Qwen-Image-2.1-viggle-turbo-v0.2-5step-lora-r256.safetensors"),
     ("texture_fix_vae_for_qwen_image_2.1_bf16.safetensors", "vae",
      HF + "madebyollin/texture-fix-vae-for-qwen-image-2.1/resolve/main/texture_fix_vae_for_qwen_image_2.1_bf16.safetensors"),
     ("qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "text_encoders",
@@ -56,7 +54,7 @@ def table() -> dict:
 
 def all_nodes(workflow: dict):
     yield from workflow.get("nodes", [])
-    for sub in workflow.get("definitions", {}).get("subgraphs", []):
+    for sub in (workflow.get("definitions") or {}).get("subgraphs") or []:
         yield from sub.get("nodes", [])
 
 

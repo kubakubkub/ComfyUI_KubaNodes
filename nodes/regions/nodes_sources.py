@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 
 import numpy as np
@@ -701,9 +702,11 @@ class KUBA_RegionsMask(io.ComfyNode):
             search_aliases=['select', 'mask'],
             description=(
                 "Make a mask of chosen regions, e.g. all windows, to use with any effect or core node. "
-                "The regions are picked with a selector in plan syntax: names with wildcards "
-                "('W_F1_*'), 'group:Windows', 'tag:front', comma = or, space = and, '!' = not. Lets any "
-                "effect or core node work on regions, or feeds the director as a layer mask."),
+                "Pick them with the 'pick regions' button (the groups, floors and sections there are, after the "
+                "regions node has run once) or type a selector in plan syntax: names with wildcards "
+                "('W_F1_*'), 'group:Windows', 'tag:front', comma = or, space = and, '!' = not. The node shows "
+                "the chosen regions lit up, and 'which' passes the choice on as text: connect it to the "
+                "'which regions' field of other nodes and they all work on the same regions."),
             inputs=[
                 RegionsType.Input("regions", tooltip="From any kubakub regions node (e.g. regions from masks)."),
                 io.String.Input("select", display_name=rp.WHICH, default="*", placeholder=rp.WHICH_HINT,
@@ -723,7 +726,11 @@ class KUBA_RegionsMask(io.ComfyNode):
                      io.Mask.Output("region_masks", tooltip="One mask per selected region (batch), in the order of "
                                                             "names, before grow, feather and invert. Needs "
                                                             "per_region_masks on. Above 4 GB of RAM the node "
-                                                            "stops and asks for a narrower select.")],
+                                                            "stops and asks for a narrower select."),
+                     io.String.Output("which", display_name=rp.WHICH,
+                                      tooltip="The text of 'which regions' as it is: connect it to the 'which "
+                                              "regions' field of a kubakub shader, region sampler, mask field ... so "
+                                              "one choice serves them all.")],
         )
 
     @classmethod
@@ -755,7 +762,56 @@ class KUBA_RegionsMask(io.ComfyNode):
             each = torch.zeros((len(chosen), *lab.shape), dtype=torch.float32)
             for i, r in enumerate(chosen):              # one at a time: no second full batch as bool
                 each[i] = torch.from_numpy(lab == r["region_id"])
-        return io.NodeOutput(torch.from_numpy(np.clip(m, 0, 1))[None], chr(10).join(names), each)
+        shown = torch.from_numpy(lit_preview(lab, ids))[None]
+        return io.NodeOutput(torch.from_numpy(np.clip(m, 0, 1))[None], chr(10).join(names), each, select,
+                             ui=ui.PreviewImage(shown, cls=cls))
+
+
+def lit_preview(lab, ids, long_side=1024):
+    """The chosen regions lit up (orange) among the others (grey, with their borders): float32 [h, w, 3]."""
+    import cv2
+    h, w = lab.shape
+    k = min(1.0, float(long_side) / max(h, w))
+    small = cv2.resize(lab.astype(np.int32), (max(1, round(w * k)), max(1, round(h * k))), interpolation=cv2.INTER_NEAREST)
+    out = np.full((*small.shape, 3), 0.07, np.float32)
+    out[small >= 0] = 0.24
+    out[np.isin(small, list(ids))] = (0.945, 0.541, 0.345)               # #f18a58
+    edge = np.zeros(small.shape, bool)
+    edge[:, 1:] |= small[:, 1:] != small[:, :-1]
+    edge[1:, :] |= small[1:, :] != small[:-1, :]
+    out[edge] *= 0.45
+    return out
+
+
+def _routes():
+    """GET /kubakub/regions/seen?nodes=12,7,3 -> what there is to pick in the regions of the first of these nodes
+    that made any in this session (regions_seen.summary), for the 'pick regions' buttons. Names only, from memory."""
+    srv = sys.modules.get("server")                        # no running ComfyUI (the tests): no route
+    if srv is None or getattr(getattr(srv, "PromptServer", None), "instance", None) is None:
+        return
+    try:
+        from aiohttp import web
+    except ImportError:
+        return
+    from ...kubakub import regions_seen
+
+    async def seen(request):
+        try:
+            ids = [s for s in str(request.query.get("nodes", "")).split(",") if s.strip()][:200]
+            node, table = regions_seen.find([s.strip() for s in ids])
+            if table is None:
+                return web.json_response({"node": None})
+            return web.json_response({"node": node, **regions_seen.summary(table)})
+        except Exception as e:  # noqa: BLE001
+            return web.json_response({"node": None, "note": (str(e).splitlines() or [""])[0]})
+
+    try:
+        srv.PromptServer.instance.routes.get("/kubakub/regions/seen")(seen)
+    except (AttributeError, RuntimeError) as e:
+        log.warning("[KUBA regions] route not registered: %s", e)
+
+
+_routes()
 
 
 NODE_CLASS_MAPPINGS = {

@@ -108,6 +108,7 @@ class KUBA_SoundMaskSwap(io.ComfyNode):
     def execute(cls, audio=None, background=None, masks=None, pictures=None, order="loop", step_on="beats", nth=1,
                 fade=0.0, fade_style="crossfade", feather=0.0, threshold=0.3, fps=25.0, seconds=0.0, scale=0.5, mask_of=1,
                 signal=None, step_times="", start=0.0, bpm=0.0, every=0.5, gap=0.1, seed=1, sound=None) -> io.NodeOutput:
+        gate = (float(threshold), float(gap))        # step_on = signal: these two belong to the control wav, not to the sound
         audio, heard, cabled = so.take(sound, audio, bpm=bpm, threshold=threshold, gap=gap)
         bpm, threshold, gap = heard["bpm"], heard["threshold"], heard["gap"]
         start = 0.0 if cabled else start             # kubakub sound has cut the sound already
@@ -145,7 +146,7 @@ class KUBA_SoundMaskSwap(io.ComfyNode):
         if step_on == "signal":
             if signal is None:
                 raise ValueError("kubakub sound mask swap: step_on = signal needs a control wav in 'signal' (Load Audio).")
-            times = so.gate_times(so.to_mono(signal["waveform"]), int(signal["sample_rate"]), st.threshold, st.gap)
+            times = so.gate_times(so.to_mono(signal["waveform"]), int(signal["sample_rate"]), *gate)
         elif step_on == "list":
             times = so.parse_times(step_times)
             if not times:

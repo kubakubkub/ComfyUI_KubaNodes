@@ -163,6 +163,19 @@ t = tcf.TimecodeFilenamePrefix
 check("timecode filename prefix: a tooltip on every input and output",
       all(v[1].get("tooltip") for v in t.INPUT_TYPES()["required"].values()) and len(t.OUTPUT_TOOLTIPS) == len(t.RETURN_TYPES) == 3
       and t().build("clip", 12.0, 25.0, "_") == ("clip_00-12-00", "00-12-00", 300))
+import torch  # noqa: E402
+_tex = torch.rand(1, 64, 96, 3)
+_by_px = mi.MosaicIllusion().build(_tex, _tex, 12, 0.5, "select", True, seed=1)
+_by_m = mi.MosaicIllusion().build(_tex, _tex, 48, 0.5, "select", True, seed=1, tile_width_m=1.0, facade_width_m=8.0)
+check("mosaic illusion: a tile of 1 m on an 8 m facade, 96 px wide = tile_px 12 (was mosaic grid from camera)",
+      torch.equal(_by_px[2], _by_m[2]) and mi.MosaicGridFromCamera().calc(8.0, 1.0, 96, 1)[0] == 12
+      and mi.MosaicGridFromCamera.DEPRECATED)
+try:
+    mi.MosaicIllusion().build(_tex, _tex, 12, 0.5, "select", True, tile_width_m=1.0)
+    _said = ""
+except ValueError as e:
+    _said = str(e)
+check("mosaic illusion: one of the two metre fields alone says what is missing", "facade_width_m" in _said, _said)
 check("mosaic illusion: detail is marked adaptive only",
       mi.MosaicIllusion.INPUT_TYPES()["optional"]["detail"][1]["tooltip"].startswith("adaptive only"))
 

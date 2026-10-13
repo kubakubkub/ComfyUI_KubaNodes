@@ -223,7 +223,8 @@ class MosaicIllusion:
                                "of a batch)."}),
                 "tile_px": ("INT", {"default": 48, "min": 2, "max": 2048,
                     "tooltip": "Tile size in pixels. With adaptive on this is "
-                               "the largest tile."}),
+                               "the largest tile. Not used when tile_width_m "
+                               "and facade_width_m give the size in metres."}),
                 "strength": ("FLOAT", {"default": 0.55, "min": 0.0, "max": 1.0,
                     "step": 0.01,
                     "tooltip": "0 = material only, 1 = target fully readable. "
@@ -310,6 +311,17 @@ class MosaicIllusion:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFF,
                     "tooltip": "Random seed for jitter, edge noise and dither. "
                                "Same seed = same mosaic."}),
+                "tile_width_m": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 50.0,
+                    "step": 0.001,
+                    "tooltip": "The tile size from real sizes instead of "
+                               "tile_px: the width of one tile on the building, "
+                               "in metres (a brick, a stone). Needs "
+                               "facade_width_m. 0 = use tile_px."}),
+                "facade_width_m": ("FLOAT", {"default": 0.0, "min": 0.0,
+                    "max": 500.0, "step": 0.01,
+                    "tooltip": "Real width of the facade the texture covers, "
+                               "in metres. With tile_width_m it sets the tile "
+                               "size. 0 = use tile_px."}),
             },
         }
 
@@ -332,10 +344,18 @@ class MosaicIllusion:
               adaptive=False, min_tile_px=8, detail=0.06, max_depth=3,
               edge_noise=0.0, edge_scale=12.0,
               palette_size=12, dither=0.9, level_radius=6.0,
-              mortar=0.0, mortar_value=0.0, jitter=0.0, seed=0):
+              mortar=0.0, mortar_value=0.0, jitter=0.0, seed=0,
+              tile_width_m=0.0, facade_width_m=0.0):
 
         tex = _to_bchw(texture).float()
         B, C, H, W = tex.shape
+        if tile_width_m > 0 or facade_width_m > 0:      # the tile size from metres on the building
+            if not (tile_width_m > 0 and facade_width_m > 0):
+                raise ValueError("kubakub mosaic illusion: the tile size in metres needs both tile_width_m (one "
+                                 "tile) and facade_width_m (the whole texture); set both, or both to 0 for tile_px.")
+            tile_px = tile_px_from(facade_width_m, tile_width_m, W)
+            print("[kubakub mosaic illusion] {:.1f} px/m, tile {} px, {} across".format(
+                W / float(facade_width_m), tile_px, int(round(W / float(tile_px)))))
         dev = tex.device
 
         # target, handled automatically
@@ -408,8 +428,14 @@ class MosaicIllusion:
         return (_to_bhwc(out), _to_bhwc(vis), _to_bhwc(grid.contiguous()))
 
 
+def tile_px_from(facade_width_m, feature_width_m, width_px, divide=1):
+    """Tile size in pixels of a tile feature_width_m wide on a facade facade_width_m wide, drawn width_px wide."""
+    return max(2, int(round(feature_width_m * width_px / float(facade_width_m) / divide)))
+
+
 class MosaicGridFromCamera:
     """Derive tile_px from real dimensions instead of guessing."""
+    DEPRECATED = True          # now tile_width_m / facade_width_m of kubakub mosaic illusion; kept for saved workflows
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -443,7 +469,7 @@ class MosaicGridFromCamera:
 
     def calc(self, facade_width_m, feature_width_m, render_width_px, divide):
         ppm = render_width_px / float(facade_width_m)
-        tile = max(2, int(round(feature_width_m * ppm / divide)))
+        tile = tile_px_from(facade_width_m, feature_width_m, render_width_px, divide)
         across = int(round(render_width_px / float(tile)))
         return (tile, "{:.1f} px/m, tile {} px, {} across".format(
             ppm, tile, across))
@@ -455,5 +481,5 @@ NODE_CLASS_MAPPINGS = {
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MosaicIllusion": "kubakub mosaic illusion",
-    "MosaicGridFromCamera": "kubakub mosaic grid from camera",
+    "MosaicGridFromCamera": "kubakub mosaic grid from camera (old)",
 }

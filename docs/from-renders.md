@@ -122,7 +122,8 @@ each object's material as a tag (`[tag:glass]`). `exclude` leaves helper objects
 output is the picture of the same EXR (Combined pass, sRGB). Connect your `matrix` to get its size.
 `scope` (optional mask, the size of the matrix, or of the render without one): pixels outside it are never part
 of a region; an object wholly outside it is no region. The `file` path can be pasted as Explorer copies it (with
-quotes; `~` and `%VARIABLES%` work).
+quotes; `~` and `%VARIABLES%` work). A network path (`\\server\share`) is not opened, here or in any other file
+or folder field of the pack: give the share a drive letter in Windows and use that path.
 
 EXR support: built in (no extra packages) for scanline and tiled files with no, RLE, ZIPS or ZIP compression,
 which is what Blender and most renderers write by default. PIZ, DWA, B44, PXR24 and multipart files are read

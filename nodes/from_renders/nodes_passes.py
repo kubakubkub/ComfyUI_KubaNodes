@@ -17,6 +17,7 @@ from comfy_api.latest import io, ui
 
 from ...kubakub import render_passes as rp
 from ...kubakub import samples
+from ...kubakub import save_paths
 
 log = logging.getLogger("KUBA.regions")
 
@@ -26,9 +27,7 @@ CATEGORY = "kubakub/3d/from renders"
 def _clean(path):
     raw = (path or "").strip().strip('"').strip("'")
     out = os.path.expandvars(os.path.expanduser(raw))
-    if ("%" in raw or "$" in raw) and out.replace("/", "\\").startswith("\\\\"):
-        raise ValueError("a path with %VARIABLES% must not lead to a network share (\\\\server\\...): type the share's path itself.")
-    return out
+    return save_paths.local(out)
 
 
 class KUBA_RenderPasses(io.ComfyNode):

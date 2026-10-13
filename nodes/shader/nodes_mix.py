@@ -172,6 +172,8 @@ class KUBA_ShaderMix(io.ComfyNode):
 
         wave, hz, mono = _sound_in(audio)
         sample = False
+        if pa is not None and pb is not None and image is not None:
+            notes.append("image: not used while 'a' and 'b' are both connected (it is the picture a preset reads)")
         if longest > 1:
             secs = longest / fps
             short = [n for n, p in (("a", pa), ("b", pb)) if p is not None and 1 < len(p) < longest]

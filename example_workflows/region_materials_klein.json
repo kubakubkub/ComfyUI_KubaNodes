@@ -2,7 +2,7 @@
  "id": "0d6c2f7a-93b1-4c58-8e2d-5b7f1a4c6e90",
  "revision": 0,
  "last_node_id": 99,
- "last_link_id": 14,
+ "last_link_id": 15,
  "nodes": [
   {
    "id": 1,
@@ -25,9 +25,9 @@
      "type": "IMAGE",
      "links": [
       1,
-      3,
-      6,
-      11
+      4,
+      5,
+      12
      ]
     },
     {
@@ -124,8 +124,8 @@
      "name": "regions",
      "type": "KUBA_REGIONS",
      "links": [
-      4,
-      5
+      3,
+      6
      ]
     },
     {
@@ -158,6 +158,75 @@
    ]
   },
   {
+   "id": 8,
+   "type": "KUBA_RegionPrompt",
+   "pos": [
+    1240,
+    870
+   ],
+   "size": [
+    400,
+    560
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "regions",
+     "type": "KUBA_REGIONS",
+     "link": 3
+    },
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "link": null
+    },
+    {
+     "name": "image",
+     "type": "IMAGE",
+     "link": 4
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan",
+     "type": "KUBA_PLAN",
+     "links": [
+      11
+     ]
+    },
+    {
+     "name": "which regions",
+     "type": "STRING",
+     "links": [
+      7
+     ]
+    },
+    {
+     "name": "preview",
+     "type": "IMAGE",
+     "links": []
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KUBA_RegionPrompt"
+   },
+   "widgets_values": [
+    "group:Windows tag:M_FLOOR_F1",
+    "a stained glass window, coloured glass in lead lines, lit from inside at night",
+    "inpaint",
+    0.8,
+    0,
+    ""
+   ]
+  },
+  {
    "id": 3,
    "type": "KUBA_Shader",
    "pos": [
@@ -169,13 +238,13 @@
     1050
    ],
    "flags": {},
-   "order": 2,
+   "order": 3,
    "mode": 0,
    "inputs": [
     {
      "name": "image0",
      "type": "IMAGE",
-     "link": 3
+     "link": 5
     },
     {
      "name": "image1",
@@ -210,7 +279,15 @@
     {
      "name": "regions",
      "type": "KUBA_REGIONS",
-     "link": 4
+     "link": 6
+    },
+    {
+     "name": "only",
+     "type": "STRING",
+     "link": 7,
+     "widget": {
+      "name": "only"
+     }
     },
     {
      "name": "sound",
@@ -223,7 +300,7 @@
      "name": "images",
      "type": "IMAGE",
      "links": [
-      12
+      13
      ]
     },
     {
@@ -282,68 +359,9 @@
     "",
     "screen",
     1.0,
-    "W_F1_*"
+    ""
    ],
    "title": "the material"
-  },
-  {
-   "id": 8,
-   "type": "KUBA_RegionPlan",
-   "pos": [
-    1240,
-    870
-   ],
-   "size": [
-    400,
-    330
-   ],
-   "flags": {},
-   "order": 3,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "regions",
-     "type": "KUBA_REGIONS",
-     "link": 5
-    },
-    {
-     "name": "image",
-     "type": "IMAGE",
-     "link": 6
-    }
-   ],
-   "outputs": [
-    {
-     "name": "plan",
-     "type": "KUBA_PLAN",
-     "links": [
-      10
-     ]
-    },
-    {
-     "name": "plan_json",
-     "type": "STRING",
-     "links": []
-    },
-    {
-     "name": "report",
-     "type": "STRING",
-     "links": []
-    },
-    {
-     "name": "preview",
-     "type": "IMAGE",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "KUBA_RegionPlan"
-   },
-   "widgets_values": [
-    "[default]\nstrategy = keep\n\n[W_F1_*]\nstrategy = inpaint\nprompt = a stained glass window, coloured glass in lead lines, lit from inside at night\ndenoise = 0.8\n",
-    0,
-    ""
-   ]
   },
   {
    "id": 10,
@@ -365,12 +383,19 @@
      "name": "MODEL",
      "type": "MODEL",
      "links": [
-      7
+      8
      ]
     }
    ],
    "properties": {
-    "Node name for S&R": "UNETLoader"
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "flux-2-klein-4b.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/flux2-klein/resolve/main/split_files/diffusion_models/flux-2-klein-4b.safetensors",
+      "directory": "diffusion_models"
+     }
+    ]
    },
    "widgets_values": [
     "flux-2-klein-4b.safetensors",
@@ -397,12 +422,19 @@
      "name": "CLIP",
      "type": "CLIP",
      "links": [
-      8
+      9
      ]
     }
    ],
    "properties": {
-    "Node name for S&R": "CLIPLoader"
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "qwen_3_4b.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
+      "directory": "text_encoders"
+     }
+    ]
    },
    "widgets_values": [
     "qwen_3_4b.safetensors",
@@ -430,12 +462,19 @@
      "name": "VAE",
      "type": "VAE",
      "links": [
-      9
+      10
      ]
     }
    ],
    "properties": {
-    "Node name for S&R": "VAELoader"
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "flux2-vae.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+      "directory": "vae"
+     }
+    ]
    },
    "widgets_values": [
     "flux2-vae.safetensors"
@@ -459,27 +498,27 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 7
+     "link": 8
     },
     {
      "name": "clip",
      "type": "CLIP",
-     "link": 8
+     "link": 9
     },
     {
      "name": "vae",
      "type": "VAE",
-     "link": 9
+     "link": 10
     },
     {
      "name": "plan",
      "type": "KUBA_PLAN",
-     "link": 10
+     "link": 11
     },
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 11
+     "link": 12
     },
     {
      "name": "style",
@@ -489,7 +528,7 @@
     {
      "name": "material",
      "type": "IMAGE",
-     "link": 12
+     "link": 13
     },
     {
      "name": "change",
@@ -502,7 +541,7 @@
      "name": "image",
      "type": "IMAGE",
      "links": [
-      13
+      14
      ]
     },
     {
@@ -514,7 +553,7 @@
      "name": "report",
      "type": "STRING",
      "links": [
-      14
+      15
      ]
     }
    ],
@@ -553,7 +592,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 13
+     "link": 14
     }
    ],
    "outputs": [
@@ -588,7 +627,7 @@
     {
      "name": "source",
      "type": "STRING",
-     "link": 14
+     "link": 15
     }
    ],
    "outputs": [
@@ -621,7 +660,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "## Paint from a shader (Flux 2 Klein)\n\n**You need:** Flux 2 Klein 4B: `flux-2-klein-4b.safetensors` (diffusion_models), `qwen_3_4b.safetensors`\n(text_encoders), `flux2-vae.safetensors` (vae). Other names: pick them in the three loaders.\n\nThe **kubakub shader** draws stripes in the first-floor windows (`which regions` = `W_F1_*`); its `images` go to **`material`**\nof the region sampler, so the model paints its stained glass along the stripes. Try another preset with **browse the\npresets**, move its sliders with **adjust**, and queue again.\n\n- how much of the shader stays: `denoise` in the plan (0.5 = most of it, 0.9 = the composition only)\n- which moment of the shader: `material_at` on the sampler (advanced)\n- the shader as a reference instead of the start: add `reference = material` to the plan (the way Qwen Image follows it)\n- where the model may change more: connect the shader's `masks` (or another shader's) to `change`\n"
+    "## Paint from a shader (Flux 2 Klein)\n\n**You need:** Flux 2 Klein 4B: `flux-2-klein-4b.safetensors` (diffusion_models), `qwen_3_4b.safetensors`\n(text_encoders), `flux2-vae.safetensors` (vae). Other names: pick them in the three loaders.\n\n**kubakub region prompt** says which regions are painted and what they become: the first-floor windows, as stained\nglass. Queue once, then **pick regions** on it lists what your regions hold (groups, floors) to choose from. Its\n`which regions` output feeds the same field of the **kubakub shader**, so the choice is made once. The shader draws\nstripes in those windows; its `images` go to **`material`** of the region sampler, so the model paints its stained\nglass along the stripes. Try another preset with **browse the presets**, move its sliders with **adjust**.\n\n- how much of the shader stays: `denoise` on kubakub region prompt (0.5 = most of it, 0.9 = the composition only)\n- another prompt for other regions: a second kubakub region prompt behind the first (plan -> plan)\n- which moment of the shader: `material_at` on the sampler (advanced)\n- the shader as a reference instead of the start: `reference = material` in `more` of kubakub region prompt (the way\n  Qwen Image follows it)\n- where the model may change more: connect the shader's `masks` (or another shader's) to `change`\n"
    ]
   }
  ],
@@ -644,38 +683,46 @@
   ],
   [
    3,
-   1,
+   2,
+   4,
+   8,
    0,
-   3,
-   0,
-   "IMAGE"
+   "KUBA_REGIONS"
   ],
   [
    4,
+   1,
+   0,
+   8,
    2,
-   4,
-   3,
-   7,
-   "KUBA_REGIONS"
+   "IMAGE"
   ],
   [
    5,
-   2,
-   4,
-   8,
-   0,
-   "KUBA_REGIONS"
-  ],
-  [
-   6,
    1,
    0,
-   8,
-   1,
+   3,
+   0,
    "IMAGE"
   ],
   [
+   6,
+   2,
+   4,
+   3,
    7,
+   "KUBA_REGIONS"
+  ],
+  [
+   7,
+   8,
+   1,
+   3,
+   8,
+   "STRING"
+  ],
+  [
+   8,
    10,
    0,
    4,
@@ -683,7 +730,7 @@
    "MODEL"
   ],
   [
-   8,
+   9,
    11,
    0,
    4,
@@ -691,7 +738,7 @@
    "CLIP"
   ],
   [
-   9,
+   10,
    12,
    0,
    4,
@@ -699,7 +746,7 @@
    "VAE"
   ],
   [
-   10,
+   11,
    8,
    0,
    4,
@@ -707,7 +754,7 @@
    "KUBA_PLAN"
   ],
   [
-   11,
+   12,
    1,
    0,
    4,
@@ -715,7 +762,7 @@
    "IMAGE"
   ],
   [
-   12,
+   13,
    3,
    0,
    4,
@@ -723,7 +770,7 @@
    "IMAGE"
   ],
   [
-   13,
+   14,
    4,
    0,
    5,
@@ -731,7 +778,7 @@
    "IMAGE"
   ],
   [
-   14,
+   15,
    4,
    2,
    6,

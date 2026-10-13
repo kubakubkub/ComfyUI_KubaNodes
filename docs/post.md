@@ -21,18 +21,21 @@ Everything works on one still or a batch of frames, before **export video / fram
   as a whole: parts that moved differently from each other stay as they are. Not needed after the region sampler,
   which pastes inside masks. kubakub versions does this by itself for `generate = whole picture`.
   Test: `tests/test_align.py`.
-- **kubakub colour match**: your frames get the colours of a `reference` picture (any size, any content). The
-  transform is fitted once (first, middle and last frame) and used for every frame, so nothing flickers. `mkl`
-  moves colours and their mix, `mean_std` only brightness and contrast per channel. `save_lut` writes the look as
+- **kubakub colour match**: a look for your frames, from one of two places.
+  A `reference` picture (any size, any content): the frames get its colours. The transform is fitted once (first,
+  middle and last frame) and used for every frame, so nothing flickers. `mkl` moves colours and their mix,
+  `mean_std` only brightness and contrast per channel.
+  Or a `.cube` file (1D or 3D): pick it in `lut` (files in `input/luts`, `models/luts` or `output/kubakub_luts`)
+  or give any path in `lut_path`. A file saved again under the same name is read again.
+  Both at once: the reference first, the `.cube` on top. `save_lut` writes the result as
   `output/kubakub_luts/<name>.cube` for After Effects, Resolume, MadMapper, Resolve. `strength` 1 = the whole
-  look, 0 = the frames as they are.
-- **kubakub apply lut**: a `.cube` (1D or 3D) from `input/luts`, `models/luts` or `output/kubakub_luts`, or any
-  path, with `strength` (1 = the whole look, 0 = the frames as they are).
+  look, 0 = the frames as they are. (Before 0.4.0 the `.cube` was a node of its own, kubakub apply lut. Saved
+  workflows with it still run; it is no longer in the menu.)
 - **kubakub deflicker**: brightness and colour jumps between frames (diffusion video, timelapse) are evened out:
   the frame is split into `grid` x `grid` zones and each zone's colour is moved to its average over `window`
   frames. Slow fades and movement survive. `strength` 1 takes all of the jumps out. It needs at least 3 frames;
   fewer come back unchanged, with a line in the console.
-- **mask** (optional, on colour match, apply lut and deflicker): the change happens only inside the mask, white =
+- **mask** (optional, on colour match and deflicker): the change happens only inside the mask, white =
   full, grey = partly; outside the frames stay as they are. One mask serves every frame, a batch of masks goes
   frame by frame, and a mask of another size is resized to the frames. The `.cube` of `save_lut` is always the
   whole look.

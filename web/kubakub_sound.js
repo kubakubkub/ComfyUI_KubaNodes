@@ -9,11 +9,17 @@ const OWN = {
   KUBA_MaskAnimate: ["listen", "gain", "release", "threshold", "gap", "bpm", "start"],
   KUBA_SoundMaskSwap: ["threshold", "gap", "bpm", "start"],
 };
+// widgets the cable does not replace after all: with step_on = signal, threshold and gap are the gate of the control wav
+const KEPT = { KUBA_SoundMaskSwap: node => node.widgets?.find(w => w.name === "step_on")?.value === "signal" ? ["threshold", "gap"] : [] };
 
 function tidy(node, names) {
   const on = node.inputs?.find(i => i.name === "sound")?.link != null;
+  const kept = KEPT[node.comfyClass || node.type]?.(node) || [];
   let changed = false;
-  for (const w of node.widgets || []) if (names.includes(w.name) && !!w.hidden !== on) { w.hidden = on; changed = true; }
+  for (const w of node.widgets || []) {
+    const hide = on && !kept.includes(w.name);
+    if (names.includes(w.name) && !!w.hidden !== hide) { w.hidden = hide; changed = true; }
+  }
   if (changed) { node.setSize([node.size[0], Math.max(node.computeSize()[1], on ? 0 : node.size[1])]); node.setDirtyCanvas(true, true); }
 }
 
@@ -37,6 +43,15 @@ app.registerExtension({
     for (const hook of ["onNodeCreated", "onConfigure", "onConnectionsChange"]) {
       const before = nodeType.prototype[hook];
       nodeType.prototype[hook] = function () { const r = before?.apply(this, arguments); setTimeout(() => tidy(this, names), 0); return r; };
+    }
+    if (KEPT[nodeData.name]) {                           // what stays depends on step_on: look again when it changes
+      const created = nodeType.prototype.onNodeCreated;
+      nodeType.prototype.onNodeCreated = function () {
+        const r = created?.apply(this, arguments);
+        const w = this.widgets?.find(x => x.name === "step_on"), cb = w?.callback;
+        if (w) w.callback = (...a) => { const out = cb?.apply(w, a); tidy(this, names); return out; };
+        return r;
+      };
     }
   },
 });

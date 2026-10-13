@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 
 import cv2
 import numpy as np
@@ -157,5 +158,132 @@ class KUBA_RegionPlan(io.ComfyNode):
                              ui=ui.PreviewImage(preview, cls=cls))
 
 
-NODE_CLASS_MAPPINGS = {"KUBA_RegionPlan": KUBA_RegionPlan}
-NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_RegionPlan": "kubakub region plan"}
+KEEP_REST = "[default]\nstrategy = keep\n"          # what a first kubakub region prompt starts from
+
+
+def prompt_rule(which, prompt, strategy, denoise, more=""):
+    """The fields of kubakub region prompt as one section of rule text -> (header, text)."""
+    header = rp.header_of(which) or "default"
+    if header == "*":
+        header = "default"
+    if "\n" in header or "[" in header or "]" in header:
+        raise ValueError(f"kubakub region prompt: {rp.WHICH} is one line without brackets (got {header!r}). {rp.WHICH_TIP}")
+    lines = [f"[{header}]", f"strategy = {strategy}", f"denoise = {float(denoise):g}"]
+    text = " ".join((prompt or "").split())             # the rule text is read line by line
+    text = text.replace(" //", "//")                    # ' //' would start a comment there
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        text = f'"{text}"'                              # the rule reader takes one pair of outer quotes off
+    if text:
+        lines.append(f"prompt = {text}")
+    for ln in (more or "").splitlines():
+        if ln.strip().startswith("["):
+            raise ValueError("kubakub region prompt: 'more' takes lines like  key = value  (no [section]: the regions "
+                             f"are chosen in '{rp.WHICH}'). For several groups, chain a second kubakub region prompt.")
+        if ln.strip():
+            lines.append(ln.strip())
+    return header, "\n".join(lines) + "\n"
+
+
+class KUBA_RegionPrompt(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="KUBA_RegionPrompt",
+            display_name="kubakub region prompt",
+            category="kubakub/2d/generate",
+            search_aliases=['prompt per region', 'plan', 'rules', 'region plan'],
+            description=(
+                "A prompt for chosen regions, with nothing to type but the prompt. Pick the regions with the "
+                "button (windows, a floor, a section ...), write what they become, set how they are painted and "
+                "how much they may change. Its plan goes to kubakub region sampler; the regions it does not "
+                "name stay as they are. For another prompt on other regions, put a second kubakub region "
+                "prompt behind it (plan -> plan). Its 'which regions' output carries the choice to other nodes, "
+                "e.g. to the same field of a kubakub shader, so it is set once. The same thing as written "
+                "rules, with every setting there is: kubakub region plan."),
+            inputs=[
+                RegionsType.Input("regions", optional=True,
+                                  tooltip="From any kubakub regions node. Not needed when 'plan' is connected: "
+                                          "the plan brings its regions."),
+                PlanType.Input("plan", optional=True,
+                               tooltip="The prompts so far: another kubakub region prompt (or a kubakub region "
+                                       "plan). This one is added on top: where both name a region, this node "
+                                       "wins."),
+                io.String.Input("which", display_name=rp.WHICH, default="", placeholder="empty = every region",
+                                tooltip="The regions this prompt is for: use the pick regions button below, or "
+                                        "type. Empty = every region. " + rp.WHICH_TIP),
+                io.String.Input("prompt", multiline=True, default="", dynamic_prompts=False,
+                                placeholder="what these regions become",
+                                tooltip="What these regions become. {a|b|c} picks one per region, so a row of "
+                                        "windows can tell different stories; {name} and {group} are filled in."),
+                io.Combo.Input("strategy", options=["inpaint", "keep", "frame_in_frame"], default="inpaint",
+                               tooltip="inpaint: repainted in place from the prompt. keep: left untouched (to "
+                                       "take regions out of an earlier, wider prompt). frame_in_frame: a scene "
+                                       "of its own, set into the region like a window onto it."),
+                io.Float.Input("denoise", default=0.6, min=0.0, max=1.0, step=0.05,
+                               tooltip="How much the regions may change: 0.3 = a little, 0.6 = clearly, 1 = "
+                                       "painted anew."),
+                io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=False,
+                             tooltip="Another number = another result (region seeds and {a|b} choices). With a "
+                                     "'plan' connected, the seed of the last node in the chain counts."),
+                io.String.Input("more", multiline=True, default="", optional=True, advanced=True, dynamic_prompts=False,
+                                placeholder="lora = name:0.8\nanimate = on",
+                                tooltip="Other settings for these regions, one  key = value  per line: negative, "
+                                        "lora, reference, color_match, feather_px, animate, video_prompt ... (the "
+                                        "list is in docs/generate.md). Empty = the usual values."),
+                io.Image.Input("image", optional=True,
+                               tooltip="Background for the preview (the matrix). Another size than the regions is "
+                                       "scaled to fit, for the preview only."),
+            ],
+            outputs=[
+                PlanType.Output("plan", tooltip="Into kubakub region sampler (or the next kubakub region prompt)."),
+                io.String.Output("which_out", display_name=rp.WHICH,
+                                 tooltip="The text of 'which regions' as it is: connect it to the same field of a "
+                                         "kubakub shader, mask field, regions to mask ... so the choice is made once."),
+                io.Image.Output("preview", tooltip="Same colour = same strategy and prompt; grey = kept."),
+                io.String.Output("report", tooltip="How many regions this prompt takes, then every region with "
+                                                   "its strategy, denoise and prompt."),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, which="", prompt="", strategy="inpaint", denoise=0.6, seed=0, regions=None, plan=None, more="",
+                image=None) -> io.NodeOutput:
+        if regions is None and plan is None:
+            raise ValueError("kubakub region prompt: connect 'regions' (from a kubakub regions node), or 'plan' "
+                             "(from another kubakub region prompt).")
+        given = which or ""
+        base = plan.plan.get("rules_text") or "" if plan is not None else KEEP_REST
+        regions = plan.regions if plan is not None else regions
+        try:
+            mine = rp.pick_or_say(regions.table, which, "kubakub region prompt")
+        except rp.PlanError as e:
+            raise ValueError(f"kubakub region prompt: {e}") from None
+        named = [r for r in regions.table.get("regions", []) if str(r.get("name", "")).lower() == (which or "").strip().lower()]
+        if named and re.search(r"[\s,\[\]]", (which or "").strip()):    # one region's own name with a space in it
+            which = "name:" + re.sub(r"[\s,\[\]]", "?", which.strip())
+        header, section = prompt_rule(which, prompt, strategy, denoise, more)
+        # [then]: this node's section wins over whatever came before, and kubakub versions goes on top of it
+        text = base.rstrip("\n") + "\n\n[then]\n" + section
+        try:
+            out = rp.resolve(regions.table, text, seed=int(seed))
+        except rp.PlanError as e:
+            raise ValueError("kubakub region prompt: " + re.sub(r"^line \d+: ", "", str(e))) from None
+        lines = [f"this prompt: {len(mine)} region{'s' if len(mine) != 1 else ''}"
+                 + (f" ({rp.WHICH} = {header})" if header != "default" else " (every region)")]
+        if strategy != "keep" and not " ".join((prompt or "").split()):
+            lines.append("note: the prompt is empty")
+        rep = "\n".join(lines) + "\n\n" + rp.report(out)
+        log.info("[KUBA regions] region prompt: %s; %d regions, %d to process", lines[0], len(out["regions"]), len(out["order"]))
+        labels = regions.labels[0].cpu().numpy()
+        h, w = labels.shape
+        bg = np.full((h, w, 3), 0.5, np.float32)
+        if image is not None:
+            bg = image[0].detach().cpu().float().numpy()
+            if bg.shape[:2] != (h, w):
+                bg = cv2.resize(bg, (w, h), interpolation=cv2.INTER_AREA if bg.shape[0] * bg.shape[1] > w * h else cv2.INTER_LINEAR)
+        preview = torch.from_numpy(plan_preview(bg, labels, out))[None]
+        return io.NodeOutput(RegionPlan(out, regions), given, preview, rep, ui=ui.PreviewImage(preview, cls=cls))
+
+
+NODE_CLASS_MAPPINGS = {"KUBA_RegionPlan": KUBA_RegionPlan, "KUBA_RegionPrompt": KUBA_RegionPrompt}
+NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_RegionPlan": "kubakub region plan", "KUBA_RegionPrompt": "kubakub region prompt"}

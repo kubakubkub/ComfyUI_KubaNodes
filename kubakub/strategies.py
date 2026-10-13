@@ -374,9 +374,15 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
         inpaint = ops.dilate(region, int(e["dilate_px"])) * scope
         alpha = ops.feather_alpha(region, int(e["feather_px"]), limit=inpaint)
         if change is not None:                        # the change map: grey = how much this place may change
-            inpaint = inpaint * _crop_zero_pad(change, cp, 0.0).float().clamp(0.0, 1.0)
+            chg = _crop_zero_pad(change, cp, 0.0).float().clamp(0.0, 1.0)
+            inpaint = inpaint * chg
+            if float(inpaint.sum()) == 0:             # black on the whole region: it stays as it is, nothing is sampled
+                black.add(rid)
+                return None
+            alpha = alpha * (chg * 8.0).clamp(0.0, 1.0)   # and only what may change is pasted back: black stays pixel exact
         return inpaint, alpha
 
+    black: set[int] = set()                           # regions the change map leaves alone
     mat_digest = rc.digest(material) if material is not None else ""
 
     style = StyleReference(adapter, settings.style, settings.style_mp) if settings.style is not None else None
@@ -454,7 +460,8 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
             cp = crop_plan(e)
             masks = s1_masks(rid, e, cp)
             if masks is None:
-                results.append(RegionResult(rid, e["name"], "empty", note="no pixels inside the scope"))
+                results.append(RegionResult(rid, e["name"], "empty", note="the change map is black here" if rid in black
+                                            else "no pixels inside the scope"))
                 continue
             inpaint, alpha = masks
             on_miss = None

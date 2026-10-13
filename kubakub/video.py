@@ -57,7 +57,7 @@ def only_filter(only):
     sections = []
     for p in pats:
         try:
-            sections.append(rp.parse_rules(f"[{p}]\n")[0])
+            sections.append(rp.selector(p))
         except rp.PlanError:
             sections.append(None)
 
@@ -84,7 +84,7 @@ def clip_groups(entries, only=None):
             continue
         prompt = (e.get("video_prompt") or e.get("prompt") or "").strip()
         key = (prompt, float(e.get("t_start", 0.0)), float(e.get("t_end", -1.0)), float(e.get("motion", 1.0)),
-               float(e.get("material_repaint", 0.91)))
+               float(e.get("material_repaint", 0.8)))
         groups.setdefault(key, []).append(int(e["region_id"]))
     return [{"ids": ids, "prompt": k[0], "t_start": k[1], "t_end": k[2], "motion": k[3], "repaint": k[4]}
             for k, ids in groups.items()]

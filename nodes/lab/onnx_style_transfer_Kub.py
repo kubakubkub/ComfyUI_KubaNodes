@@ -49,7 +49,8 @@ class OnnxStyleTransfer:
 
     @staticmethod
     def _resolve(model_path):
-        p = os.path.expandvars((model_path or "").strip().strip('"').strip("'"))
+        from ...kubakub import save_paths
+        p = save_paths.local(os.path.expandvars((model_path or "").strip().strip('"').strip("'")))
         if not p:
             raise ValueError("kubakub onnx style transfer: no model given. Put your trained pix2pix .onnx file in "
                              "ComfyUI/models/onnx and type its name into 'model_path', or paste its full path "

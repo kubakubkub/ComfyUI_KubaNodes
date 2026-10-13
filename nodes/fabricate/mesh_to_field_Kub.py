@@ -26,6 +26,7 @@ import folder_paths
 
 from ...kubakub import relief_core as rc
 from ...kubakub import samples
+from ...kubakub import save_paths
 
 CAT = "kubakub/3d/fabricate/relief"
 FIELD = "RELIEFFORGE_FIELD"
@@ -194,7 +195,7 @@ def rasterize_depth(verts, faces, azimuth_deg=0.0, elevation_deg=0.0,
 
 def _mesh_file(mesh_path):
     """The pasted mesh path, or the built-in sample model when the field is empty -> (path, is the sample)."""
-    path = str(mesh_path or "").strip().strip('"')
+    path = save_paths.local(str(mesh_path or "").strip().strip('"'))
     if not path:                                       # nothing pasted yet: the sample facade (an OBJ in metres, Y up)
         return samples.model(folder_paths.get_temp_directory()), True
     if not os.path.isfile(path):
@@ -215,6 +216,8 @@ def _mesh_stamp(mesh_path, **_):
     """The mesh file's path + size + mtime: an edited mesh re-runs the node (the widget text alone does not change)."""
     p = str(mesh_path or "").strip().strip('"')
     try:
+        if save_paths.is_network(p):
+            return p
         st = os.stat(p)
         return f"{p}|{st.st_size}|{st.st_mtime_ns}"
     except OSError:

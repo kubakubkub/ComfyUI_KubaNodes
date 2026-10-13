@@ -39,7 +39,7 @@ def only_filter(text: str):
     if not text:
         return None
     try:
-        section = rp.parse_rules(f"[{text}]\n")[0]
+        section = rp.selector(text)
     except rp.PlanError as e:
         raise ValueError(f"kubakub region sampler: {rp.WHICH} = '{text}' cannot be read ({e}). {rp.WHICH_TIP}") from None
     return lambda entry: section.match(entry) is not None

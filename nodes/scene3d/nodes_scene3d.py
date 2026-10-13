@@ -470,7 +470,7 @@ def viewer_spot(viewer):
 
 DEFAULT_SPOTS = "0, 20, 1.7\n-15, 12, 1.7\n12, 8, 1.7"
 DEFAULT_PATH = "-15, 25, 1.7\n0, 15, 1.7\n15, 10, 1.7"
-VIEWER_TIP = "The audience spot of kubakub scene measure / audience viewpoint / project settings, one spot for all nodes. "
+VIEWER_TIP = "The audience spot of kubakub scene measure / project settings, one spot for all nodes. "
 
 
 class KUBA_SceneMeasure(io.ComfyNode):

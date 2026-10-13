@@ -196,6 +196,16 @@ def test_material():
         check("sampler: without one the mask is plain", not any(s for s, _ in seen))
     finally:
         NodeAdapter.sample = keep
+    ys = torch.arange(270)[:, None].expand(270, 480)
+    top = w1 & (ys < int(ys[w1].float().median()))
+    half = torch.zeros(1, 270, 480)
+    half[0][top] = 1.0                                # W_1: its upper half may change; W_2: nothing
+    ad, out = run(rules, change=half)
+    low = w1 & ~top
+    check("change: black places of a region stay pixel exact and are not in 'changed'",
+          torch.equal(out[0][0][low], seq.canvas_img()[0][low][..., :3]) and float(out[1][0][low].max()) == 0.0
+          and float(out[1][0][top].max()) > 0.0)
+    check("change: a region the map leaves black is not sampled", len(ad.calls) == 1, str(len(ad.calls)))
     for key in ("material", "change", "finish"):
         try:
             rp.resolve(seq.make_regions().table, f"[default]\n{key} = plasma\n")
@@ -246,6 +256,72 @@ def test_plan_preview():
           and "note:" not in same[2] and "note:" not in grey[2], big[2][-200:])
     odd = run(torch.rand(1, 100, 100, 4))
     check("plan: another shape and an alpha channel still give a preview", tuple(odd[3].shape) == (1, 270, 480, 3))
+
+
+def test_region_prompt():
+    """kubakub region prompt: the plan from fields (which regions, prompt, strategy, denoise), chained by cable."""
+    node = npl.KUBA_RegionPrompt
+    schema = node.define_schema()
+    check("region prompt: the fields in the order they are filled in",
+          ids(schema.inputs) == ["regions", "plan", "which", "prompt", "strategy", "denoise", "seed", "more", "image"]
+          and ids(schema.outputs) == ["plan", "which_out", "preview", "report"]
+          and all(i.tooltip for i in schema.inputs) and all(o.tooltip for o in schema.outputs))
+    regions = seq.make_regions()
+    names = [r["name"] for r in regions.table["regions"]]
+    wins = [n for n in names if n.startswith("W_")]
+    first = node.execute("W_*", "stained\nglass", "inpaint", 0.8, 3, regions=regions).args
+    by = {e["name"]: e for e in first[0].plan["regions"]}
+    check("region prompt: the chosen regions get prompt, strategy and denoise; the others are kept",
+          all(by[n]["prompt"] == "stained glass" and by[n]["denoise"] == 0.8 and by[n]["strategy"] == "inpaint" for n in wins)
+          and all(by[n]["strategy"] == "keep" for n in names if n not in wins) and first[0].order == [by[n]["region_id"] for n in wins],
+          str([(e["name"], e["strategy"]) for e in first[0].plan["regions"]]))
+    check("region prompt: 'which regions' goes out as it is, the report counts the regions",
+          first[1] == "W_*" and first[3].startswith(f"this prompt: {len(wins)} regions") and tuple(first[2].shape) == (1, 270, 480, 3))
+    wide = node.execute("", "gold", "inpaint", 0.5, 3, plan=first[0]).args
+    by2 = {e["name"]: e for e in wide[0].plan["regions"]}
+    check("region prompt: a second node on top wins where both name a region, also with a wider choice",
+          all(e["prompt"] == "gold" and e["strategy"] == "inpaint" for e in by2.values()) and "(every region)" in wide[3])
+    out = node.execute(wins[0], "", "keep", 0.5, 3, plan=first[0], more="feather_px = 20").args
+    by3 = {e["name"]: e for e in out[0].plan["regions"]}
+    check("region prompt: keep takes a region out again, 'more' sets the other keys",
+          by3[wins[0]]["strategy"] == "keep" and by3[wins[0]]["feather_px"] == 20 and by3[wins[1]]["strategy"] == "inpaint"
+          and "note:" not in out[3])
+    again = rp.resolve(regions.table, out[0].plan["rules_text"], seed=3)
+    check("region prompt: the plan's rule text gives the same plan again (kubakub versions builds on it)",
+          [(e["strategy"], e["prompt"], e["denoise"]) for e in again["regions"]]
+          == [(e["strategy"], e["prompt"], e["denoise"]) for e in out[0].plan["regions"]])
+    text = npl.KUBA_RegionPlan.execute(regions, "[default]\nprompt = base\ndenoise = 0.3\n", 0).args[0]
+    on_text = {e["name"]: e for e in node.execute("W_*", "glass", "inpaint", 0.7, 0, plan=text).args[0].plan["regions"]}
+    check("region prompt: on top of a kubakub region plan", on_text[wins[0]]["prompt"] == "glass"
+          and all(on_text[n]["prompt"] == "base" and on_text[n]["denoise"] == 0.3 for n in names if n not in wins))
+    for what, kw, word in (("nothing connected", dict(), "connect 'regions'"),
+                           ("a choice that matches nothing", dict(regions=regions, which="nothing_*"), "matches no region"),
+                           ("a section typed into 'more'", dict(regions=regions, which="W_*", more="[x]\nprompt = y"), "chain a second"),
+                           ("an unknown key in 'more'", dict(regions=regions, which="W_*", more="denoize = 1"), "denoise")):
+        try:
+            node.execute(kw.pop("which", ""), "x", "inpaint", 0.5, 0, **kw)
+            said = "no error"
+        except ValueError as e:
+            said = str(e)
+        check(f"region prompt: {what} is said in plain words", word in said and "line " not in said, said)
+    import copy
+    odd = copy.deepcopy(regions.table)
+    odd["regions"][1]["name"], odd["regions"][2]["name"] = "my window", "then"
+    odd_r = type(regions)(regions.labels, odd, regions.scope)
+    for which, text, want in (("my window", "a 50//50 mix // of red", "a 50//50 mix// of red"), ("then", '"neon" and "glass"', '"neon" and "glass"')):
+        got = node.execute(which, text, "inpaint", 0.5, 0, regions=odd_r).args
+        painted = [(e["name"], e["prompt"]) for e in got[0].plan["regions"] if e["strategy"] != "keep"]
+        check(f"region prompt: the region named '{which}' is the one painted, its prompt arrives whole",
+              painted == [(which, want)] and got[1] == which and got[3].startswith("this prompt: 1 region"), str(painted))
+    # kubakub versions joins its rules to the plan's text: on a region prompt plan they go on top of every node
+    base = first[0].plan["rules_text"].rstrip("\n")
+    joined = base + ("\n[then]\n" if "[then]" in base else "\n") + "[default]\nprompt += copper\ndenoise = 0.33\n"
+    look = {e["name"]: e for e in rp.resolve(regions.table, joined)["regions"]}
+    check("region prompt: a version's look and settings reach the regions it paints",
+          "[then]" in base and all(look[n]["prompt"] == "stained glass, copper" and look[n]["denoise"] == 0.33 for n in wins)
+          and all(look[n]["strategy"] == "keep" for n in names if n not in wins))
+    empty = node.execute("W_*", " ", "inpaint", 0.5, 0, regions=regions).args[3]
+    check("region prompt: an empty prompt is noted", "note: the prompt is empty" in empty)
 
 
 def test_frame_in_frame_regions():
@@ -367,7 +443,8 @@ def test_only_regions_and_cfg():
 
 if __name__ == "__main__":
     try:
-        for t in (test_region_sampler, test_seam_pass_schema, test_plan_preview, test_frame_in_frame_regions,
+        for t in (test_region_sampler, test_material, test_seam_pass_schema, test_plan_preview, test_region_prompt,
+                  test_frame_in_frame_regions,
                   test_versions, test_only_regions_and_cfg):
             t()
     finally:

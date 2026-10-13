@@ -14,10 +14,10 @@ downloads. `--check` only reports.
 | | [flux2-vae](https://huggingface.co/Comfy-Org/flux2-dev/blob/main/split_files/vae/flux2-vae.safetensors) | vae | also sets 2 |
 | **2 Klein 9B fp8** | [flux-2-klein-9b-fp8](https://huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8) (accept the licence on the page) | diffusion_models | facade_regions_diffusion, frame_in_frame |
 | | [qwen_3_8b_fp8mixed](https://huggingface.co/Comfy-Org/flux2-klein-9B/blob/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors) | text_encoders | |
-| **3 Qwen Image 2.1** | [qwen_image_2.1_int8_convrot](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/diffusion_models) | diffusion_models | facade_regions_diffusion |
+| **3 Qwen Image 2.1** | [qwen_image_2.1_turbo_int8_convrot](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/diffusion_models) (the 8 step turbo model) | diffusion_models | facade_regions_diffusion |
 | | [qwen3vl_8b_int8_convrot](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/text_encoders) | text_encoders | |
 | | [qwen_image_2.1_vae_bf16](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/vae) | vae | |
-| | turbo LoRA: [Viggle/Qwen-Image-2.1-viggle-turbo](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo) (by hand) | loras | schedule `qwen21_turbo_5` |
+| | in place of the turbo model: a base file you already have + the [turbo LoRA](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/loras) (by hand) | loras | same settings, see [generate](generate.md) |
 | | better decoder: [texture-fix VAE](https://huggingface.co/madebyollin/texture-fix-vae-for-qwen-image-2.1) (by hand) | vae | replaces the VAE above |
 | **4 LTX 2.5** | [transformer int8 convrot, gemma4 text encoder, video + audio VAE, latent upscaler x2](https://huggingface.co/Lightricks/LTX-2.5) | diffusion_models, text_encoders, vae, latent_upscale_models | 04, director_video_ltx, motion_guide |
 | **5 SAM 3.1** | [sam3.1_multiplex_fp16](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints) | checkpoints | regions_sam3_masks (+ [KJNodes](https://github.com/kijai/ComfyUI-KJNodes) Points Editor) |

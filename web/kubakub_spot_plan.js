@@ -99,7 +99,7 @@ function build(node, cfg) {
       st.bg = null;
       const img = new Image();
       img.onload = () => { if (st.bgKey === key) { st.bg = img; draw(); } };
-      img.onerror = () => { if (st.bgKey !== key) return; st.bg = null; delete node.properties.kubakub_spot_plan; draw(); };   // gone after a restart: the grid again
+      img.onerror = () => { if (st.bgKey !== key) return; st.bg = null; st.bgKey = ""; delete node.properties.kubakub_spot_plan; draw(); };   // gone after a restart: the grid again, the next run loads it anew
       img.src = api.apiURL(`/view?filename=${encodeURIComponent(m.filename)}&subfolder=${encodeURIComponent(m.subfolder || "")}&type=${encodeURIComponent(m.type || "temp")}`);
     }
     return st.bg;

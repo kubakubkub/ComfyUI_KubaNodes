@@ -489,7 +489,7 @@ app.registerExtension({
 function mixTidy(node) {
   const on = name => node.inputs?.find(i => i.name === name)?.link != null;
   const a = on("a"), b = on("b");
-  const gone = { shader_a: a, controls_a: a, code_a: a, shader_b: b, controls_b: b, code_b: b, width: a || b, height: a || b, seconds: a || b, loops: a && b };
+  const gone = { shader_a: a, controls_a: a, code_a: a, shader_b: b, controls_b: b, code_b: b, width: a || b, height: a || b, loops: a && b };   // seconds stays: two stills still need a length
   let changed = false;
   for (const w of node.widgets || []) if (w.name in gone && !!w.hidden !== gone[w.name]) { w.hidden = gone[w.name]; changed = true; }
   if (changed) { node.setSize([node.size[0], node.computeSize()[1]]); node.setDirtyCanvas(true, true); }

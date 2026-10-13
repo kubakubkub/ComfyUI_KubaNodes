@@ -134,6 +134,27 @@ class KUBA_ScenePieces(io.ComfyNode):
         return io.NodeOutput(pieces, torch.from_numpy(img)[None], report, torch.from_numpy(m.astype(np.float32))[None])
 
 
+def _beat_times(document, trigger, every_nth):
+    """The beats, bars or markers of a director document, in seconds."""
+    from ...kubakub.director import motion
+    if not (document or "").strip():
+        raise ValueError("kubakub pieces falloff: type = beat needs the timeline: connect the 'document' output of "
+                         "kubakub director to 'document'.")
+    try:
+        doc = json.loads(document)
+    except ValueError as e:
+        raise ValueError(f"The director document is not valid JSON ({e}).") from e
+    ctx = motion.context(doc)
+    if trigger == "markers":
+        times = list(ctx["markers"])[::every_nth]
+    else:
+        times = list(ctx["beats"])[::every_nth * (4 if trigger == "bars" else 1)]
+    if not times:
+        what = "markers (M in the timeline)" if trigger == "markers" else "a tempo (load a sound or set the bpm)"
+        raise ValueError(f"The timeline has no {trigger}: set {what} in the director window, then run it.")
+    return times
+
+
 class KUBA_PiecesFalloff(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -141,17 +162,20 @@ class KUBA_PiecesFalloff(io.ComfyNode):
             node_id="KUBA_PiecesFalloff",
             display_name="kubakub pieces falloff",
             category=CATEGORY,
-            search_aliases=["falloff", "wave", "stagger", "noise", "mops"],
+            search_aliases=["falloff", "wave", "stagger", "noise", "mops", "beat", "bars", "markers", "music", "timeline"],
             description=("How strongly a transform acts on each piece over time. wave: a front runs across the "
                          "facade and the pieces it passed stay moved. pulse: a band runs across and the pieces move "
                          "and come back. stagger: one piece after the other in an order. noise: every piece drifts "
-                         "on its own. all: every piece fully."),
+                         "on its own. beat: a kick on the beats, bars or markers of the director's timeline (connect "
+                         "its document). all: every piece fully."),
             inputs=[
-                io.Combo.Input("type", options=["wave", "pulse", "stagger", "noise", "all"], default="wave",
+                io.Combo.Input("type", options=["wave", "pulse", "stagger", "noise", "beat", "all"], default="wave",
                                tooltip="wave: moved pieces stay moved; pulse: they come back; stagger: one after the "
-                                       "other; noise: each on its own; all: every piece fully."),
+                                       "other; noise: each on its own; beat: every piece jumps on the beat and "
+                                       "settles; all: every piece fully."),
                 io.Combo.Input("direction", options=list(pc.ORDERS[:5]) + ["towards the centre", "random"],
-                               default="left to right", tooltip="wave / pulse: where the front runs (random = a ripple in random order); stagger: the order."),
+                               default="left to right", tooltip="wave / pulse: where the front runs (random = a ripple in random order); "
+                                                                "stagger / beat: the order."),
                 io.Float.Input("start", default=0.0, min=-100.0, max=1000.0, step=0.1,
                                tooltip="wave / pulse / stagger: when it begins, in seconds from the first frame "
                                        "(nothing moves before; negative = already under way at the first frame)."),
@@ -175,17 +199,39 @@ class KUBA_PiecesFalloff(io.ComfyNode):
                 io.Float.Input("amount", default=1.0, min=-10.0, max=10.0, step=0.05,
                                tooltip="Multiplies the falloff (negative = the other way)."),
                 io.Boolean.Input("invert", default=False, tooltip="Pieces the falloff reached rest, the others move."),
+                io.String.Input("document", force_input=True, optional=True,
+                                tooltip="beat: the 'document' output of kubakub director (its tempo, sound and markers)."),
+                io.Combo.Input("trigger", options=["beats", "bars", "markers"], default="beats", optional=True,
+                               tooltip="beat: beats and bars come from the tempo (or the sound) of the timeline; "
+                                       "markers from M."),
+                io.Int.Input("every_nth", default=1, min=1, max=64, optional=True,
+                             tooltip="beat: only every nth beat / bar / marker."),
+                io.Float.Input("attack", default=0.03, min=0.0, max=10.0, step=0.01, optional=True,
+                               tooltip="beat: seconds to the peak."),
+                io.Float.Input("decay", default=0.3, min=0.01, max=20.0, step=0.05, optional=True,
+                               tooltip="beat: seconds to settle (e-fold)."),
+                io.Float.Input("ripple", default=0.0, min=0.0, max=20.0, step=0.05, optional=True,
+                               tooltip="beat: seconds the kick takes from the first piece to the last, in the order "
+                                       "of 'direction' (0 = all pieces at once)."),
             ],
-            outputs=[FalloffType.Output("falloff", tooltip="-> kubakub pieces transform, falloff.")],
+            outputs=[FalloffType.Output("falloff", tooltip="-> kubakub pieces transform, falloff."),
+                     io.String.Output("report", tooltip="What the falloff does; for beat: how many beats, bars or "
+                                                        "markers and from when to when.")],
         )
 
     @classmethod
     def execute(cls, type, direction, start, speed, width, spread, duration, hold, loop, frequency, seed, amount,
-                invert) -> io.NodeOutput:
+                invert, document="", trigger="beats", every_nth=1, attack=0.03, decay=0.3, ripple=0.0) -> io.NodeOutput:
+        if type == "beat":
+            times = _beat_times(document, trigger, int(every_nth))
+            f = {"type": "triggers", "times": times, "attack": attack, "decay": decay, "spread": ripple,
+                 "order": direction, "seed": seed, "amount": amount, "invert": invert}
+            return io.NodeOutput(f, f"{len(times)} {trigger} from {times[0]:.2f} s to {times[-1]:.2f} s")
         # wave / pulse read "axis" (with "random" = a random ripple), stagger reads "order"
         return io.NodeOutput({"type": type, "axis": direction, "order": direction, "start": start, "speed": speed,
                               "width": width, "spread": spread, "duration": duration, "hold": hold, "loop": loop,
-                              "freq": frequency, "seed": seed, "amount": amount, "invert": invert})
+                              "freq": frequency, "seed": seed, "amount": amount, "invert": invert},
+                             type + ("" if type in ("noise", "all") else f", {direction}"))
 
 
 class KUBA_PiecesBeatFalloff(io.ComfyNode):
@@ -193,8 +239,9 @@ class KUBA_PiecesBeatFalloff(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="KUBA_PiecesBeatFalloff",
-            display_name="kubakub pieces beat falloff",
+            display_name="kubakub pieces beat falloff (old)",
             category=CATEGORY,
+            is_deprecated=True,                              # now type = beat of kubakub pieces falloff; kept for saved workflows
             search_aliases=["beat", "bars", "markers", "music", "timeline", "falloff", "mops"],
             description=("A kick on the beats, bars or markers of the director's timeline: every piece jumps (attack) "
                          "and settles (decay). spread > 0 lets the kick run across the facade in an order, like a "
@@ -220,19 +267,7 @@ class KUBA_PiecesBeatFalloff(io.ComfyNode):
 
     @classmethod
     def execute(cls, document, trigger, every_nth, attack, decay, spread, order, seed, amount) -> io.NodeOutput:
-        from ...kubakub.director import motion
-        try:
-            doc = json.loads(document or "")
-        except ValueError as e:
-            raise ValueError(f"The director document is not valid JSON ({e}).") from e
-        ctx = motion.context(doc)
-        if trigger == "markers":
-            times = list(ctx["markers"])[::every_nth]
-        else:
-            times = list(ctx["beats"])[::every_nth * (4 if trigger == "bars" else 1)]
-        if not times:
-            what = "markers (M in the timeline)" if trigger == "markers" else "a tempo (load a sound or set the bpm)"
-            raise ValueError(f"The timeline has no {trigger}: set {what} in the director window, then run it.")
+        times = _beat_times(document, trigger, int(every_nth))
         f = {"type": "triggers", "times": times, "attack": attack, "decay": decay, "spread": spread, "order": order,
              "seed": seed, "amount": amount}
         return io.NodeOutput(f, f"{len(times)} {trigger} from {times[0]:.2f} s to {times[-1]:.2f} s")
@@ -252,7 +287,7 @@ class KUBA_PiecesTransform(io.ComfyNode):
             inputs=[
                 PiecesType.Input("pieces", tooltip="From kubakub scene pieces or another pieces transform."),
                 FalloffType.Input("falloff", optional=True,
-                                  tooltip="How strongly and when (kubakub pieces falloff / beat falloff). None = fully."),
+                                  tooltip="How strongly and when (kubakub pieces falloff). None = fully."),
                 io.Float.Input("push", default=0.5, min=-100.0, max=100.0, step=0.05, tooltip="Metres along the piece's normal."),
                 io.Float.Input("across", default=0.0, min=-100.0, max=100.0, step=0.05, tooltip="Metres left -> right."),
                 io.Float.Input("up", default=0.0, min=-100.0, max=100.0, step=0.05, tooltip="Metres up."),
@@ -333,7 +368,7 @@ class KUBA_PiecesRender(io.ComfyNode):
                 io.Float.Input("exposure", default=0.0, min=-10.0, max=10.0, step=0.1, optional=True, advanced=True,
                                tooltip="Overall exposure in stops: +1 = twice as bright, -1 = half (0 = as before)."),
                 ViewerType.Input("viewer", optional=True,
-                                 tooltip="The audience spot of kubakub scene measure / audience viewpoint / project "
+                                 tooltip="The audience spot of kubakub scene measure / project "
                                          "settings. With view = audience it replaces audience_distance_m, "
                                          "audience_offset_m and eye_height_m of this node."),
             ],
@@ -423,6 +458,6 @@ NODE_CLASS_MAPPINGS = {"KUBA_ScenePieces": KUBA_ScenePieces, "KUBA_PiecesFalloff
                        "KUBA_PiecesBeatFalloff": KUBA_PiecesBeatFalloff,
                        "KUBA_PiecesTransform": KUBA_PiecesTransform, "KUBA_PiecesRender": KUBA_PiecesRender}
 NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_ScenePieces": "kubakub scene pieces", "KUBA_PiecesFalloff": "kubakub pieces falloff",
-                              "KUBA_PiecesBeatFalloff": "kubakub pieces beat falloff",
+                              "KUBA_PiecesBeatFalloff": "kubakub pieces beat falloff (old)",
                               "KUBA_PiecesTransform": "kubakub pieces transform",
                               "KUBA_PiecesRender": "kubakub pieces render"}

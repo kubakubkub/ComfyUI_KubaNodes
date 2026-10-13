@@ -45,6 +45,15 @@ def is_network(path: str) -> bool:
     return (path or "").strip().strip('"').replace("/", "\\").startswith("\\\\")
 
 
+def local(path: str) -> str:
+    """The path as it is; a ValueError for a network path. A workflow from someone else could name any server
+    there, and Windows would contact it (and offer your login) the moment the path is looked at."""
+    if is_network(path):
+        raise ValueError("a network path (\\\\server\\share) is not opened from a node. Give the share a drive letter "
+                         "in Windows (Map network drive) and use that path.")
+    return path
+
+
 def save_folder(value: str, output_dir: str, what: str = "save_folder") -> str:
     """'' -> ''. A relative folder -> inside output_dir. An absolute folder, or one that climbs out with '..',
     only with save_anywhere = on; else a ValueError that says how to allow it."""

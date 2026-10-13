@@ -177,11 +177,25 @@ class ReliefMouldKub:
                                         "max": 4096, "step": 64,
                                         "tooltip": "The relief is worked on at most this many pixels on its long "
                                                    "side, then scaled back. Higher = finer but slower."}),
-            }
+            },
+            "optional": {
+                "anti_perch": ("BOOLEAN", {"default": False,
+                                           "tooltip": "On: after the mould prep every flat ledge is shaved into a "
+                                                      "sloped sill, so birds and people cannot perch, stand or sit "
+                                                      "on it. Vertical faces and undersides stay as they are."}),
+                "sill_angle_deg": ("FLOAT", {"default": 45.0, "min": 10.0, "max": 80.0, "step": 1.0,
+                                             "tooltip": "anti_perch: slope of the new sills, in degrees from "
+                                                        "horizontal. 45 is the common value; 60 is aggressive and "
+                                                        "eats more of the relief."}),
+                "max_span_mm": ("FLOAT", {"default": 400.0, "min": 20.0, "max": 2000.0, "step": 10.0,
+                                          "tooltip": "anti_perch: how far down, in mm, a sill slope can reach below "
+                                                     "a ledge. Larger = deep ledges get fully sloped, but slower."}),
+            },
         }
 
     DESCRIPTION = ("Makes a relief castable: rounds every sharp edge and limits steep walls so the panel comes out "
-                   "of a one-piece mould. Some depth is lost; the report says how much.")
+                   "of a one-piece mould. With anti_perch on it then shaves every flat ledge into a sloped sill. "
+                   "Some depth is lost; the report says how much.")
     RETURN_TYPES = (FIELD, "IMAGE", "STRING", "MASK")
     RETURN_NAMES = ("field", "preview", "report", "height")
     OUTPUT_TOOLTIPS = ("The mould-ready relief.",
@@ -191,17 +205,23 @@ class ReliefMouldKub:
     FUNCTION = "run"
     CATEGORY = CAT
 
-    def run(self, field, min_edge_radius_mm, draft_angle_deg, max_work_px):
+    def run(self, field, min_edge_radius_mm, draft_angle_deg, max_work_px, anti_perch=False, sill_angle_deg=45.0,
+            max_span_mm=400.0):
         h, px = field["height_mm"], field["px_mm"]
         before = float(h.max() - h.min())
         h2 = rc.round_edges(h, px, min_edge_radius_mm, max_work_px)
         h2 = rc.limit_slope(h2, px, draft_angle_deg, max_work_px)
+        sills = {}
+        if anti_perch:
+            h2 = rc.deslope_ledges(h2, px, sill_angle_deg, max_span_mm)
+            sills = {"sill_angle_deg": float(sill_angle_deg)}
         after = float(h2.max() - h2.min())
         out = _stamp(_make_field(h2, px, field["panel_bottom_mm"], field["meta"]),
                      stage="mould_ready",
                      min_edge_radius_mm=float(min_edge_radius_mm),
-                     draft_angle_deg=float(draft_angle_deg))
+                     draft_angle_deg=float(draft_angle_deg), **sills)
         rep = json.dumps({
+            "anti_perch": bool(anti_perch), **sills,
             "relief_before_mm": round(before, 1),
             "relief_after_mm": round(after, 1),
             "detail_lost_pct": round(100.0 * (1.0 - after / before), 1) if before else 0.0,
@@ -234,8 +254,10 @@ class ReliefAntiPerchKub:
             }
         }
 
-    DESCRIPTION = ("Shaves every flat ledge of a relief into a sloped sill so birds and people cannot perch, stand "
-                   "or sit on it. Vertical faces and undersides stay as they are.")
+    DESCRIPTION = ("(old: now 'anti_perch' of kubakub relief mould prep.) Shaves every flat ledge of a relief into a "
+                   "sloped sill so birds and people cannot perch, stand or sit on it. Vertical faces and undersides "
+                   "stay as they are.")
+    DEPRECATED = True                                 # kept for saved workflows
     RETURN_TYPES = (FIELD, "IMAGE", "MASK")
     RETURN_NAMES = ("field", "preview", "height")
     OUTPUT_TOOLTIPS = ("The relief with sloped sills.",
@@ -393,6 +415,33 @@ class ReliefMassKub:
 # 6. export
 # --------------------------------------------------------------------------
 
+SHAPES = ("panel (stl)", "prow (obj)")
+
+
+def _write_prow(field_a, interior_angle_deg, filename_prefix, base_mm, decimate, field_b=None):
+    """One or two reliefs folded into a prow -> the path of the written .obj."""
+    out_dir = folder_paths.get_output_directory()
+    full, name, counter, subfolder, _ = folder_paths.get_save_image_path(
+        filename_prefix, out_dir)
+    path = os.path.join(full, f"{name}_{counter:05}.obj")
+    panels = [field_a["height_mm"]]
+    if field_b is not None:
+        # the prow is written with field_a's pixel size: field_b is brought to it, so it keeps its size in mm
+        hb = _to_px_mm(field_b, field_a["px_mm"])
+        ha_mm = panels[0].shape[0] * field_a["px_mm"]
+        hb_mm = field_b["height_mm"].shape[0] * field_b["px_mm"]
+        if hb.shape != field_b["height_mm"].shape:
+            print(f"[kubakub relief export] field_b resampled from {field_b['px_mm']:.3f} to "
+                  f"{field_a['px_mm']:.3f} mm per pixel (its size in mm is kept)")
+        if abs(ha_mm - hb_mm) > max(2.0 * field_a["px_mm"], 0.01 * ha_mm):   # both stand on the same base line
+            print(f"[kubakub relief export] the wings differ in height: field {ha_mm:.0f} mm, "
+                  f"field_b {hb_mm:.0f} mm; the taller one stands above the other at the edge")
+        panels.append(hb)
+    rc.write_prow_obj(path, panels, field_a["px_mm"], interior_angle_deg,
+                      base_mm, decimate)
+    return path
+
+
 class ReliefExportPanelKub:
     @classmethod
     def INPUT_TYPES(cls):
@@ -409,19 +458,37 @@ class ReliefExportPanelKub:
                 "decimate": ("INT", {"default": 2, "min": 1, "max": 16,
                                      "tooltip": "Use every n-th pixel for the mesh. 1 = full detail, higher = "
                                                 "smaller, lighter file."}),
-            }
+            },
+            "optional": {
+                "shape": (list(SHAPES), {"default": SHAPES[0],
+                                         "tooltip": "panel: one flat panel as a closed .stl solid. prow: the relief "
+                                                    "folded into two wings that meet at an edge, as one .obj."}),
+                "interior_angle_deg": ("FLOAT", {"default": 28.0, "min": 5.0, "max": 170.0, "step": 0.5,
+                                                 "tooltip": "prow: full angle between the two wings, in degrees "
+                                                            "(small = sharp prow)."}),
+                "field_b": (FIELD, {"tooltip": "prow: optional relief for the second wing. Without it, field is "
+                                               "mirrored onto both wings. It keeps its own size in mm, also when "
+                                               "its pixel size differs."}),
+            },
         }
 
-    DESCRIPTION = ("Saves a relief as a closed STL solid in millimetres for printing or milling (relief on top, "
-                   "flat back, side walls).")
+    DESCRIPTION = ("Saves a relief in millimetres for printing or milling. panel: a closed STL solid (relief on top, "
+                   "flat back, side walls). prow: one or two reliefs folded into two wings meeting at an edge, as "
+                   "one OBJ.")
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("path",)
-    OUTPUT_TOOLTIPS = ("Full path of the saved .stl file.",)
+    OUTPUT_TOOLTIPS = ("Full path of the saved .stl (panel) or .obj (prow) file.",)
     FUNCTION = "run"
     OUTPUT_NODE = True
     CATEGORY = CAT
 
-    def run(self, field, filename_prefix, base_mm, decimate):
+    def run(self, field, filename_prefix, base_mm, decimate, shape=None, interior_angle_deg=28.0, field_b=None):
+        if shape == SHAPES[1]:
+            if filename_prefix == "reliefforge/panel":     # the name left as it came: a prow is not called 'panel'
+                filename_prefix = "reliefforge/prow"
+            return (_write_prow(field, interior_angle_deg, filename_prefix, base_mm, decimate, field_b),)
+        if field_b is not None:
+            print("[kubakub relief export] field_b is only used with shape = prow; the panel is field alone")
         out_dir = folder_paths.get_output_directory()
         full, name, counter, subfolder, _ = folder_paths.get_save_image_path(
             filename_prefix, out_dir)
@@ -456,8 +523,9 @@ class ReliefExportProwKub:
                                                          "also when its pixel size differs from field_a."})},
         }
 
-    DESCRIPTION = ("Folds one or two reliefs into a prow (two wings meeting at an edge) and saves it as one OBJ "
-                   "in millimetres.")
+    DESCRIPTION = ("(old: now shape = prow of kubakub relief export.) Folds one or two reliefs into a prow (two "
+                   "wings meeting at an edge) and saves it as one OBJ in millimetres.")
+    DEPRECATED = True                                 # kept for saved workflows
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("path",)
     OUTPUT_TOOLTIPS = ("Full path of the saved .obj file.",)
@@ -467,26 +535,7 @@ class ReliefExportProwKub:
 
     def run(self, field_a, interior_angle_deg, filename_prefix, base_mm,
             decimate, field_b=None):
-        out_dir = folder_paths.get_output_directory()
-        full, name, counter, subfolder, _ = folder_paths.get_save_image_path(
-            filename_prefix, out_dir)
-        path = os.path.join(full, f"{name}_{counter:05}.obj")
-        panels = [field_a["height_mm"]]
-        if field_b is not None:
-            # the prow is written with field_a's pixel size: field_b is brought to it, so it keeps its size in mm
-            hb = _to_px_mm(field_b, field_a["px_mm"])
-            ha_mm = panels[0].shape[0] * field_a["px_mm"]
-            hb_mm = field_b["height_mm"].shape[0] * field_b["px_mm"]
-            if hb.shape != field_b["height_mm"].shape:
-                print(f"[kubakub relief export prow] field_b resampled from {field_b['px_mm']:.3f} to "
-                      f"{field_a['px_mm']:.3f} mm per pixel (its size in mm is kept)")
-            if abs(ha_mm - hb_mm) > max(2.0 * field_a["px_mm"], 0.01 * ha_mm):   # both stand on the same base line
-                print(f"[kubakub relief export prow] the wings differ in height: field_a {ha_mm:.0f} mm, "
-                      f"field_b {hb_mm:.0f} mm; the taller one stands above the other at the edge")
-            panels.append(hb)
-        rc.write_prow_obj(path, panels, field_a["px_mm"], interior_angle_deg,
-                          base_mm, decimate)
-        return (path,)
+        return (_write_prow(field_a, interior_angle_deg, filename_prefix, base_mm, decimate, field_b),)
 
 
 NODE_CLASS_MAPPINGS = {
@@ -501,10 +550,10 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ReliefFieldKub": "kubakub relief field (from depth)",
-    "ReliefMouldKub": "kubakub relief mould prep",
-    "ReliefAntiPerchKub": "kubakub relief anti perch",
+    "ReliefMouldKub": "kubakub relief mould prep / anti perch",
+    "ReliefAntiPerchKub": "kubakub relief anti perch (old)",
     "ReliefSafetyCheckKub": "kubakub relief safety check",
     "ReliefMassKub": "kubakub relief mass estimate",
-    "ReliefExportPanelKub": "kubakub relief export panel (stl)",
-    "ReliefExportProwKub": "kubakub relief export prow (obj)",
+    "ReliefExportPanelKub": "kubakub relief export (stl panel / obj prow)",
+    "ReliefExportProwKub": "kubakub relief export prow (old)",
 }

@@ -37,6 +37,25 @@ def resolve_size(preset: str, width: int, height: int, matrix_shape=None) -> tup
     return int(width), int(height), "custom"
 
 
+def eye_preview(viewer, picture=None):
+    """The matrix (float32 [h, w, 3]; None = a dark frame of its shape, at most 960 wide) with a red dot where the
+    audience's eye line meets the facade -> float32 [h, w, 3]."""
+    import cv2
+    import numpy as np
+    W, H = int(viewer.width_px), int(viewer.height_px)
+    if picture is None:
+        k = min(1.0, 960.0 / max(W, 1))
+        prev = np.full((max(1, int(round(H * k))), max(1, int(round(W * k))), 3), 28, np.uint8)
+    else:
+        k = 1.0
+        prev = (np.clip(picture[..., :3], 0.0, 1.0) * 255).astype(np.uint8).copy()
+    h, w = prev.shape[:2]
+    fx, fy = viewer.foot_px()
+    r = max(6, w // 200)
+    cv2.circle(prev, (int(round(fx * k)), int(round(min(max(fy * k, r), h - r)))), r, (255, 40, 40), -1)
+    return prev.astype(np.float32) / 255
+
+
 def build(name, preset, width, height, fps, facade_width_m, bottom_m, viewer_x_m, eye_height_m, distance_m,
           matrix_shape=None) -> dict:
     """Everything the node outputs, plus a one-line report."""

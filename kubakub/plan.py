@@ -91,10 +91,11 @@ SETTINGS: dict[str, tuple[type | tuple, object, str]] = {
     "t_start": (float, 0.0, "video: seconds from which the region moves"),
     "t_end": (float, -1.0, "video: seconds until which it moves; -1 = to the end"),
     "motion": (float, 1.0, "video: 0..1, how much the region may change over time"),
-    "material_repaint": (float, 0.91, "video, with a clip on the sampler's 'material' input (e.g. from kubakub "
+    "material_repaint": (float, 0.8, "video, with a clip on the sampler's 'material' input (e.g. from kubakub "
                                       "shader): the region moves as the clip moves, and the model repaints it from "
-                                      "this noise level: 1 = it ignores the clip, 0.91 = its movement with the "
-                                      "model's own look, lower = more of the clip's look"),
+                                      "this noise level: 1 = it ignores the clip, 0.8 = every region follows its "
+                                      "clip, 0.91 = freer, more of the model's own look (small regions can lose "
+                                      "the clip's timing), lower = more of the clip's look"),
 }
 ALIASES = {"negative_prompt": "negative", "neg": "negative", "positive": "prompt",
            "context": "context_px", "dilate": "dilate_px", "feather": "feather_px"}
@@ -120,8 +121,23 @@ def pick_ids(table: dict | None, text: str) -> list[int]:
     exact = [r["region_id"] for r in regions if str(r.get("name", "")).lower() == want.lower()]
     if exact:
         return exact
-    sec = parse_rules(f"[{want}]\ndenoise = 0.5\n")[0]
+    sec = selector(want)
     return [r["region_id"] for r in regions if sec.match(r) is not None]
+
+
+RESERVED = ("then", "plan")                         # section headers that are not selectors
+
+
+def selector(text: str) -> "Section":
+    """A 'which regions' text as a section to match regions with. In such a text 'then' and 'plan' are region
+    names like any other (in the rules they head a layer and the plan's own settings)."""
+    return parse_rules(f"[{text}]\n", markers=False)[0]
+
+
+def header_of(text: str) -> str:
+    """A 'which regions' text as a section header for rule text: a reserved word becomes a name selector."""
+    t = (text or "").strip()
+    return f"name:{t}" if t.lower() in RESERVED else t
 
 
 def pick_or_say(table: dict | None, text: str, node: str) -> list[int]:
@@ -185,6 +201,7 @@ class Section:
     alternatives: list[list[Term]]          # OR of ANDs
     settings: list[tuple[str, str, str, int]] = field(default_factory=list)  # key, op, raw value, line
     is_plan: bool = False
+    layer: int = 0                          # sections after a [then] line: they win over everything before it
 
     def match(self, r: dict):
         """Specificity of the best matching alternative, or None."""
@@ -220,9 +237,11 @@ def _parse_term(tok: str, line: int) -> Term:
     return Term(kind, val, neg)
 
 
-def parse_rules(text: str) -> list[Section]:
+def parse_rules(text: str, markers: bool = True) -> list[Section]:
+    """The sections of a rule text. markers = False: [then] and [plan] are read as selectors (see selector())."""
     sections: list[Section] = []
     cur: Section | None = None
+    layer = 0
     for n, raw in enumerate((text or "").splitlines(), 1):
         line = _strip_comment(raw).strip()
         if not line:
@@ -231,7 +250,11 @@ def parse_rules(text: str) -> list[Section]:
             if not line.endswith("]"):
                 raise PlanError(f"line {n}: section header '{line}' is missing its ']'")
             header = line[1:-1].strip()
-            if header.lower() == "plan":
+            if markers and header.lower() == "then":    # what follows wins over what came before, whatever it names
+                layer += 1
+                cur = None
+                continue
+            if markers and header.lower() == "plan":
                 cur = Section(header, n, [], is_plan=True)
             else:
                 alts = []
@@ -240,14 +263,14 @@ def parse_rules(text: str) -> list[Section]:
                     if not toks:
                         raise PlanError(f"line {n}: empty selector in [{header}]")
                     alts.append([_parse_term(t, n) for t in toks])
-                cur = Section(header, n, alts)
+                cur = Section(header, n, alts, layer=layer)
             sections.append(cur)
             continue
         m = re.match(r"^([A-Za-z_][\w]*)\s*(\+?=)\s*(.*)$", line)
         if not m:
             raise PlanError(f"line {n}: expected 'key = value' or a [selector] header, got '{line}'")
         if cur is None:
-            cur = Section("default", n, [[Term("default", "*")]])
+            cur = Section("default", n, [[Term("default", "*")]], layer=layer)
             sections.append(cur)
         key, op, val = m.group(1).lower(), m.group(2), m.group(3).strip()
         key = ALIASES.get(key, key)
@@ -266,7 +289,7 @@ def parse_rules(text: str) -> list[Section]:
 
 def _strip_comment(line: str) -> str:
     # '//' starts a comment unless it is part of a URL-like 'x://'
-    return re.split(r"(?<!:)//", line, maxsplit=1)[0]
+    return re.split(r"(?:^|(?<=\s))//", line, maxsplit=1)[0]
 
 
 def _convert(key: str, raw: str, line: int, table=SETTINGS):
@@ -359,7 +382,7 @@ def resolve(table: dict, rules: str, seed: int = 0) -> dict:
         for s_i, s in enumerate(rule_sections):
             spec = s.match(r)
             if spec is not None:
-                matched.append((spec, s_i, s))
+                matched.append(((s.layer, *spec), s_i, s))
                 hits[s_i] += 1
         matched.sort(key=lambda x: (x[0], x[1]))
         rng = random.Random(f"{seed}:{rid}")

@@ -9,7 +9,7 @@ Open it from the templates. It runs the whole chain on the sample facade (1920x1
 ```
 kubakub sample facade -> regions from matrix / masks (its mask folder) -> region plan (example rules)
    -> region sampler, Klein 9B, only = !W_F1_*               every region but the floor 1 windows
-   -> region sampler, Qwen 2.1 + turbo LoRA, only = W_F1_*   the floor 1 windows, frame in frame
+   -> region sampler, Qwen 2.1 turbo, only = W_F1_*          the floor 1 windows, frame in frame
    -> seam pass (Klein) over both changed masks -> Save (output/KubaRegions)
 ```
 
@@ -18,9 +18,37 @@ on the regions node. The rules are the text of [rules_example.txt](rules_example
 plan so the workflow stands alone; rules for names your masks do not have match nothing. To iterate on a few
 regions, set `which regions` on one sampler (e.g. `W_F2_*`) and mute the other.
 
+## kubakub region prompt
+
+A prompt for chosen regions with nothing to type but the prompt. This is the easy way to make a
+plan; kubakub region plan below is the same thing as written rules.
+
+| input | default | what it does |
+|---|---|---|
+| regions | | From any kubakub regions node. Not needed when `plan` is connected. |
+| plan (optional) | | The prompts so far: another kubakub region prompt, or a kubakub region plan. This node is added on top; where both name a region, this node wins. |
+| which regions | empty | The regions this prompt is for. Use the **pick regions** button under it (groups, floors, sections, single names, after the regions node has run once), or type. Empty = every region. |
+| prompt | | What these regions become. `{a\|b\|c}` picks one per region; `{name}` and `{group}` are filled in. |
+| strategy | inpaint | inpaint: repainted in place. keep: left untouched (takes regions out of an earlier, wider prompt). frame_in_frame: a scene of its own, set into the region. |
+| denoise | 0.6 | How much the regions may change: 0.3 = a little, 1 = painted anew. |
+| seed | 0 | Another number = another result. In a chain the seed of the last node counts. |
+| more (advanced) | empty | Other settings for these regions, one `key = value` per line (`lora = name:0.8`, `animate = on`, `reference = material` ...): the keys of the table under kubakub region plan. |
+| image (optional) | | Background of the preview. |
+
+Outputs: `plan` (into kubakub region sampler, or into the next kubakub region prompt), `which regions`
+(the text of the field, for the same field of other nodes), `preview`, `report`.
+
+- **The regions it does not name stay as they are.** Nothing else is repainted.
+- **Several prompts:** one node per prompt, chained `plan` -> `plan`. The last node in the chain wins
+  where two name the same region.
+- **Set the regions once:** connect the `which regions` output to the `which regions` field of a
+  kubakub shader (or mask field, regions to mask ...). `region_materials_klein.json` is wired this way.
+
 ## kubakub region plan
 
-Gives every region its prompt and settings with a small rule text. Input:
+Gives every region its prompt and settings with a small rule text. For the same with fields in
+place of text, see kubakub region prompt above. A line `[then]` in the rules makes every section after
+it win over the sections before it, whatever they name (this is how kubakub region prompt nodes stack). Input:
 `regions` from any of the regions nodes. Output: `plan` (for the samplers),
 `plan_json`, a readable `report`, and a `preview` where regions of the same
 strategy and prompt share a colour (`p1`, `fif2`, `keep`). The optional `image`
@@ -116,7 +144,7 @@ details like vines), `none` lets the region be freely repainted inside its mask
 
 | input | default | |
 |---|---|---|
-| steps, cfg | 0, 0 | used where the plan says 0; 0 = the model's default (Klein 4 / 1, Qwen 2.1 25 / 1) |
+| steps, cfg | 0, 0 | used where the plan says 0; 0 = the model's default (Klein 4 / 1, Qwen 2.1 25 / 1; set 8 / 1 for the Qwen 2.1 turbo model) |
 | sampler_name | euler | |
 | scheduler | simple | generic models only; Flux 2 uses its own schedule |
 | region_mp | 1.0 | work megapixels per region crop |
@@ -183,8 +211,9 @@ give every region its own colour, pace or pattern.
 
 **In video.** kubakub region video sampler has the same `material` input, for a clip: connect the `images` of a
 kubakub shader with the same regions and the same fps. Each animated region then moves as the clip moves there, and
-LTX repaints it from the noise level `material_repaint` of the plan. At 0.91 it keeps the movement and paints its
-own look; at 1 it ignores the clip; lower keeps more of the clip's look. Such a clip does not start on the
+LTX repaints it from the noise level `material_repaint` of the plan. At 0.8, the default, every region follows its
+clip; at 0.91 it is freer and paints more of its own look, and small regions can lose the clip's timing; at 1 it
+ignores the clip; lower keeps more of the clip's look. Such a clip does not start on the
 untouched still, its first frame is repainted too. Before a region's `t_start` it stays the still. Where the clip
 is the same as the picture, the model moves the region freely, as without a material.
 
@@ -196,8 +225,8 @@ is the same as the picture, the model moves the region freely, as without a mate
 | Qwen Image 2.1 (turbo 5 step), denoise 0.9 | with the default `reference = self` it keeps the shader almost as it is; with `reference = none` and `denoise = 0.95` it paints along the forms | as the start: little | strong: the forms come back in the model's own look |
 | LTX 2.5 (video), 49 frames | at `material_repaint = 0.91` it paints its own moving light and loses the timing of small regions; at 0.8 every window follows its shader | | |
 
-So for Klein lay the material in, for Qwen show it as the reference (or take the self reference away), and for
-small regions in video go down to about 0.8.
+So for Klein lay the material in, for Qwen show it as the reference (or take the self reference away). In video
+the default is 0.8 for this reason.
 
 Limits to know: with a 4 or 5 step model the change map has only that many levels (a place joins the sampling at
 one of the steps), so a soft ramp becomes 4 or 5 bands, and only the brightest band is repainted fully: a place
@@ -234,7 +263,34 @@ on facade crops: the fine checkerboard speckle on flat plaster drops 4-14x
   detailed; use Qwen for the few hero windows and Klein for the many small regions
   (one backend per sampler node, chain two samplers with `which regions`).
 
+### Qwen Image 2.1 turbo (8 steps)
+
+The fast way, and what the example workflow uses: UNETLoader **`qwen_image_2.1_turbo_int8_convrot`**
+(huggingface.co/Comfy-Org/Qwen-Image-2.1, diffusion_models) -> Qwen Image 2.1 Cache (gpu, default) ->
+region sampler with **`steps = 8`, `cfg = 1`**, euler / simple, `schedule = auto`. Set the steps yourself:
+at 0 the sampler takes the 25 of the full model.
+
+The same result on a base file you already have (int8, NVFP4 ...): put core **LoraLoaderModelOnly** with
+`qwen_image_2.1_turbo_lora_avg_rank_178_bf16` (same repository, loras) behind the loader, same settings.
+At strength 1 the picture is nearly the one of the turbo model; at 0.6 it is the same composition, a
+little softer and less burnt.
+
+Tried on the first-floor windows of the sample facade (2026-10-13, 12 GB GPU, w4a8 encoder, cache gpu):
+
+| | time | |
+|---|---|---|
+| inpaint, a window of about 120 pixels | 5 to 7 s | stained glass with crisp lead lines |
+| frame in frame, scene 1056x992 + border pass | about 14 s | a full scene per window |
+
+For a flat region (a plain window, a blank wall field) add `reference = none` and go to `denoise = 0.95`
+(on kubakub region prompt: in `more`). With the default `reference = self` at 0.9 the windows kept their
+flat colour and got a plain glass pattern; without the reference every window became a picture of its
+own, with more colour.
+
 ### Qwen Image 2.1 turbo LoRA (Viggle)
+
+An older 5 step LoRA with its own schedule. In the test above it left the flat windows as they were at
+denoise 0.9 and 0.95, where the turbo model painted them; that was one test, not a verdict.
 
 `Qwen-Image-2.1-viggle-turbo-v0.2-5step-lora-r256.safetensors` (huggingface.co/Viggle/
 Qwen-Image-2.1-viggle-turbo) loads with plain core **LoraLoaderModelOnly**: all 227
@@ -429,15 +485,16 @@ Outputs: `image`, `seam_mask` (the band, to inspect or to feed core nodes) and a
 sampler's feathered paste already hides most edges, so the seam pass matters most
 where neighbouring regions differ strongly in style or light.
 
-## Frame in frame: audience viewpoint, rooms behind windows
+## Frame in frame: where the audience stands, rooms behind windows
 
 Rooms behind windows and things sticking out of the facade, in the perspective
 of the audience.
 
-**kubakub audience viewpoint**: the facade's real width (`facade_width_m`, the matrix maps onto
+**kubakub project settings** gives the `viewer`: the facade's real width (`facade_width_m`, the matrix maps onto
 it with one scale), the height of the matrix's bottom edge above the ground,
 and where the viewer stands (`viewer_x_m`, -1 = centre; `eye_height_m`;
-`distance_m`). A plane D metres behind the facade appears scaled towards the
+`distance_m`). Its `preview` shows the matrix with a red dot where the viewer's eye line meets the facade.
+(Before 0.4.0 this was a node of its own, kubakub audience viewpoint. Saved workflows with it still run.) A plane D metres behind the facade appears scaled towards the
 viewer's foot point by `d / (d + D)`; D < 0 (in front) scales away from it.
 
 **kubakub frame guide**: regions + viewer + `depth_rules` (`W_F1_* = 4`,

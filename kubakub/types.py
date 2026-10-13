@@ -23,6 +23,10 @@ class Regions:
     table: dict                         # the atlas JSON (regions, groups, notes ...)
     scope: torch.Tensor | None = None   # float [T, H, W], 1 = may be diffused
 
+    def __post_init__(self):            # the names of this session's regions, for the 'which regions' pickers
+        from . import regions_seen
+        regions_seen.note(self.table)
+
     @property
     def count(self) -> int:
         return len(self.table.get("regions", []))

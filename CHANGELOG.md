@@ -4,7 +4,66 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
-## Next (not released yet)
+## 0.4.0 (2026-10-13)
+
+Shaders, and less to type: moving pictures drawn by a shader, as a mask, a fill or the material your regions are
+painted from; a prompt per region from fields; regions picked from a list.
+
+**Behaves differently than in 0.3.0:**
+- **Network paths are not opened.** A file or folder field with `\\server\share\...` now stops with a message.
+  A workflow from someone else could name any server there, and Windows would contact it. Give the share a drive
+  letter (Map network drive) and use that path.
+- **Six nodes became part of another** (list below). Saved workflows with the old nodes still run; the old
+  nodes are no longer in the menu.
+
+**Known limits:**
+- **pick regions** remembers the names per node. After opening another workflow, queue once and the list is the
+  right one. It does not see into subgraphs.
+- A mask on `change` of the region sampler does not hold back frame in frame regions.
+
+- **Video: a clip on `material` is followed more closely.** `material_repaint` is 0.8 by default: every region
+  follows its clip. 0.91 is freer, with more of the model's own look.
+- **Qwen Image 2.1 turbo.** `facade_regions_diffusion.json` now loads the 8 step turbo model
+  (`qwen_image_2.1_turbo_int8_convrot`, 8 steps, cfg 1, `schedule = auto`) in place of the base model with a
+  step LoRA: one file less, about 14 s per frame in frame window. The nodes needed no change. The model list and
+  the generate page say how to get the same from a base file plus the turbo LoRA.
+- **kubakub region prompt: a plan with nothing to type but the prompt.** A new node (2d / generate) for what
+  kubakub region plan does with rule text. Choose the regions with **pick regions**, write the prompt, set
+  `strategy` and `denoise` as fields. The regions it does not name stay as they are. For another prompt on other
+  regions, put a second one behind it (`plan` -> `plan`); the later node wins where both name a region. Its
+  `which regions` output feeds the same field of a kubakub shader, so the regions are chosen once.
+  `region_materials_klein.json` uses it. kubakub region plan stays for written rules and reads a new line
+  `[then]`: the sections after it win over the ones before.
+- **pick regions: choose from a list, no names to type.** Every `which regions` field (shader, region sampler,
+  region video sampler, versions, mask field, regions to mask, scene pieces, regions to svg / pdf / dxf) has a
+  button under it. It opens what your regions hold: the groups, the floors and sections, single regions by name,
+  each with its number of regions. A click writes the text into the field: within a row any choice counts
+  (windows or columns), across rows all of them (windows on floor 1). In kubakub region plan the same button adds
+  a `[section]` for the chosen regions to the rules. The names are known once the regions node has run in the
+  session. kubakub regions to mask now shows the chosen regions lit up, and its new output `which regions`
+  carries the choice to other nodes by cable.
+- **Fewer nodes: six became part of another.** Saved workflows with the old
+  nodes still run; the old ones are no longer in the menu.
+  - kubakub pieces beat falloff is `type` = beat of **kubakub pieces falloff**.
+  - kubakub audience viewpoint is **kubakub project settings**, which now has the `preview` with the eye point.
+  - kubakub apply lut is `lut` / `lut_path` of **kubakub colour match**: a reference picture, a `.cube`, or both.
+    A `.cube` saved again under the same name is read again.
+  - kubakub relief anti perch is the switch `anti_perch` of **kubakub relief mould prep / anti perch**.
+  - kubakub relief export prow is `shape` = prow of **kubakub relief export**.
+  - kubakub mosaic grid from camera is `tile_width_m` + `facade_width_m` of **kubakub mosaic illusion**.
+- **Fixes from a review of the new parts.**
+  - Region sampler, `change`: places the map leaves black now stay pixel exact (before, they were pasted back
+    recoloured and softened), they are no longer in `changed`, and a region that is black all over is not
+    sampled.
+  - Scene preview / walkthrough: the map on the node came back empty after a restart of ComfyUI until the page
+    was reloaded.
+  - Region video sampler: a `material` clip of another size is scaled per clip crop, not as a whole (a 121 frame
+    clip on a 4K facade took about 12 GB of RAM).
+  - Sound mask swap: with `step_on` = signal, `threshold` and `gap` stay the node's own (they belong to the
+    control signal), also with a `sound` cable.
+  - Shader mix: `seconds` stays visible with `a` / `b` connected (two stills need it), and a connected `image`
+    that is not used is said in the report.
+  - Regions from id renders: the `scene_json` cable in `folder` gives a plain message, not a page of JSON.
 
 - **Shaders know your regions.** kubakub shader has a new input `regions`. Three new presets under *on your
   regions* treat every region on its own: **region colours** (each its own colour, breathing at its own pace),
@@ -19,7 +78,7 @@ may have changed since.
   shader's picture. Its `masks` on the new `change` input say how much each place may change. `reference =
   material` in the plan shows the picture to the model as a reference instead. For two shaders on top of each
   other, put a second kubakub shader behind the first (`on_picture` is the blend). In kubakub region video sampler
-  a clip on the new `material` input moves the animated regions as it moves (plan: `material_repaint`, 0.91).
+  a clip on the new `material` input moves the animated regions as it moves (plan: `material_repaint`, 0.8).
   Example `region_materials.json`, page [docs/generate.md](docs/generate.md). Tried with Flux 2 Klein 4B, Qwen
   Image 2.1 and LTX 2.5: Klein paints best from a material laid in, Qwen from a material as its reference, and
   small regions in video follow their shader at `material_repaint = 0.8` (the table is in the docs).

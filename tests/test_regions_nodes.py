@@ -68,7 +68,8 @@ table = {"regions": [
 regions = Regions.from_numpy(lab, table, None)
 
 # ---- every output of before is still there in its place; the new ones follow, with a tooltip
-check("regions to mask: outputs", outs(ns.KUBA_RegionsMask) == [("mask", "MASK"), ("names", "STRING"), ("region_masks", "MASK")],
+check("regions to mask: outputs, 'which' added last", outs(ns.KUBA_RegionsMask) == [("mask", "MASK"), ("names", "STRING"),
+                                                                                  ("region_masks", "MASK"), ("which", "STRING")],
       str(outs(ns.KUBA_RegionsMask)))
 check("regions from masks: outputs", [o for o, _ in outs(ns.KUBA_RegionsFromMasks)] ==
       ["regions", "region_masks", "regions_json", "preview", "report", "scope"], str(outs(ns.KUBA_RegionsFromMasks)))
@@ -102,6 +103,39 @@ check("regions to mask: region_masks before grow / feather / invert",
       all(torch.equal(each[i], torch.from_numpy((lab == rid).astype(np.float32))) for i, rid in enumerate((0, 1, 2))))
 check("regions to mask: the mask itself is unchanged by the switch",
       torch.equal(res[0], ns.KUBA_RegionsMask.execute(regions, "group:Windows, wall", 4, 6, True).result[0]))
+out = ns.KUBA_RegionsMask.execute(regions, "group:Windows", 0, 0, False)
+lit = ns.lit_preview(lab, [1, 2])
+check("regions to mask: 'which' passes the text on, the preview lights the chosen regions",
+      out.result[3] == "group:Windows" and out.ui is not None and lit.shape == (H, W, 3)
+      and float(lit[lab == 1][:, 0].max()) > 0.9 and float(lit[lab == 3].max()) < 0.3)
+
+# ---- the names of this session's regions, for the 'pick regions' buttons (kubakub/regions_seen.py)
+from kubapack.kubakub import regions_seen as seen  # noqa: E402
+seen._SEEN.clear()
+Regions.from_numpy(lab, table, None)
+check("regions seen: outside a running node nothing is kept", seen.find(["7"]) == (None, None))
+seen.note(table, node_id=7)
+check("regions seen: the table of a node, the nearest node first", seen.find(["3", "7"])[0] == "7" and seen.find(["3"])[0] is None)
+s = seen.summary(table)
+check("regions seen: groups with their counts, tags of no pass as the row 'tags'",
+      s["count"] == 4 and s["groups"] == [["doors", 1], ["wall", 1], ["Windows", 2]]
+      and s["rows"] == [{"label": "tags", "tags": [["floor 1", 1], ["front", 2], ["side", 1]]}]
+      and s["regions"][1] == ["W_F1_01", "Windows", ["front", "floor 1"]] and s["many"] == [], str(s))
+big = {"regions": [{"region_id": i, "name": f"w_{i:02d}", "group_id": "windows", "tags": [f"floor_{i % 3}", f"planes_{i:03d}", "left"]}
+                   for i in range(40)],
+       "passes": {"elements": ["windows"], "planes": [f"planes_{i:03d}" for i in range(40)], "sections": ["left"],
+                  "floors": ["floor_0", "floor_1", "floor_2", "roof"]}}
+s = seen.summary(big)
+check("regions seen: tags sorted into their passes, floors first; the pass of the groups and unused names left out",
+      [r["label"] for r in s["rows"]] == ["floors", "sections"] and s["rows"][0]["tags"] == [["floor_0", 14], ["floor_1", 13], ["floor_2", 13]],
+      str(s["rows"]))
+check("regions seen: a pass with too many names is named, not listed", s["many"] == [["planes", 40, "planes_000"]]
+      and s["regions"][5] == ["w_05", "windows", ["floor_2", "left"]], str(s["many"]))
+for _ in range(seen.MAX_NODES + 5):
+    seen.note(table, node_id=1000 + _)
+check("regions seen: only the last tables are kept", len(seen._SEEN) == seen.MAX_NODES and seen.find(["7"])[0] is None)
+seen._SEEN.clear()
+
 keep = ns.REGION_MASKS_MAX_GB
 ns.REGION_MASKS_MAX_GB = 3 * H * W * 4 / 1024 ** 3 * 0.9          # as if three masks were too many
 try:

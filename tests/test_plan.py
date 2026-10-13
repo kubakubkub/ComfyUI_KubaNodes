@@ -126,6 +126,34 @@ def test_negation_and_bare_settings():
     check("{prompt} placeholder", by_name(p)["M_Pilasters_01"]["prompt"] == "a, b, c")
 
 
+def test_then():
+    """[then]: the sections after it win over the ones before, whatever they name (the chain of kubakub region prompt)."""
+    rules = "[W_F1_*]\nprompt = narrow\ndenoise = 0.2\n[then]\n[default]\nprompt = wide\n"
+    p = by_name(rp.resolve(TABLE, rules))
+    name = next(n for n in p if n.startswith("W_F1_"))
+    check("[then]: a wider rule after it wins over a narrower one before it", p[name]["prompt"] == "wide")
+    check("[then]: what the later rule does not set stays", p[name]["denoise"] == 0.2)
+    q = by_name(rp.resolve(TABLE, rules.replace("[then]\n", "")))
+    check("without [then] the narrower rule wins, as before", q[name]["prompt"] == "narrow")
+    r = by_name(rp.resolve(TABLE, "[default]\nprompt = a\n[then]\nprompt = b\n"))
+    check("[then]: a bare setting after it belongs to the later layer", r[name]["prompt"] == "b")
+
+
+def test_reserved_and_comments():
+    """'then' and 'plan' in a 'which regions' text are names; '//' is a comment only after a space."""
+    t = {"regions": [{"region_id": 0, "name": "then", "group_id": "a", "tags": []},
+                     {"region_id": 1, "name": "plan", "group_id": "a", "tags": []},
+                     {"region_id": 2, "name": "wall", "group_id": "b", "tags": []}]}
+    check("which regions: 'then' and 'plan' are region names there", rp.pick_ids(t, "then") == [0] and rp.pick_ids(t, "plan") == [1]
+          and rp.selector("then, wall").match(t["regions"][2]) is not None and rp.selector("then").match(t["regions"][2]) is None)
+    check("a header for the rules: a reserved word becomes a name selector",
+          rp.header_of(" Then ") == "name:Then" and rp.header_of("group:a") == "group:a")
+    p = rp.resolve(t, "[default]\nprompt = a 50//50 mix  // a note\n// a whole line\ndenoise = 0.4 // another\n")
+    check("'//' inside a word is text, after a space it starts a comment",
+          p["regions"][0]["prompt"] == "a 50//50 mix" and p["regions"][0]["denoise"] == 0.4, p["regions"][0]["prompt"])
+    check("a URL in a prompt stays whole", rp.resolve(t, "[default]\nprompt = like http://x.y/z\n")["regions"][0]["prompt"] == "like http://x.y/z")
+
+
 def expect_error(name, rules, fragment):
     try:
         rp.resolve(TABLE, rules)
@@ -146,7 +174,7 @@ def test_errors():
 
 
 if __name__ == "__main__":
-    for t in (test_resolve, test_negation_and_bare_settings, test_errors):
+    for t in (test_resolve, test_negation_and_bare_settings, test_then, test_reserved_and_comments, test_errors):
         t()
     print()
     if failures:

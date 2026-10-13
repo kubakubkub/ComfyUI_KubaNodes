@@ -39,8 +39,9 @@ class KUBA_Viewer(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="KUBA_Viewer",
-            display_name="kubakub audience viewpoint",
+            display_name="kubakub audience viewpoint (old)",
             category="kubakub/2d/generate",
+            is_deprecated=True,                              # kubakub project settings gives the same viewer; kept for saved workflows
             search_aliases=['viewer', 'perspective'],
             description=(
                 "Where the audience stands in front of the facade, in metres. Frame in frame uses it for the "
@@ -71,16 +72,14 @@ class KUBA_Viewer(io.ComfyNode):
         H, W = int(matrix.shape[1]), int(matrix.shape[2])
         v = vw.Viewer(W, H, facade_width_m, bottom_m, None if viewer_x_m < 0 else viewer_x_m, eye_height_m,
                       distance_m)
+        from ...kubakub import project as pj
         fx, fy = v.foot_px()
-        prev = (matrix[0, ..., :3].cpu().float().numpy() * 255).astype(np.uint8).copy()
-        r = max(6, W // 200)
-        cv2.circle(prev, (int(round(fx)), int(round(min(max(fy, r), H - r)))), r, (255, 40, 40), -1)
+        prev = pj.eye_preview(v, matrix[0, ..., :3].cpu().float().numpy())
         report = (f"facade {facade_width_m:g} x {v.facade_height_m:.1f} m, {v.m_per_px * 1000:.1f} mm per px; "
                   f"viewer {distance_m:g} m in front, eye at pixel ({fx:.0f}, {fy:.0f})"
                   + (" (below the matrix)" if fy > H else "") + "; a room 3 m deep appears at "
                   f"{v.scale(3.0) * 100:.0f} %, something 1 m in front at {v.scale(-1.0) * 100:.0f} %")
-        return io.NodeOutput(v, _img(prev.astype(np.float32) / 255), report,
-                             ui=ui.PreviewImage(_img(prev.astype(np.float32) / 255), cls=cls))
+        return io.NodeOutput(v, _img(prev), report, ui=ui.PreviewImage(_img(prev), cls=cls))
 
 
 class KUBA_FrameGuide(io.ComfyNode):

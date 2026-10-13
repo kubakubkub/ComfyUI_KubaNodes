@@ -160,7 +160,7 @@ everything behind the building, scaled to cover the view.
 | input | |
 |---|---|
 | matrix (optional) | the picture or frames to project. Nothing connected: the clay views alone, at full brightness, without a picture |
-| viewer (optional) | the audience spot of scene measure / audience viewpoint / project settings. Connected: it replaces the typed `spots` (one view from there) |
+| viewer (optional) | the audience spot of scene measure / project settings. Connected: it replaces the typed `spots` (one view from there) |
 
 `clay_color` (a colour picker, almost white by default) is the colour of the model and its surroundings where no
 picture lands. `look` draws them as `clay`, as `wireframe` (the edges as lines in the clay colour on black, not
@@ -234,7 +234,7 @@ from the middle, height above the ground, distance from the wall towards the aud
 - **`matrix`** takes one picture: of a batch only the first frame is used (for moving pictures use the director
   or pieces render).
 - **`environment = file`** with an empty `hdri_file`: the built-in night environment is used and the report says so.
-- **`viewer`** (optional): the audience spot of scene measure / audience viewpoint / project settings. With
+- **`viewer`** (optional): the audience spot of scene measure / project settings. With
   `camera = audience` it replaces `audience_distance_m`, `audience_offset_m` and `eye_height_m` of this node;
   dragging the ring on the plan then does not move the camera.
 - **`plan`** (output): the light plan from above, the audience at the bottom. Every lamp in its colour with its
@@ -329,9 +329,10 @@ dormer) is a piece. Build a chain like in MOPS for Houdini:
   the other in an order (`direction`: left to right, bottom to top, from the centre, random) over `spread` seconds, each taking
   `duration`; `hold` sends them back. *noise*: every piece drifts on its own. `loop` repeats a wave or pulse.
   `start` is when a wave, pulse or stagger begins, in seconds from the first frame.
-- **kubakub pieces beat falloff**: a kick on the beats, bars or markers of the director's timeline (connect the
-  director's `document`): every piece jumps (`attack`) and settles (`decay`); `spread` lets the kick run across the
-  facade in an order, like a ripple.
+  *beat*: a kick on the beats, bars or markers of the director's timeline (connect the director's `document`,
+  choose them in `trigger`): every piece jumps (`attack`) and settles (`decay`); `ripple` (seconds) lets the kick run
+  across the facade in the order of `direction`, 0 = all at once. (A node of its own before 0.4.0,
+  kubakub pieces beat falloff. Saved workflows with it still run.)
 - **kubakub pieces transform**: push (out of the wall: along a flat piece's own face, out of the facade for closed
   stones), across / up / out (metres along the facade), tilt / turn / roll (degrees about each piece's centre),
   random rotate, scale, jitter. Weighted by the falloff; chain several, they add up.
@@ -341,7 +342,7 @@ dormer) is a piece. Build a chain like in MOPS for Houdini:
   itself the picture stays in place and the movement shows as shadows and gaps; that is what the building does to it.
   `view = audience` renders from a spot in front of the building instead (`audience_distance_m`, `audience_offset_m`,
   `eye_height_m`, `lens_mm`, advanced): the depth of the moving pieces shows, the projector stays where it is.
-  A connected `viewer` (scene measure / audience viewpoint / project settings) replaces these three numbers of the
+  A connected `viewer` (scene measure / project settings) replaces these three numbers of the
   spot. `exposure` (advanced, in stops, 0 = as before) makes the frames brighter or darker.
 
 The motion is computed in numpy (`kubakub/scene3d/pieces.py`, one matrix per piece and frame); Blender only

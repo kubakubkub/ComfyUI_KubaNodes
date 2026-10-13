@@ -123,6 +123,9 @@ def discover(folder: str):
     {pass: {"legend": [(name, rgb)], "idmap": path|None, "masks": {name: path}}}, reference path|None.
     """
     folder = fc.clean_folder_path(folder)
+    if folder.lstrip().startswith("{"):                # a JSON text landed here: the wrong output of scene render
+        raise ValueError("'folder' got a text that is not a path (it starts with '{'): connect the 'folder' output of "
+                         "kubakub scene render, not 'scene_json'")
     if not os.path.isdir(folder):
         hint = (" - it was a kubakub scene render cache folder that is gone now (the cache size cap or a cleared "
                 "cache removed it); queue again and the scene render recreates it") if "kuba_scene3d" in folder else ""
