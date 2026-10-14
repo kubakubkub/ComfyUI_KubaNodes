@@ -135,6 +135,17 @@ for _ in range(seen.MAX_NODES + 5):
     seen.note(table, node_id=1000 + _)
 check("regions seen: only the last tables are kept", len(seen._SEEN) == seen.MAX_NODES and seen.find(["7"])[0] is None)
 seen._SEEN.clear()
+other = {"regions": [{"region_id": 0, "name": "door", "group_id": "doors", "tags": []}]}
+seen.note(table, node_id=2, workflow="wf-a")
+seen.note(other, node_id=2, workflow="wf-b")
+check("regions seen: node 2 of another workflow is not offered", seen.find(["2"], "wf-a")[1] is table
+      and seen.find(["2"], "wf-b")[1] is other and seen.find(["2"], "wf-c") == (None, None))
+seen.note(other, node_id="15:4", workflow="wf-a")
+check("regions seen: a node run inside a subgraph is found by its own id", seen.find(["4"], "wf-a") == ("4", other)
+      and seen.find(["5"], "wf-a") == (None, None))
+seen.note(other, node_id=9)
+check("regions seen: a table kept without a workflow (a script) is offered to any", seen.find(["9"], "wf-a")[1] is other)
+seen._SEEN.clear()
 
 keep = ns.REGION_MASKS_MAX_GB
 ns.REGION_MASKS_MAX_GB = 3 * H * W * 4 / 1024 ** 3 * 0.9          # as if three masks were too many

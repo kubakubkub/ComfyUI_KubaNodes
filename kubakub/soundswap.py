@@ -73,6 +73,8 @@ def timing(mono, sr, st: Settings, sample=False, times=None):
          "t_start": start, "t_end": start + seconds}
     ctx = {"beats": [], "markers": [], "offset": 0.0, "hits": {}}
     lines = [f"sound {total:.2f} s" + (" (the built-in beat)" if sample else "") + f", {start:.2f} to {start + seconds:.2f} s"]
+    if st.start > total - 1e-3:
+        lines.append(f"start {st.start:g} s is past the end of the sound ({total:.2f} s): it starts at 0")
     if own:
         ctx["markers"] = sorted(float(t) for t in times or [])
         lines.append(f"{len(ctx['markers'])} " + ("rises found in the signal" if st.step_on == "signal" else "times in the list"))
@@ -160,6 +162,8 @@ def ram_bytes(frames, W, H):
 
 def frame_count(mono_len, sr, st: Settings):
     total = mono_len / float(sr)
-    start = min(max(0.0, st.start), max(0.0, total - 1e-3))
+    start = max(0.0, st.start)
+    if start > total - 1e-3:                        # past the end: from the beginning (timing says so)
+        start = 0.0
     seconds = total - start if st.seconds <= 0 else min(st.seconds, total - start)
     return max(1, int(round(seconds * min(max(float(st.fps), 1.0), 120.0)))), start, seconds

@@ -75,6 +75,9 @@ check("node: the tempo is found once and travels as a number", abs(out[2] - 120.
 check("node: start and seconds cut the sound for the cable and for 'audio'", out[0]["audio"]["waveform"].shape[-1] == 4 * SR
       and out[1]["waveform"].shape[-1] == 4 * SR and "from 2.00 s" in out[3])
 check("node: the settings travel", out[0]["gain"] == 1.5 and out[0]["threshold"] == 0.4 and "low 8 of" in out[3], out[3])
+out = ns.KUBA_Sound.execute(audio=AUDIO, start=500.0, seconds=2.0).args
+check("node: a start past the end begins at 0 and says so", out[1]["waveform"].shape[-1] == 2 * SR
+      and "past the end" in out[3] and "from " not in out[3].splitlines()[0], out[3])
 out = ns.KUBA_Sound.execute(audio=AUDIO, bpm=100.0).args
 check("node: a tempo you set wins", out[2] == 100.0 and "(set)" in out[3], out[3])
 try:

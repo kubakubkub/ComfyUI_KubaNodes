@@ -388,6 +388,9 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                                  vd.frames_in_range(pixels.shape[0], fps, ts, te))
                 if 1 < len(mat) < i0 + pixels.shape[0]:
                     said.append(f"it has {len(mat)} frames, the clip runs to frame {i0 + pixels.shape[0]}: its last frame is held")
+                elif len(mat) == 1:
+                    said.append("it is one picture, so the regions take its look but barely move; for movement give it a "
+                                "clip (a kubakub shader with seconds > 0)")
                 if guide is None:
                     said = [f"clip {gi + 1} material: it does not differ from the picture on these regions, so the model moves them freely"]
                 else:

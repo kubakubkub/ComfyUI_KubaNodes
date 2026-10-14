@@ -36,8 +36,9 @@ function write(text, pts) {                              // comments and empty l
   lines.forEach((raw, i) => {
     const v = raw.split("//")[0].trim().replace(/,/g, " ").split(/\s+/).filter(Boolean).map(Number);
     const isPoint = v.length >= 2 && v.every(Number.isFinite);
-    if (!isPoint) { if (raw.trim()) out.push(raw); return; }
-    if (by.has(i)) out.push(lineOf(by.get(i)));          // a removed point's line is dropped
+    if (!isPoint) { out.push(raw); return; }
+    const note = raw.includes("//") ? "   //" + raw.split("//").slice(1).join("//") : "";     // a note after a point stays (as in the light plan)
+    if (by.has(i)) out.push(lineOf(by.get(i)) + note);  // a removed point's line is dropped
   });
   for (const p of pts) if (p.line == null) out.push(lineOf(p));
   return out.join("\n");

@@ -149,6 +149,10 @@ check("feather: soft mask edges, the middle stays whole", 0.2 < sqf2[0][edge[0][
       , str(sqf2[0][edge[0][0], edge[1][0]]))
 n, t0, secs = sw.frame_count(len(x), SR, sw.Settings(start=7.0, seconds=5.0, fps=25))
 check("start / seconds stay inside the sound", (n, t0, secs) == (25, 7.0, 1.0), str((n, t0, secs)))
+n, t0, secs = sw.frame_count(len(x), SR, sw.Settings(start=500.0, seconds=2.0, fps=25))
+check("a start past the end begins at 0", (n, t0, secs) == (50, 0.0, 2.0), str((n, t0, secs)))
+_, _, _, said = sw.timing(x, SR, sw.Settings(start=500.0, seconds=2.0, fps=25))
+check("... and the report says so", any("past the end" in l for l in said), str(said))
 
 # ---- through the director: animate writes the masks a layer holds, the render shows the picture through them
 from kubakub.director import render as rd  # noqa: E402

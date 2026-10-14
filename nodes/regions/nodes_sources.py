@@ -798,7 +798,7 @@ def _routes():
     async def seen(request):
         try:
             ids = [s for s in str(request.query.get("nodes", "")).split(",") if s.strip()][:200]
-            node, table = regions_seen.find([s.strip() for s in ids])
+            node, table = regions_seen.find([s.strip() for s in ids], request.query.get("workflow", ""))
             if table is None:
                 return web.json_response({"node": None})
             return web.json_response({"node": node, **regions_seen.summary(table)})

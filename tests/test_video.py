@@ -440,6 +440,8 @@ def test_material():
         v.clear()
     short = _run(_plan(rules), Seen(), material=torch.rand(5, 96, 160, 3)).args
     assert "its last frame is held" in short[1] and torch.equal(seen["pixels"][0][4], seen["pixels"][0][16]), short[1]
+    one = _run(_plan(rules), Seen(), material=torch.rand(1, 96, 160, 3)).args
+    assert "it is one picture" in one[1] and "repainted from noise" in one[1], one[1]
     nv._CLIP_CACHE.clear()
     return "a material clip guides the animated regions (time range, repaint level, cache, another size, a short clip)"
 

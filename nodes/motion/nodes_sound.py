@@ -85,7 +85,11 @@ class KUBA_Sound(io.ComfyNode):
         total = wave.shape[-1] / float(hz)
         if total < 0.1:
             raise ValueError(f"{NAME}: the sound is empty.")
-        a = int(round(min(max(0.0, float(start)), max(0.0, total - 0.1)) * hz))
+        s0 = max(0.0, float(start))
+        if s0 > total - 0.1:
+            notes.append(f"start {s0:g} s is past the end of the sound ({total:.2f} s): it starts at 0")
+            s0 = 0.0
+        a = int(round(s0 * hz))
         b = wave.shape[-1] if seconds <= 0 else min(wave.shape[-1], a + max(1, int(round(float(seconds) * hz))))
         wave = wave[..., a:b].float().cpu().contiguous()
         mono = so.to_mono(wave)

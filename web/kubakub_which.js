@@ -149,7 +149,8 @@ async function show(node, field, plan) {
   say("reading…");
   let data = null;
   try {
-    const r = await api.fetchApi("/kubakub/regions/seen?nodes=" + encodeURIComponent(ids.join(",")));
+    const wf = String(app.rootGraph?.id ?? app.graph?.id ?? "");          // node 2 of another workflow is not this one
+    const r = await api.fetchApi("/kubakub/regions/seen?nodes=" + encodeURIComponent(ids.join(",")) + "&workflow=" + encodeURIComponent(wf));
     data = await r.json();
   } catch (e) {
     console.warn("[kubakub which regions]", e);
