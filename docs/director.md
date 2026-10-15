@@ -50,14 +50,38 @@ in the graph (bypass it for still-only work), and changing its settings does not
 | files | what the export wrote, one path per line: the video file, or for a PNG sequence the folder of frames and the .wav |
 | frame_count | frames of the timeline (length x fps) |
 | projection_mask | the building's silhouette at the size of **frames** (all ones when the projection mask is off) |
-| document | the director's document, passed through (into kubakub keyframe clips (h3)) |
+| document | the director's document, passed through (into kubakub keyframe clips) |
 
 The director's old render_sequence / export inputs still work for older workflows (advanced section); the window's
 export button uses them.
 Light layers render all their frames in one Blender session and frames with the same rig only once: on a 12 GB laptop GPU
 ~1.1 s per light frame at 800x540 (16 samples), 10 frames of the 3200x2160 test facade in 17 s.
 
-## Animate layers with LTX
+## Any LTX or H3 model
+
+The three video nodes (region video sampler, motion guide, keyframe clips) take whichever video model you load:
+LTX 2.x (dev or distilled; fp8, nvfp4, int8, GGUF) or MiniMax H3 (fl2va or ref2va, pruned or full), with or
+without a speed LoRA on it. Connect its own text encoder, VAE and audio VAE: a VAE of the other family stops with a
+message. The node reads the model's file names (the loader and every LoRA loader in front of it) and picks the
+schedule; the first lines of its **report** say what it took:
+
+| what the names say | schedule |
+|---|---|
+| LTX with `distilled` (model or LoRA), or no name hint | the 8 distilled sigmas, euler ancestral, cfg 1 |
+| LTX `dev` without the distilled LoRA | 20 steps of the LTX scheduler, cfg 4 |
+| H3 + `taomate` | 3 steps, euler, sigmas 1, 0.961165, 0.853333, 0 |
+| H3 + `flashgen` | 4 steps, euler, sigmas 1, 0.965517, 0.888889, 0.679245, 0 |
+| H3 + another `<n>step` LoRA or model (Acc 8 step, PDMD, DMAD, FastH3 ...) | n steps, res_multistep, simple |
+| H3 without a speed LoRA | 20 steps, res_multistep, simple |
+| H3 with `ref2va` in the model name | the still goes in as `<Picture 1>` instead of a keyframe |
+
+Two advanced widgets override it when your files have other names: **schedule** (auto / fast / full steps) and
+**steps** (0 = what the model needs). Differences of H3: it renders at its own 24 fps (17k + 5 frames), mapped back
+onto the node's frames by time; it has no latent upscaler (the second stage is left out and the report says so);
+at cfg 1 the negative prompt is not used. A dense H3 LoRA on a pruned model may log AdaLN keys it cannot load: that
+part is tiny, the LoRA works.
+
+## Animate layers (LTX or H3)
 
 An image or paint layer's **animate (ltx)** section: on, a video prompt (what happens over time), from / to
 (seconds; "here" takes the playhead) and motion. The director writes it into its plan rules (animate,
@@ -73,8 +97,8 @@ sequence with a moving lamp + an animated arcade 215 s.
 
 ## The whole sequence as a motion guide
 
-**kubakub motion guide (ltx)** goes the other way round: not single layers that LTX animates inside your frames, but
-your whole clip as a rough draft that LTX repaints. Connect the director sequence's **frames** (or a kubakub shader,
+**kubakub motion guide** goes the other way round: not single layers that the model animates inside your frames, but
+your whole clip as a rough draft that the model repaints. Connect the director sequence's **frames** (or a kubakub shader,
 a previz from scene walkthrough, any clip) to **guide**, its **fps** to fps and say in **prompt** what it should
 look like and what moves. What moves, where and when stays yours; the look comes from the prompt.
 
@@ -125,11 +149,11 @@ Two more inputs of the region video sampler, for clips that run on their own (a 
 In the window: **h3 clips** (timeline bar) → **+ clip** (between the markers around the playhead, else the next 3 s).
 Per clip: from / to, type, prompt (what happens), sound, raw, on. Project-wide: look, camera, sound, avoid. Clips
 show as bars on the ruler (orange = keyframes, lavender = reference); click one to edit it.
-- **keyframes** (fl2va model): the frames at the clip's start and end are H3's first and last frame; H3 animates
-  the way between them. Joined into the sequence with a short crossfade (crossfade frames).
-- **reference** (ref2va model): references instead of anchors - the sequence stretch itself (reference video with
+- **keyframes** (H3 fl2va or any LTX on `model`): the frames at the clip's start and end are the first and last frame;
+  the model animates the way between them. Joined into the sequence with a short crossfade (crossfade frames).
+- **reference** (H3 ref2va on `model_ref`; an LTX there makes a first-frame clip): references instead of anchors - the sequence stretch itself (reference video with
   its sound: keeps the layout, e.g. light lines that follow the real cornices), the timeline music, director layers.
-The node **kubakub keyframe clips (h3)** after **kubakub director sequence** renders them: frames / fps / audio from the
+The node **kubakub keyframe clips** after **kubakub director sequence** renders them: frames / fps / audio from the
 sequence (its **document** output too, or the director's), H3 models (fl2va + LoRA; ref2va + LoRA optional), the qwen3vl 32b H3 encoder,
 video + audio VAE. It builds H3's prompt format for you (look, anchors / tags in connection order, a timeline with
 the named markers inside the clip as beats, locked-off camera, Audio line, avoid) - the output **prompts** shows
@@ -137,7 +161,7 @@ them; 'raw' sends your text as it is. H3's sound is mixed into the timeline soun
 **Prompt enhance** (optional, local): connect **enhance_clip** = a text encoder that can write, e.g.
 `qwen3.5_9b_qwen_image_2.1_pe_i2i` (CLIPLoader type qwen_image); it looks at the clip's first frame and expands the
 prompt. The Gemma 4 LTX int8 encoder cannot generate text (garbage) - unusable output is detected and the draft is
-used. The region video sampler (LTX) has the same enhance_prompt / enhance_clip with core's LTX instructions.
+used. The region video sampler has the same enhance_prompt / enhance_clip with core's LTX instructions.
 Measured (12 GB laptop GPU, 1120x768): keyframe clip 2 s, 4 steps (flashgen LoRA) ~56 s; reference clip 2.5 s, 8 steps
 (Ref2VA Acc-8Step LoRA) with the sequence as reference ~263 s.
 

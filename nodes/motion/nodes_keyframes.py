@@ -1,14 +1,15 @@
 """
 nodes_keyframes.py
 
-kubakub keyframe clips (h3) (category kubakub/2d/motion): the director's timeline clips rendered with MiniMax H3
-(local, core nodes) and put into the director's sequence.
+kubakub keyframe clips (category kubakub/2d/motion): the director's timeline clips rendered with MiniMax H3 or
+LTX 2.x (local, core nodes; any variant, see kubakub/video_models.py) and put into the director's sequence.
 - keyframes clip (fl2va model): the sequence frames at the clip's start and end are H3's first and last frame;
   H3 makes the in-between (with sound). Anchored at both ends, so it joins the sequence without a seam.
 - reference clip (ref2va model): no anchors; references instead - director layers (image references), the
   timeline music of that stretch (audio reference) and/or the sequence stretch itself (reference video with its
   sound). Joined with a short crossfade.
-The chain follows core's templates video_minimax_h3_i2v / _r2v (BasicGuider, res_multistep, simple). The H3 sound
+The H3 chain follows core's templates video_minimax_h3_i2v / _r2v, the LTX chain video_ltx2_5_flf2v (LTXVAddGuide at
+the first and the last frame); the schedule comes from the model's file names (a speed LoRA's own sigmas). The sound
 is mixed into the timeline sound. The clips run in phases (enhance all, encode all, sample all per model, decode
 all), so each model is loaded once per run; rendered clips and enhanced prompts are cached (clip_cache.py). The
 models are lazy inputs: without a clip to render (or while the director holds) no H3 model is loaded.
@@ -29,6 +30,8 @@ from comfy_api.latest import io
 
 from ...kubakub import clip_cache as cc
 from ...kubakub import keyframes as kf
+from ...kubakub import video_models as vm
+from . import nodes_video as nv
 
 log = logging.getLogger("KUBA.regions")
 
@@ -81,11 +84,15 @@ class _H3Ops:
             clip, prompt, W, H, length, "match", vae, audio_vae, ref_images=ref_images or None,
             ref_videos=ref_videos or None, ref_video_audios=ref_video_audios or None, ref_audios=ref_audios or None).args
 
-    def sample(self, mdl, cond, latent, steps, seed):
+    def sample(self, mdl, cond, latent, prof, seed):
+        """One clip with the model's schedule (prof: video_models.profile)."""
         from comfy_extras import nodes_custom_sampler as cs
         guider = cs.BasicGuider.execute(mdl, cond).args[0]
-        sampler = cs.KSamplerSelect.execute("res_multistep").args[0]
-        sigmas = cs.BasicScheduler.execute(mdl, "simple", steps, 1.0).args[0]
+        sampler = cs.KSamplerSelect.execute(prof["sampler"]).args[0]
+        if prof.get("sigmas"):
+            sigmas = torch.tensor([float(v) for v in prof["sigmas"]], dtype=torch.float32)
+        else:
+            sigmas = cs.BasicScheduler.execute(mdl, prof.get("scheduler") or "simple", int(prof["steps"]), 1.0).args[0]
         noise = cs.RandomNoise.execute(int(seed)).args[0]
         return cs.SamplerCustomAdvanced.execute(noise, guider, sampler, sigmas, latent).args[0]
 
@@ -100,7 +107,51 @@ class _H3Ops:
         return {"waveform": snd["waveform"].cpu(), "sample_rate": snd["sample_rate"]}
 
 
+class _LtxKeyOps(_H3Ops):
+    """The same steps for LTX 2.x (core template video_ltx2_5_flf2v): the first and the last frame (and pinned
+    frames) as LTXVAddGuide at strength 0.7 after LTXVPreprocess 18, the audio-video latent, the guide frames cropped
+    off before decoding. LTX has no reference mode: a reference clip starts from the stretch's first frame."""
+
+    NEGATIVE = "camera movement, zoom, pan, shaky, morphing facade, blurry, low quality, text, watermark"
+
+    def keyframes_cond(self, clip, vae, prompt, W, H, length, first, last, guides, fps=25.0, audio_vae=None):
+        from comfy_extras import nodes_lt as lt
+        pos = clip.encode_from_tokens_scheduled(clip.tokenize(prompt))
+        neg = clip.encode_from_tokens_scheduled(clip.tokenize(self.NEGATIVE))
+        latent = lt.EmptyLTXVLatentVideo.execute(W, H, length, 1).args[0]
+        for idx, img in [(0, first), *guides, (-1, last)]:
+            if img is None:
+                continue
+            img = lt.LTXVPreprocess.execute(img[..., :3], 18).args[0]
+            pos, neg, latent = lt.LTXVAddGuide.execute(pos, neg, vae, latent, img, idx, 0.7).args
+        return {"pos": pos, "neg": neg, "fps": float(fps), "audio": nv._OPS.empty_audio(audio_vae, length, fps)}, latent
+
+    def reference_cond(self, clip, vae, audio_vae, prompt, W, H, length, ref_images, ref_videos, ref_video_audios,
+                       ref_audios, first=None, fps=25.0):
+        return self.keyframes_cond(clip, vae, prompt, W, H, length, first, None, [], fps, audio_vae)
+
+    def sample(self, mdl, cond, latent, prof, seed):
+        from comfy_extras import nodes_lt as lt
+        ops = nv._OPS
+        guider = ops.guider(mdl, cond["pos"], cond["neg"], cond["fps"], prof)
+        sigmas = nv._text(ops.base_sigmas(mdl, prof, latent))
+        video, audio = ops.sample(mdl, guider, int(seed), sigmas, latent, cond["audio"], prof["sampler"])
+        video = lt.LTXVCropGuides.execute(cond["pos"], cond["neg"], video).args[2]
+        return {"video": video, "audio": audio}
+
+    def decode_video(self, vae, res):
+        return nv._OPS.decode(vae, res["video"])[..., :3].float().cpu()
+
+    def decode_audio(self, audio_vae, res):
+        if res.get("audio") is None or audio_vae is None:
+            return {"waveform": torch.zeros((1, 2, 1600)), "sample_rate": 16000}
+        from comfy_extras import nodes_lt_audio as lta
+        snd = lta.LTXVAudioVAEDecode.execute(res["audio"], audio_vae).args[0]
+        return {"waveform": snd["waveform"].cpu(), "sample_rate": snd["sample_rate"]}
+
+
 _OPS = _H3Ops()
+_LTX_OPS = _LtxKeyOps()
 
 
 def _by_model(jobs):
@@ -154,28 +205,35 @@ class KUBA_KeyframeClips(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="KUBA_KeyframeClips",
-            display_name="kubakub keyframe clips (h3)",
+            display_name="kubakub keyframe clips",
             category="kubakub/2d/motion",
-            search_aliases=['h3', 'minimax', 'video with sound'],
+            search_aliases=['h3', 'minimax', 'ltx', 'video with sound'],
             description=(
                 "Turns the clips you set on the director's timeline into generated video with sound and puts them "
-                "into its sequence (MiniMax H3, run locally). Keyframe clips (the fl2va, first and last frame, model): the frames at the clip's start and end become H3's first and last frame, H3 animates "
-                "the way between them. Reference clips (the ref2va, reference, model): director layers, the music of that stretch and / "
-                "or the stretch itself as references. H3's sound is mixed into the timeline sound."),
+                "into its sequence (MiniMax H3 or LTX 2.x, any variant, run locally). Keyframe clips (H3 fl2va or "
+                "any LTX): the frames at the clip's start and end become the first and last frame, the model "
+                "animates the way between them. Reference clips (H3 ref2va on model_ref): director layers, the music "
+                "of that stretch and / or the stretch itself as references. The model's sound is mixed into the "
+                "timeline sound."),
             inputs=[
-                io.Model.Input("model", lazy=True, tooltip="H3 fl2va (keyframe clips), e.g. + the 4-step flashgen LoRA."),
-                io.Clip.Input("clip", lazy=True, tooltip="qwen3vl 32b MiniMax H3 encoder (CLIPLoader type minimax)."),
-                io.Vae.Input("vae", lazy=True, tooltip="H3 video VAE."),
-                io.Vae.Input("audio_vae", lazy=True, tooltip="H3 audio VAE."),
+                io.Model.Input("model", lazy=True, tooltip="For keyframe clips: H3 fl2va or any LTX 2.x, with or "
+                                                            "without a speed LoRA (FlashGen, TaoMate, distilled ...)."),
+                io.Clip.Input("clip", lazy=True, tooltip=nv.CLIP_TIP),
+                io.Vae.Input("vae", lazy=True, tooltip=nv.VAE_TIP),
+                io.Vae.Input("audio_vae", lazy=True, tooltip="The audio VAE of the same model (its sound is mixed in)."),
                 io.Image.Input("frames", tooltip="The frames output of kubakub director sequence."),
                 io.Float.Input("fps", default=25.0, min=1.0, max=120.0, tooltip="The director's fps output."),
                 io.String.Input("document", multiline=True, default="", tooltip="The director's document output (its timeline clips)."),
                 io.Audio.Input("audio", optional=True, tooltip="The director's audio output (timeline sound)."),
-                io.Model.Input("model_ref", optional=True, lazy=True, tooltip="H3 ref2va for reference clips (+ a turbo LoRA -> fewer steps)."),
+                io.Model.Input("model_ref", optional=True, lazy=True, tooltip="H3 ref2va for reference clips (+ a turbo LoRA -> fewer steps). "
+                                                                              "An LTX model here makes first-frame clips (LTX has no references)."),
                 io.Image.Input("layer_images", optional=True,
                                tooltip="The images connected to the director's 'layers' input (for references to those layers)."),
-                io.Int.Input("steps", advanced=True, default=4, min=1, max=100, tooltip="Keyframe clips (4 with the flashgen LoRA)."),
-                io.Int.Input("steps_ref", advanced=True, default=20, min=1, max=100, tooltip="Reference clips (20 without a turbo LoRA, 4 with)."),
+                io.Int.Input("steps", advanced=True, default=0, min=0, max=100,
+                             tooltip="Keyframe clips. 0 = what the model needs (its speed LoRA's steps, 20 without one); "
+                                     "another number overrides it."),
+                io.Int.Input("steps_ref", advanced=True, default=0, min=0, max=100,
+                             tooltip="Reference clips. 0 = what model_ref needs; another number overrides it."),
                 io.Float.Input("megapixels", default=0.85, min=0.1, max=2.0, step=0.05,
                                tooltip="H3 work size (the aspect of the sequence); scaled to the sequence size after."),
                 io.Int.Input("seed", default=42, min=0, max=0xFFFFFFFFFFFFFFFF,
@@ -189,12 +247,14 @@ class KUBA_KeyframeClips(io.ComfyNode):
                                       "expands each clip's prompt into H3's format, looking at the clip's first frame."),
                 io.Boolean.Input("enhance", default=True, optional=True, tooltip="Use enhance_clip when connected."),
                 io.Int.Input("crossfade", advanced=True, default=6, min=0, max=48, tooltip="Frames blended into the director's own frames at each clip end (H3 does not always land exactly on the end frame). At most 12 are used."),
+                nv.schedule_inputs()[0],
             ],
+            hidden=[io.Hidden.prompt, io.Hidden.unique_id],
             outputs=[
                 io.Image.Output("frames", tooltip="The sequence with the clips in."),
-                io.String.Output("prompts", tooltip="The prompts H3 got, per clip (copy one into a clip with 'raw' on to tune it)."),
-                io.Audio.Output("audio", tooltip="Timeline sound + H3 sound."),
-                io.String.Output("report", tooltip="Per clip: mode, time span, H3 size, frames, steps and time (or "
+                io.String.Output("prompts", tooltip="The prompts the model got, per clip (copy one into a clip with 'raw' on to tune it)."),
+                io.Audio.Output("audio", tooltip="Timeline sound + the model's sound."),
+                io.String.Output("report", tooltip="Per clip: mode, time span, size, frames, steps and time (or "
                                                    "'from the cache')."),
                 io.Float.Output("fps", tooltip="The frame rate (frames per second), passed through for Create Video."),
             ],
@@ -214,10 +274,16 @@ class KUBA_KeyframeClips(io.ComfyNode):
 
     @classmethod
     def execute(cls, model, clip, vae, audio_vae, frames, fps, document, audio=None, model_ref=None, layer_images=None,
-                steps=4, steps_ref=20, megapixels=0.85, seed=42, h3_audio=0.6, crossfade=6, enhance_clip=None,
-                enhance=True) -> io.NodeOutput:
+                steps=0, steps_ref=0, megapixels=0.85, seed=42, h3_audio=0.6, crossfade=6, enhance_clip=None,
+                enhance=True, schedule="auto") -> io.NodeOutput:
         ops = _OPS
         t0 = time.perf_counter()
+        setups = {}                                             # per model input: (family, profile, ops)
+        for name, mdl, n_steps in (("model", model, steps), ("model_ref", model_ref, steps_ref)):
+            if mdl is not None:
+                fam, prof, _o = nv.model_setup(cls, mdl, schedule, n_steps, input_name=name, default="h3", clip=clip, vae=vae,
+                                               audio_vae=audio_vae)
+                setups[name] = (fam, prof, _OPS if fam == "h3" else _LTX_OPS)
         doc = json.loads(document) if (document or "").strip() else {}
         out = frames[..., :3].float().cpu().clone()
         N, fh, fw = out.shape[0], out.shape[1], out.shape[2]
@@ -249,41 +315,45 @@ class KUBA_KeyframeClips(io.ComfyNode):
             run_jobs = [jobs[i] for i in run]
             for j in run_jobs:
                 cls._prepare(j, doc, raw, tl, h3cfg, out, fps, W, H, audio, layer_images, model, model_ref, clip, vae,
-                             audio_vae, enhance_clip, enhance, steps, steps_ref, seed)
+                             audio_vae, enhance_clip, enhance, setups, seed)
             todo = [j for j in run_jobs if j["hit"] is None]
             for j in todo:                                      # the enhancer, once for all clips
                 tc = time.perf_counter()
                 j["prompt"] = cls._prompt(j["draft"], j["meta"], enhance_clip, enhance, out[j["i0"]:j["i0"] + 1],
                                           seed + j["k"])
                 j["t"] += time.perf_counter() - tc
-            for j in todo:                                      # the H3 text encoder (+ VAE for the anchors)
+            for j in todo:                                      # the text encoder (+ VAE for the anchors)
                 tc = time.perf_counter()
+                jo = j["ops"]
                 if j["mode"] == "keyframes":
                     i0, i1 = j["i0"], j["i1"]
-                    j["cond"], j["latent"] = ops.keyframes_cond(clip, vae, j["prompt"], W, H, j["length"], out[i0:i0 + 1],
-                                                                out[i1:i1 + 1], [(hf, out[ia:ia + 1]) for ia, hf in j["pins"]])
+                    extra = {} if jo is ops else {"fps": j["mfps"], "audio_vae": audio_vae}
+                    j["cond"], j["latent"] = jo.keyframes_cond(clip, vae, j["prompt"], W, H, j["length"], out[i0:i0 + 1],
+                                                               out[i1:i1 + 1], [(hf, out[ia:ia + 1]) for ia, hf in j["pins"]],
+                                                               **extra)
                     if j["pins"]:
                         j["rows"].append(f"clip {j['c']['id']}: pinned {len(j['pins'])} frame(s) at "
                                          + ", ".join(f"{ia / fps:.2f} s" for ia, _ in j["pins"]))
                 else:
-                    j["cond"], j["latent"] = ops.reference_cond(clip, vae, audio_vae, j["prompt"], W, H, j["length"],
-                                                                *j["refs"])
+                    extra = {} if jo is ops else {"first": out[j["i0"]:j["i0"] + 1], "fps": j["mfps"]}
+                    j["cond"], j["latent"] = jo.reference_cond(clip, vae, audio_vae, j["prompt"], W, H, j["length"],
+                                                               *j["refs"], **extra)
                 j["t"] += time.perf_counter() - tc
             for j in _by_model(todo):                           # each diffusion model loaded once for its clips
                 tc = time.perf_counter()
-                j["res"] = ops.sample(j["mdl"], j.pop("cond"), j.pop("latent"), j["n_steps"], int(seed) + j["k"])
+                j["res"] = j["ops"].sample(j["mdl"], j.pop("cond"), j.pop("latent"), j["prof"], int(seed) + j["k"])
                 ops.free()
                 j["t"] += time.perf_counter() - tc
             for j in todo:                                      # the video VAE, then the audio VAE
                 tc = time.perf_counter()
-                video = ops.decode_video(vae, j["res"])
+                video = j["ops"].decode_video(vae, j["res"])
                 j["video_u8"] = (video.clamp(0, 1) * 255).round().to(torch.uint8)
                 del video
                 j["t"] += time.perf_counter() - tc
             ops.free()
             for j in todo:
                 tc = time.perf_counter()
-                j["snd"] = ops.decode_audio(audio_vae, j.pop("res"))
+                j["snd"] = j["ops"].decode_audio(audio_vae, j.pop("res"))
                 j["t"] += time.perf_counter() - tc
             if todo:
                 ops.free()
@@ -297,8 +367,8 @@ class KUBA_KeyframeClips(io.ComfyNode):
                 prompts.append(f"[clip {c['id']} {c['t_start']:g}-{c['t_end']:g} s{', reference' if j['mode'] == 'reference' else ''}]\n{j['prompt']}")
                 wave = snd["waveform"][0].float().cpu().numpy()
                 segments.append((c["t_start"], wave, int(snd["sample_rate"])))
-                j["rows"].append(f"clip {c['id']} ({j['mode']}): {c['t_start']:.2f}-{c['t_end']:.2f} s, H3 {W}x{H} x "
-                                 f"{j['length']} frames, {j['n_steps']} steps, "
+                j["rows"].append(f"clip {c['id']} ({j['mode']}): {c['t_start']:.2f}-{c['t_end']:.2f} s, "
+                                 f"{vm.NAMES[j['fam']]} {W}x{H} x {j['length']} frames, {j['n_steps']} steps, "
                                  + ("unchanged, from the cache" if j["hit"] is not None else f"{j['t']:.0f} s"))
                 for key in ("video_u8", "hit", "snd"):
                     j.pop(key, None)
@@ -309,31 +379,41 @@ class KUBA_KeyframeClips(io.ComfyNode):
         base = audio["waveform"][0].float().cpu().numpy() if audio is not None else np.zeros((2, int(round(duration * sr))), np.float32)
         mixed = kf.mix_audio(base, sr, segments, float(h3_audio)) if segments and h3_audio > 0 else base
         audio_out = {"waveform": torch.from_numpy(np.ascontiguousarray(mixed))[None], "sample_rate": sr}
-        report = "\n".join([f"{len(clips)} clip(s) in {N} frames at {fps:g} fps, {time.perf_counter() - t0:.0f} s", *rows]
-                           + ([] if work else ["no clip to render: frames passed through, no H3 model loaded"]))
+        models = [vm.describe(prof).replace("model:", f"{name}:", 1) for name, (_f, prof, _o) in setups.items() if work]
+        report = "\n".join([f"{len(clips)} clip(s) in {N} frames at {fps:g} fps, {time.perf_counter() - t0:.0f} s", *models, *rows]
+                           + ([] if work else ["no clip to render: frames passed through, no video model loaded"]))
         log.info("[KUBA director] keyframe clips: %s", report.split("\n")[0])
         return io.NodeOutput(out, "\n\n".join(prompts), audio_out, report, float(fps))
 
     @staticmethod
     def _prepare(j, doc, raw, tl, h3cfg, out, fps, W, H, audio, layer_images, model, model_ref, clip, vae, audio_vae,
-                 enhance_clip, enhance, steps, steps_ref, seed):
+                 enhance_clip, enhance, setups, seed):
         """A clip's draft prompt, references, cache key and cache lookup (no model runs here)."""
         tc = time.perf_counter()
         c, k, i0, i1 = j["c"], j["k"], j["i0"], j["i1"]
         meta = raw.get(c["id"], {})
         dur = (i1 - i0) / float(fps)
-        length = kf.h3_length(dur)
+        fam, prof, jops = setups.get("model" if j["mode"] == "keyframes" else "model_ref",
+                                     ("h3", vm.profile("h3"), _OPS))
+        if jops is not _LTX_OPS:
+            jops = _OPS                                         # the module's ops (tests replace them)
+        length, mfps = kf.model_length(fam, dur, fps)
+        ltx_ref = j["mode"] == "reference" and fam != "h3"
+        if ltx_ref:
+            j["rows"].append(f"clip {c['id']}: LTX has no reference mode, so this clip starts from the stretch's first "
+                             f"frame (put an H3 ref2va model on model_ref for references)")
         beats = kf.clip_beats(tl.get("markers"), c["t_start"], c["t_end"])
         meta_c = {**meta, "prompt": c["prompt"], "mode": j["mode"]}
         use_enh = enhance_clip if (enhance and not meta.get("raw")) else None
         if j["mode"] == "keyframes":
             draft = kf.build_h3_prompt(meta_c, h3cfg, dur, beats)
-            mdl, n_steps = model, int(steps)
-            pins = kf.clip_anchors(tl.get("markers"), fps, i0, i1, length)       # markers set to pin their frame
-            ckey = _digest("keyframes", draft, W, H, length, n_steps, seed + k, out[i0], out[i1], [(hf, out[ia]) for ia, hf in pins])
+            mdl = model
+            pins = kf.clip_anchors(tl.get("markers"), fps, i0, i1, length, mfps)  # markers set to pin their frame
+            ckey = _digest("keyframes", fam, vm.describe(prof), draft, W, H, length, seed + k, out[i0], out[i1],
+                           [(hf, out[ia]) for ia, hf in pins])
             j.update(pins=pins)
         else:
-            refs = [str(r) for r in meta.get("refs") or []]
+            refs = [] if ltx_ref else [str(r) for r in meta.get("refs") or []]
             ref_images = {}
             for r in refs:
                 if r.startswith("layer:"):
@@ -357,13 +437,13 @@ class KUBA_KeyframeClips(io.ComfyNode):
             if ref_audios:
                 tags.append(("<Audio 1>", "the music"))
             draft = kf.build_h3_prompt(meta_c, h3cfg, dur, beats, tags)
-            mdl, n_steps = model_ref, int(steps_ref)
-            ckey = _digest("reference", draft, W, H, length, n_steps, seed + k, out[i0], ref_images, ref_videos,
-                           ref_video_audios, ref_audios)
+            mdl = model_ref
+            ckey = _digest("reference", fam, vm.describe(prof), draft, W, H, length, seed + k, out[i0], ref_images,
+                           ref_videos, ref_video_audios, ref_audios)
             j.update(refs=(ref_images, ref_videos, ref_video_audios, ref_audios))
         objs = (mdl, clip, vae, audio_vae, use_enh)
-        j.update(meta=meta_c, draft=draft, length=length, dur=dur, mdl=mdl, n_steps=n_steps, objs=objs, ckey=ckey,
-                 hit=_CLIP_CACHE.get(ckey, objs), t=time.perf_counter() - tc)
+        j.update(meta=meta_c, draft=draft, length=length, dur=dur, mdl=mdl, n_steps=prof["steps"], objs=objs, ckey=ckey,
+                 hit=_CLIP_CACHE.get(ckey, objs), t=time.perf_counter() - tc, fam=fam, prof=prof, ops=jops, mfps=mfps)
 
     @staticmethod
     def _paste(j, out, fps, crossfade, fh, fw):
@@ -371,7 +451,7 @@ class KUBA_KeyframeClips(io.ComfyNode):
         i0, i1 = j["i0"], j["i1"]
         crossfade = min(crossfade, kf.HIDDEN_MARGIN)            # skip_h3_frames keeps only that many director frames
         video = j["video_u8"].float() / 255.0                   # the same 8 bits whether cached or not
-        idx = kf.frame_map(i1 - i0 + 1, j["dur"], video.shape[0])
+        idx = kf.frame_map(i1 - i0 + 1, j["dur"], video.shape[0], j["mfps"])
         lo, hi = (i0 + 1, i1 - 1) if j["mode"] == "keyframes" else (i0, i1)
         for jj in range(lo, hi + 1):
             f = video[idx[jj - i0]].numpy()
@@ -410,4 +490,4 @@ class KUBA_KeyframeClips(io.ComfyNode):
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_KeyframeClips": KUBA_KeyframeClips}
-NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_KeyframeClips": "kubakub keyframe clips (h3)"}
+NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_KeyframeClips": "kubakub keyframe clips"}

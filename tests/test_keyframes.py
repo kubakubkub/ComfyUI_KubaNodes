@@ -151,7 +151,8 @@ class _StubH3:
         self.calls.append(("encode", clip.name))
         return float(len(prompt)), {"length": length, "W": W, "H": H}
 
-    def sample(self, mdl, cond, latent, steps, seed):
+    def sample(self, mdl, cond, latent, prof, seed):
+        steps = prof["steps"]
         self.calls.append(("sample", mdl.name))
         return {"v": (cond * 0.37 + steps * 0.01 + (seed % 7) * 0.05) % 1.0, **latent}
 

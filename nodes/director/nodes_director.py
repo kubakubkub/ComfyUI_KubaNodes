@@ -797,7 +797,7 @@ def _sequence_body(doc, docs, n, fps, windows, shown, hidden, mf, sources, base_
         frames[i] = frames[a] + (frames[b] - frames[a]) * ((i - a) / (b - a))
     report = (f"sequence: {n} frames at {ws}x{hs}, {fps} fps, {time.perf_counter() - t0:.1f} s"
               + (f"\n{len(hidden)} frames under H3 keyframe clips are placeholders (a dissolve), not rendered: kubakub "
-                 f"keyframe clips (h3) replaces them (skip_h3_frames; off = every frame rendered)" if hidden else "")
+                 f"keyframe clips replaces them (skip_h3_frames; off = every frame rendered)" if hidden else "")
               + "".join("\n" + r for r in reports))
     return frames, fps, report
 
@@ -837,7 +837,7 @@ def _export(fmt, scale, alpha, name, doc, base, sources, labels, table, scene, W
 # per content key and handed out again when nothing that changes pixels, sound or timing has changed.
 UI_DOC_KEYS = ("diffusion", "dismissed")          # window state saved with the document, never rendered
 UI_TIMELINE_KEYS = ("time", "snap", "h3")         # the playhead (sequences animate every frame themselves), snap,
-                                                  # the H3 prompt settings (read by keyframe clips (h3) only)
+                                                  # the H3 prompt settings (read by keyframe clips only)
 CLIP_TIMING_KEYS = ("id", "on", "t_start", "t_end", "mode")     # what hidden_frames reads of a clip
 def _pack_settings():
     """The pack's settings.py (kubakub.ini [settings]); loaded by path when this module is imported on its own."""
@@ -1031,7 +1031,7 @@ def cached_export(key, write, out=None):
 
 
 def h3_after(prompt, node_id):
-    """True / False: a kubakub keyframe clips (h3) node takes this node's outputs (directly or further down the
+    """True / False: a kubakub keyframe clips node takes this node's outputs (directly or further down the
     graph); None when the prompt is not known (then skip_h3_frames is taken as it is)."""
     if not isinstance(prompt, dict) or node_id is None:
         return None
@@ -1056,7 +1056,7 @@ def sequence_frames(doc, base, sources, labels, table, scene, W, H, scale, skip_
     has_hidden = bool(skip_h3) and bool(kf.hidden_frames(doc, rd.timeline(doc)["frames"], rd.timeline(doc)["fps"]))
     skip = has_hidden and h3_node is not False
     if has_hidden and not skip:
-        lines.append("skip_h3_frames is on, but no kubakub keyframe clips (h3) node takes these frames: every frame "
+        lines.append("skip_h3_frames is on, but no kubakub keyframe clips node takes these frames: every frame "
                      "rendered (nothing would replace the frames under the H3 clips)")
     t0 = time.perf_counter()
     key = ("seq", content_key(doc, base, sources, labels, table, scene, W, H, pmask, skip), float(scale), skip,
@@ -1091,7 +1091,7 @@ def _paths_out(written):
 
 
 class KUBA_Export(io.ComfyNode):
-    """Any frames (e.g. after 'kubakub keyframe clips (h3)') into a delivery file, the same formats as the director."""
+    """Any frames (e.g. after 'kubakub keyframe clips') into a delivery file, the same formats as the director."""
 
     @classmethod
     def define_schema(cls):
@@ -1761,7 +1761,7 @@ class KUBA_DirectorSequence(io.ComfyNode):
             is_output_node=True,
             description=(
                 "Turns the kubakub director's timeline into video: renders every frame of the timeline (frames / fps / audio, e.g. "
-                "into Create Video or kubakub keyframe clips (h3)) and / or writes it as a delivery file. Changing these "
+                "into Create Video or kubakub keyframe clips) and / or writes it as a delivery file. Changing these "
                 "settings does not re-render the director's still; bypass the node when you only need the still."),
             inputs=[
                 DirectorType.Input("director", tooltip="The director output of kubakub director."),
@@ -1772,7 +1772,7 @@ class KUBA_DirectorSequence(io.ComfyNode):
                                tooltip="Size of the frames relative to the matrix (RAM: 250 frames at 1600x1080 = ~5 GB)."),
                 io.Boolean.Input("skip_h3_frames", default=False,
                                  tooltip="Do not render the frames that H3 keyframe clips replace anyway (a dissolve "
-                                         "stands in for them). Only applies when a kubakub keyframe clips (h3) node takes "
+                                         "stands in for them). Only applies when a kubakub keyframe clips node takes "
                                          "these frames; otherwise every frame is rendered."),
                 io.Combo.Input("export", options=["none", *exm.FORMATS], default="none",
                                tooltip="Write the whole timeline as a file at the delivery size, frame by frame (no RAM limit): "
@@ -1804,7 +1804,7 @@ class KUBA_DirectorSequence(io.ComfyNode):
                                                           "(1 = building; all ones when the director's projection "
                                                           "mask is off)."),
                 io.String.Output("document", tooltip="The director's composition document (JSON), passed through: "
-                                                     "straight into kubakub keyframe clips (h3)."),
+                                                     "straight into kubakub keyframe clips."),
             ],
             hidden=[io.Hidden.unique_id, io.Hidden.prompt],
         )

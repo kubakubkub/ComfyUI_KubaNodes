@@ -1,5 +1,5 @@
 """
-Model free test for kubakub motion guide (ltx): the noise levels for a start level, the LTX size and length of a guide,
+Model free test for kubakub motion guide: the noise levels for a start level, the LTX size and length of a guide,
 the built-in sample, and the node KUBA_MotionGuide with stub models (the steps of one and two stages, the sound, the
 sizes of what comes out). Does not start ComfyUI.
 
@@ -27,11 +27,11 @@ from test_video import MODELS, _StubOps  # noqa: E402
 class _Ops(_StubOps):
     """The stub steps, and what each sample call was given."""
 
-    def sample(self, model, guider, seed, sigmas, video, audio):
+    def sample(self, model, guider, seed, sigmas, video, audio, sampler_name="euler_ancestral"):
         self.sampled = getattr(self, "sampled", []) + [(sigmas, tuple(video["samples"].shape), seed)]
         self.masks = getattr(self, "masks", []) + [video.get("noise_mask")]
         video = dict(video, noise_mask=video.get("noise_mask") if video.get("noise_mask") is not None else torch.zeros(1))
-        return super().sample(model, guider, seed, sigmas, video, audio)
+        return super().sample(model, guider, seed, sigmas, video, audio, sampler_name)
 
 
 def _run(ops, **kw):

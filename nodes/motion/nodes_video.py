@@ -41,6 +41,7 @@ from ...kubakub import materials as ma
 from ...kubakub import plan as rp
 from ...kubakub import save_paths as sp
 from ...kubakub import video as vd
+from ...kubakub import video_models as vm
 from ...kubakub.io_types import PlanType
 
 log = logging.getLogger("KUBA.regions")
@@ -74,7 +75,10 @@ _WRITE_THREADS = max(1, min(8, (os.cpu_count() or 4)))
 
 
 class _LtxOps:
-    """The model steps (core nodes). Tests put a stub with the same methods in its place (_OPS)."""
+    """The model steps for LTX (core nodes). Tests put a stub with the same methods in its place (_OPS); _H3Ops
+    has the same methods for MiniMax H3 (ops_for picks by the model)."""
+
+    family = "ltx"
 
     def progress(self, n):
         import comfy.utils
@@ -100,12 +104,32 @@ class _LtxOps:
     def encode_text(self, clip, text):
         return clip.encode_from_tokens_scheduled(clip.tokenize(text))
 
-    def guider(self, model, pos, neg, fps):
-        _cs, lt, _lta, _ltu = _ltx()
+    def condition(self, clip, vae, text, first, last, frames, task=None):
+        """The prompt's conditioning; LTX takes the still through the noise mask, so the frames are not needed."""
+        return self.encode_text(clip, text)
+
+    def guider(self, model, pos, neg, fps, prof=None):
+        cs, lt, _lta, _ltu = _ltx()
         pos, neg = lt.LTXVConditioning.execute(pos, neg, fps).args
+        cfg = float((prof or {}).get("cfg", 1.0))
+        if cfg != 1.0:                                  # a dev model: core's dev templates use CFGGuider
+            return cs.CFGGuider.execute(model, pos, neg, cfg).args[0]
         return lt.LTXVDualCFGGuider.execute(model, pos, neg, 1.0, 1.0).args[0]
 
+    def base_sigmas(self, model, prof, latent=None):
+        """The schedule a stage starts from: the profile's own sigmas, or its scheduler at its steps."""
+        if prof.get("sigmas"):
+            return [float(s) for s in prof["sigmas"]]
+        cs, lt, _lta, _ltu = _ltx()
+        if prof.get("scheduler") == "ltxv":
+            sig = lt.LTXVScheduler.execute(int(prof["steps"]), 2.05, 0.95, True, 0.1, latent).args[0]
+        else:
+            sig = cs.BasicScheduler.execute(model, prof.get("scheduler") or "simple", int(prof["steps"]), 1.0).args[0]
+        return [float(s) for s in sig]
+
     def empty_audio(self, audio_vae, frames, fps):
+        if audio_vae is None:                           # LTX video only: no audio stream
+            return None
         _cs, _lt, lta, _ltu = _ltx()
         return lta.LTXVEmptyLatentAudio.execute(frames_number=frames, frame_rate=int(round(fps)), batch_size=1,
                                                 audio_vae=audio_vae).args[0]
@@ -118,12 +142,15 @@ class _LtxOps:
         latent = lta.LTXVAudioVAEEncode.execute({"waveform": waveform, "sample_rate": int(sample_rate)}, audio_vae).args[0]
         return nodes.SetLatentNoiseMask().set_mask(latent, torch.zeros((1, 512, 512)))[0]
 
-    def sample(self, model, guider, seed, sigmas, video, audio):
-        """One LTX stage on the audio-video latent -> (video latent, audio latent)."""
+    def sample(self, model, guider, seed, sigmas, video, audio, sampler_name="euler_ancestral"):
+        """One stage on the audio-video latent (the video alone for a video-only model) -> (video, audio latent)."""
         import comfy.samplers
         cs, lt, _lta, _ltu = _ltx()
+        sampler = comfy.samplers.sampler_object(sampler_name)
+        if audio is None:
+            out = cs.SamplerCustomAdvanced.execute(cs.Noise_RandomNoise(int(seed)), guider, sampler, _sigmas(sigmas), video).args[0]
+            return out, None
         av = lt.LTXVConcatAVLatent.execute(video, audio).args[0]
-        sampler = comfy.samplers.sampler_object("euler_ancestral")
         out = cs.SamplerCustomAdvanced.execute(cs.Noise_RandomNoise(int(seed)), guider, sampler, _sigmas(sigmas), av).args[0]
         return tuple(lt.LTXVSeparateAVLatent.execute(out).args)
 
@@ -137,7 +164,126 @@ class _LtxOps:
         return decoded.reshape(-1, *decoded.shape[-3:])
 
 
+class _H3Ops(_LtxOps):
+    """The same steps for MiniMax H3 (core comfy_extras/nodes_minimax_h3.py): the AV latent is a NestedTensor
+    (video [1, 24, T, H/16, W/16], audio [1, 32, 2, T40]); core's sampler takes a nested noise mask, so the regions
+    are held the same way as with LTX. fl2va gets the still as its first (and with a loop last) keyframe, ref2va as
+    <Picture 1>. No latent upscaler exists for H3."""
+
+    family = "h3"
+
+    def condition(self, clip, vae, text, first, last, frames, task="fl2va"):
+        import node_helpers
+        from comfy_extras import nodes_minimax_h3 as h3
+        if first is None:
+            return self.encode_text(clip, text)
+        H, W = first.shape[1:3]
+        if task == "ref2va":
+            if "<Picture 1>" not in text:
+                text = "<Picture 1> is the first frame: keep its building, framing and light. " + text
+            return h3.MiniMaxH3ReferenceToVideo.execute(clip, text, W, H, frames, "match", vae, None,
+                                                        ref_images={"ref_image_1": first}).args[0]
+        n = vm.h3_frames(frames)
+        images, keys = [first], [{"resolved_frame_index": 0, "latent": vae.encode(first[..., :3])}]
+        if last is not None:
+            images.append(last)
+            keys.append({"resolved_frame_index": n - 1, "latent": vae.encode(last[..., :3])})
+        cond = clip.encode_from_tokens_scheduled(clip.tokenize(text, images=images))
+        return node_helpers.conditioning_set_values(cond, {"minimax_keyframes": keys})
+
+    def guider(self, model, pos, neg, fps, prof=None):
+        from comfy_extras import nodes_custom_sampler as cs
+        cfg = float((prof or {}).get("cfg", 1.0))
+        if cfg != 1.0:
+            return cs.CFGGuider.execute(model, pos, neg, cfg).args[0]
+        return cs.BasicGuider.execute(model, pos).args[0]       # core's H3 templates: no negative at cfg 1
+
+    def empty_audio(self, audio_vae, frames, fps):
+        import comfy.model_management as mm
+        return {"samples": torch.zeros((1, 32, 2, vm.h3_audio_frames(frames)), device=mm.intermediate_device())}
+
+    def sound_audio(self, audio_vae, waveform, sample_rate):
+        """A sound as H3's audio latent, held (noise mask 0): core's H3 reference-audio encode."""
+        import comfy.audio
+        sr = getattr(audio_vae, "audio_sample_rate", 32000)
+        if int(sample_rate) != sr:
+            waveform = comfy.audio.resample(waveform, int(sample_rate), sr)
+        z = audio_vae.encode(waveform[:1].movedim(1, -1))
+        return {"samples": z, "noise_mask": torch.zeros_like(z)}
+
+    def sample(self, model, guider, seed, sigmas, video, audio, sampler_name="res_multistep"):
+        import comfy.nested_tensor
+        import comfy.samplers
+        from comfy_extras import nodes_custom_sampler as cs
+        v = video["samples"]
+        t_lat = v.shape[2]
+        frames = 5 if t_lat <= 2 else (t_lat - 2) // 5 * 17 + 5
+        a = (audio or self.empty_audio(None, frames, vm.H3_FPS))["samples"]
+        am = (audio or {}).get("noise_mask")
+        want = vm.h3_audio_frames(frames)                 # the sound cut / padded to the clip's audio length
+        if a.shape[-1] != want:
+            a = a[..., :want] if a.shape[-1] > want else torch.nn.functional.pad(a, (0, want - a.shape[-1]))
+            if am is not None:
+                am = torch.zeros_like(a)
+        latent = {"samples": comfy.nested_tensor.NestedTensor((v, a))}
+        v_mask = video.get("noise_mask")
+        if v_mask is not None or am is not None:
+            latent["noise_mask"] = comfy.nested_tensor.NestedTensor((
+                v_mask if v_mask is not None else torch.ones((1, 1) + tuple(v.shape[2:])),
+                am if am is not None else torch.ones_like(a)))
+        sampler = comfy.samplers.sampler_object(sampler_name)
+        out = cs.SamplerCustomAdvanced.execute(cs.Noise_RandomNoise(int(seed)), guider, sampler, _sigmas(sigmas), latent).args[0]
+        streams = out["samples"].unbind()
+        return {"samples": streams[0]}, {"samples": streams[1]}
+
+    def upsample(self, video, upscale_model, vae):
+        raise ValueError("there is no latent upscaler for MiniMax H3")
+
+    def decode(self, vae, video):
+        import nodes
+        decoded = nodes.VAEDecode().decode(vae, video)[0]
+        return decoded.reshape(-1, *decoded.shape[-3:])
+
+
 _OPS = _LtxOps()
+_H3_OPS = _H3Ops()
+
+
+def ops_for(model):
+    """The model steps for this model's family (LTX unless it is MiniMax H3)."""
+    return _H3_OPS if vm.family(model) == "h3" else _OPS
+
+
+MODEL_TIP = ("The video model, any variant: LTX 2.x (dev or distilled, fp8 / nvfp4 / int8 / GGUF) or MiniMax H3 "
+             "(fl2va or ref2va, pruned or full), with or without a speed LoRA on it. The node sees which it is.")
+CLIP_TIP = ("The text encoder of the same model: Gemma for LTX (CLIPLoader type ltxv), Qwen3-VL for H3 "
+            "(CLIPLoader type minimax).")
+VAE_TIP = "The video VAE of the same model (LTX or H3)."
+AUDIO_VAE_TIP = ("The audio VAE of the same model (LTX 2.x and H3 make sound with the picture; a video-only LTX "
+                 "needs none). Needed for the 'audio' input; without it the clip's sound is empty.")
+
+
+def schedule_inputs():
+    """The two advanced widgets every video node has: how to sample the model when its file names do not say."""
+    return [
+        io.Combo.Input("schedule", options=list(vm.SCHEDULES), default=vm.SCHEDULES[0], optional=True, advanced=True,
+                       tooltip="auto = from the model's file names (a 'distilled' / '4step' / 'flashgen' / 'taomate' "
+                               "name = fast, a 'dev' LTX or an H3 without a speed LoRA = full steps); the report says "
+                               "what it took. Set it when your files have other names."),
+        io.Int.Input("steps", default=0, min=0, max=100, optional=True, advanced=True,
+                     tooltip="0 = what the model needs (8 distilled LTX, 20 dev LTX, 3 / 4 / 8 with an H3 speed LoRA, "
+                             "20 H3 without). Another number overrides it."),
+    ]
+
+
+def model_setup(node, model, schedule="auto", steps=0, input_name="model", default="ltx", **parts):
+    """(family, profile, ops) for the connected model: its family from the model, the schedule from the file names
+    upstream of it (the hidden prompt) and the widgets; a VAE / text encoder of the other family is an error."""
+    fam = vm.family(model) or default
+    vm.check_set(fam, **parts)
+    hid = getattr(node, "hidden", None)
+    files = vm.upstream_files(getattr(hid, "prompt", None), getattr(hid, "unique_id", None), input_name)
+    return fam, vm.profile(fam, files, schedule or "auto", int(steps or 0)), (_H3_OPS if fam == "h3" else _OPS)
 
 
 def _label_ids(plan):
@@ -191,30 +337,32 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="KUBA_RegionVideoSampler",
-            display_name="kubakub region video sampler (ltx)",
+            display_name="kubakub region video sampler",
             category="kubakub/2d/motion",
-            search_aliases=['ltx', 'animate', 'video'],
+            search_aliases=['ltx', 'h3', 'minimax', 'animate', 'video'],
             description=(
                 "Animate chosen regions of a still: only regions with animate = on move, the rest of the "
-                "facade stays still (LTX 2.x distilled). "
+                "facade stays still. Plug in any LTX 2.x or MiniMax H3 model (dev or distilled, fl2va or ref2va, "
+                "with or without a speed LoRA): the node sees which one it is and samples it the way it needs. "
                 "Regions sharing video_prompt, t_start / t_end and motion form one clip; each clip runs on its "
-                "crop (LTX grid), the rest of the crop is held by the noise mask, the first frame is the still, "
+                "crop, the rest of the crop is held by the noise mask, the first frame is the still, "
                 "and the result is pasted back into the untouched still frame by frame, so the facade stays "
                 "pixel exact. Plan keys: animate, video_prompt, t_start, t_end, motion. With a clip on "
                 "'material' (a kubakub shader) the animated regions move as it moves, and the model repaints "
                 "them (plan: material_repaint)."),
             inputs=[
-                io.Model.Input("model", lazy=True, tooltip="LTX 2.5 22B distilled (UNETLoader)."),
-                io.Clip.Input("clip", lazy=True, tooltip="Gemma text encoder for LTX (CLIPLoader, type ltxv)."),
-                io.Vae.Input("vae", lazy=True, tooltip="LTX video VAE."),
-                io.Vae.Input("audio_vae", lazy=True, tooltip="LTX audio VAE (the model is audio-video; without the audio input the audio stays silent)."),
+                io.Model.Input("model", lazy=True, tooltip=MODEL_TIP),
+                io.Clip.Input("clip", lazy=True, tooltip=CLIP_TIP),
+                io.Vae.Input("vae", lazy=True, tooltip=VAE_TIP),
+                io.Vae.Input("audio_vae", lazy=True, optional=True, tooltip=AUDIO_VAE_TIP),
                 PlanType.Input("plan", tooltip="From kubakub region plan: animate = on, video_prompt, t_start, t_end "
                                                "and motion say which regions move and how."),
                 io.Image.Input("image", optional=True,
                                tooltip="The still (matrix size), e.g. frame in frame + region sampler result. Not "
                                        "needed (and not used) when background is connected."),
                 io.LatentUpscaleModel.Input("upscale_model", optional=True, lazy=True,
-                                            tooltip="LTX latent spatial upscaler x2: adds a sharper second stage."),
+                                            tooltip="LTX latent spatial upscaler x2: adds a sharper second stage "
+                                                    "(LTX only; H3 has none)."),
                 io.Int.Input("frames", default=121, min=9, max=1025, step=8,
                              tooltip="Video length in frames; rounded up to 8k + 1. Ignored when background is "
                                      "connected (the video is as long as the background)."),
@@ -272,7 +420,9 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                                        "freer, small regions can lose the timing). Frame by frame at this node's fps; a "
                                        "shorter clip holds its last frame. Where the clip is the same as the picture "
                                        "the model moves the region freely."),
+                *schedule_inputs(),
             ],
+            hidden=[io.Hidden.prompt, io.Hidden.unique_id],
             outputs=[
                 io.Image.Output("frames", tooltip="The video at output_scale."),
                 io.String.Output("report", tooltip="Clips, frames, stages and time, one line per clip (size, time range, "
@@ -287,7 +437,7 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
 
     @classmethod
     def check_lazy_status(cls, plan=None, fps=25.0, only="", enhance_prompt=False, background=None, **kw):
-        """The LTX models only when a clip will be rendered (lazy inputs): a held director (blocked plan / image /
+        """The video models only when a clip will be rendered (lazy inputs): a held director (blocked plan / image /
         background: this is not even called) or a plan without an animated region loads no model. An input that
         is not connected is not in kw; a connected one that has not run yet is None."""
         if plan is None:
@@ -300,15 +450,16 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
         return [x for x in want if x in kw and kw[x] is None]
 
     @classmethod
-    def execute(cls, model, clip, vae, audio_vae, plan, frames, fps, seed, stage1_mp, context_px,
-                feather_px, output_scale, image=None, upscale_model=None, negative="", only="", save_folder="",
-                filename_prefix="region_video", stage2_max_mp=0.6, background=None, enhance_prompt=False,
-                enhance_clip=None, loop=False, audio=None, material=None) -> io.NodeOutput:
-        ops = _OPS
+    def execute(cls, model, clip, vae, plan, frames, fps, seed, stage1_mp, context_px,
+                feather_px, output_scale, audio_vae=None, image=None, upscale_model=None, negative="", only="",
+                save_folder="", filename_prefix="region_video", stage2_max_mp=0.6, background=None,
+                enhance_prompt=False, enhance_clip=None, loop=False, audio=None, material=None, schedule="auto",
+                steps=0) -> io.NodeOutput:
         t0 = time.perf_counter()
         if image is None and background is None:
             raise ValueError("kubakub region video sampler: connect 'image' (the still to animate) or 'background' "
                              "(a video to animate into).")
+        fam, prof, ops = model_setup(cls, model, schedule, steps, clip=clip, vae=vae, audio_vae=audio_vae)
         labels = plan.regions.labels[0].cpu().numpy()
         bg = None
         if background is not None:                     # animate into a video: regions follow its size
@@ -326,6 +477,11 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
         if material is not None and len(material):   # the clip the animated regions follow, at the frames' size
             mat = material[..., :3].cpu().float().numpy()   # another size stays as it is: only each clip's crop is scaled
         groups = vd.clip_groups(plan.plan["regions"], only)
+        model_rows = []
+        if upscale_model is not None and fam == "h3":
+            model_rows.append("upscale_model: there is no latent upscaler for MiniMax H3, so one stage (raise stage1_mp "
+                              "for a sharper clip)")
+            upscale_model = None
         if upscale_model is not None and stage1_mp * 4 > stage2_max_mp:
             stage1_mp = stage2_max_mp / 4              # the second stage is 2x per side: keep it inside the cap
         F = vd.ltx_frames(frames) if bg is None else len(bg)
@@ -335,11 +491,11 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
         rows, jobs = [], []
         if not groups and (only or "").strip() and vd.clip_groups(plan.plan["regions"]):
             names = [str(e.get("name", "")) for e in plan.plan["regions"] if e.get("animate")]
-            rows.append(f"{rp.WHICH} = '{only.strip()}' matches no animated region: frames passed through, no LTX model "
-                        f"loaded (animated regions: {', '.join(names[:8])}{', ...' if len(names) > 8 else ''})")
+            rows.append(f"{rp.WHICH} = '{only.strip()}' matches no animated region: frames passed through, no video "
+                        f"model loaded (animated regions: {', '.join(names[:8])}{', ...' if len(names) > 8 else ''})")
         elif not groups:
             rows.append("no animated regions: frames passed through (set 'animate = on' and a video_prompt in the "
-                        "region plan to animate), no LTX model loaded")
+                        "region plan to animate), no video model loaded")
         # 1. per clip: the crop, the cache lookup and the VAE encode of the clips to render (the video VAE only)
         for gi, g in enumerate(groups):
             tg = time.perf_counter()
@@ -350,8 +506,9 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
             (x0, y0, x1, y1), (w1, h1) = vd.crop_plan(mask, stage1_mp * 1e6, context_px)
             if bg is None:                             # a still: the crop repeated, the time range in the mask
                 i0, n, ts, te = 0, F, g["t_start"], g["t_end"]
+                Fc, mfps = vm.model_frames(fam, (n - 1) / fps, fps)
                 crop = cv2.resize(still[y0:y1, x0:x1], (w1, h1), interpolation=cv2.INTER_AREA)
-                pixels = torch.from_numpy(np.ascontiguousarray(crop))[None].repeat(F, 1, 1, 1)
+                pixels = torch.from_numpy(np.ascontiguousarray(crop))[None].repeat(Fc, 1, 1, 1)
             else:                                      # a video: the clip covers the time range, its first frame = the background
                 rng = vd.video_range(g["t_start"], g["t_end"], fps, len(bg))
                 if rng is None:
@@ -359,22 +516,26 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                     continue
                 i0, i1 = rng
                 n, ts, te = i1 - i0 + 1, 0.0, -1.0
-                Fc = vd.ltx_frames(n)
-                idx = [min(i0 + k, i1) for k in range(Fc)]
+                Fc, mfps = vm.model_frames(fam, (n - 1) / fps, fps)
+                idx = [i0 + k for k in vm.time_index(Fc, mfps, n, fps)]     # the model's frames on the video's time
                 pixels = torch.from_numpy(np.stack([cv2.resize(bg[k, y0:y1, x0:x1], (w1, h1), interpolation=cv2.INTER_AREA)
                                                     for k in idx]))
             region_crop = mask[y0:y1, x0:x1]
             sound = None
             if audio is not None:                      # the clip's stretch of the sound, silence where it has ended
                 sr = int(audio["sample_rate"])
-                a0, an = vd.audio_range(i0, pixels.shape[0], fps, sr)
+                a0, an = int(round(i0 / fps * sr)), int(round(Fc / mfps * sr))
                 seg = audio["waveform"][:1, :, a0:a0 + an].float().cpu()
                 if seg.shape[-1] < an:
                     seg = torch.nn.functional.pad(seg, (0, an - seg.shape[-1]))
                 sound = (seg, sr)
-            sig1, sig2, said, guided = SIGMAS_1, SIGMAS_2, [], False
+                if audio_vae is None:
+                    rows.append(f"clip {gi + 1}: the sound needs audio_vae (the model's audio VAE): sampled without it")
+                    sound = None
+            repaint, said, guided = None, [], False
             if mat is not None:                        # the material clip moves the regions: it is laid into the crop
-                idx_m = [min(i0 + k, len(mat) - 1) for k in range(pixels.shape[0])]
+                want_m = [i0 + k for k in vm.time_index(Fc, mfps, 1 << 30, fps)]   # the material's frames on the clip's time
+                idx_m = [min(k, len(mat) - 1) for k in want_m]
                 held = {}                              # a still material is cut and scaled once
                 for k in idx_m:
                     if k not in held:
@@ -385,34 +546,34 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                                              interpolation=cv2.INTER_AREA if cut.shape[1] >= w1 else cv2.INTER_LINEAR)
                 small = cv2.resize(region_crop.astype(np.uint8), (w1, h1), interpolation=cv2.INTER_NEAREST) > 0
                 guide = ma.guide(pixels.numpy(), [held[k] for k in idx_m], small,
-                                 vd.frames_in_range(pixels.shape[0], fps, ts, te))
-                if 1 < len(mat) < i0 + pixels.shape[0]:
-                    said.append(f"it has {len(mat)} frames, the clip runs to frame {i0 + pixels.shape[0]}: its last frame is held")
+                                 vd.frames_in_range(pixels.shape[0], mfps, ts, te))
+                last_m = want_m[-1] + 1
+                if 1 < len(mat) < last_m:
+                    said.append(f"it has {len(mat)} frames, the clip runs to frame {last_m}: its last frame is held")
                 elif len(mat) == 1:
                     said.append("it is one picture, so the regions take its look but barely move; for movement give it a "
                                 "clip (a kubakub shader with seconds > 0)")
                 if guide is None:
                     said = [f"clip {gi + 1} material: it does not differ from the picture on these regions, so the model moves them freely"]
                 else:
-                    guided, pixels = True, torch.from_numpy(guide)
-                    sig1 = _text(vd.guide_sigmas(g["repaint"]))
-                    sig2 = _text(vd.guide_sigmas(min(float(g["repaint"]), vd.GUIDE_SIGMAS_2[0]), vd.GUIDE_SIGMAS_2))
+                    guided, pixels, repaint = True, torch.from_numpy(guide), float(g["repaint"])
                     said = [f"clip {gi + 1} material: {m}" for m in said] + [
                         f"clip {gi + 1} material: the regions move as the material clip moves, repainted from noise "
-                        f"level {float(g['repaint']):g} (plan: material_repaint)"]
-            key = _digest("ltx", pixels, region_crop, g["prompt"], negative or "", bool(enhance_prompt), int(seed) + gi,
-                          float(fps), n, float(ts), float(te), float(g["motion"]), sig1,
-                          sig2 if upscale_model is not None else None, loop,
-                          *(sound if sound is not None else ()))
+                        f"level {repaint:g} (plan: material_repaint)"]
+            key = _digest(fam, vm.describe(prof), pixels, region_crop, g["prompt"], negative or "", bool(enhance_prompt),
+                          int(seed) + gi, float(fps), n, float(ts), float(te), float(g["motion"]), repaint,
+                          upscale_model is not None, loop, *(sound if sound is not None else ()))
             job = {"gi": gi, "g": g, "box": (x0, y0, x1, y1), "mask": mask, "region_crop": region_crop, "i0": i0,
-                   "n": n, "ts": ts, "te": te, "Fc": pixels.shape[0], "key": key, "hit": _CLIP_CACHE.get(key, objs),
-                   "text": g["prompt"], "enhanced": None, "rows": list(said), "sound": sound, "sig1": sig1, "sig2": sig2,
+                   "n": n, "ts": ts, "te": te, "Fc": Fc, "mfps": mfps, "key": key, "hit": _CLIP_CACHE.get(key, objs),
+                   "text": g["prompt"], "enhanced": None, "rows": list(said), "sound": sound, "repaint": repaint,
                    "guided": guided}
             rows.append(job["rows"])
             if enhance_prompt and enhance_clip is None:
                 job["rows"].append(f"clip {gi + 1}: enhance_prompt needs enhance_clip (a text encoder that can write), plan prompt used")
             if job["hit"] is None:
                 job["first"] = pixels[0:1].clone() if enhance_prompt and enhance_clip is not None else None
+                if fam == "h3" and (not guided or prof["task"] == "ref2va"):
+                    job["still"] = pixels[0:1].clone()     # H3's first (and loop: last) keyframe / picture reference
                 job["latent"] = ops.vae_encode(vae, pixels)
             del pixels
             job["t"] = time.perf_counter() - tg
@@ -430,29 +591,45 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 if kf.plausible_prompt(better, ""):
                     j["enhanced"] = j["text"] = better
             except Exception as e:  # noqa: BLE001
-                log.warning("[KUBA regions] LTX prompt enhance failed, using the plan prompt: %s", e)
+                log.warning("[KUBA regions] prompt enhance failed, using the plan prompt: %s", e)
             j["t"] += time.perf_counter() - tg
-        # 3. the LTX text encoder (each text encoded once per run)
+        # 3. the text encoder (LTX: each text once per run; H3: per clip, with the clip's still as its keyframe)
         conds = {}
+        use_neg = fam != "h3" or float(prof["cfg"]) != 1.0
         for j in todo:
             tg = time.perf_counter()
-            for text in (j["text"], negative or ""):
-                if text not in conds:
-                    conds[text] = ops.encode_text(clip, text)
+            still_px = j.pop("still", None)
+            ck = j["text"] if still_px is None else ("clip", j["gi"])
+            if ck not in conds:
+                conds[ck] = ops.condition(clip, vae, j["text"], still_px, still_px if loop else None, j["Fc"],
+                                          prof["task"])
+            j["ck"] = ck
+            if use_neg and (negative or "") not in conds:
+                conds[negative or ""] = ops.encode_text(clip, negative or "")
             j["t"] += time.perf_counter() - tg
         # 4. stage 1 for every clip (the DiT loaded once)
         for j in todo:
             tg = time.perf_counter()
-            latent, Fc = j.pop("latent"), j["Fc"]
-            lat_h, lat_w = latent["samples"].shape[3:]
-            latent["noise_mask"] = torch.from_numpy(vd.latent_mask(j["region_crop"], lat_w, lat_h, Fc, fps, j["ts"], j["te"],
-                                                                   j["g"]["motion"], loop=loop, hold_first=not j["guided"]))
+            latent, Fc, mfps = j.pop("latent"), j["Fc"], j["mfps"]
+            lat_t, lat_h, lat_w = latent["samples"].shape[2:]
+            times = np.linspace(0.0, (Fc - 1) / mfps, lat_t) if fam == "h3" else None
+            j["times"] = times
+            latent["noise_mask"] = torch.from_numpy(vd.latent_mask(j["region_crop"], lat_w, lat_h, Fc, mfps, j["ts"], j["te"],
+                                                                   j["g"]["motion"], loop=loop, hold_first=not j["guided"],
+                                                                   times=times))
             if j["sound"] is not None:                 # the sound, held: both stages get this same latent
                 clip_audio = j["sound_latent"] = ops.sound_audio(audio_vae, *j.pop("sound"))
             else:
-                clip_audio = ops.empty_audio(audio_vae, Fc, fps)
-            j["guider"] = ops.guider(model, conds[j["text"]], conds[negative or ""], fps)
-            j["video"], j["audio"] = ops.sample(model, j["guider"], int(seed) + j["gi"], j["sig1"], latent, clip_audio)
+                clip_audio = ops.empty_audio(audio_vae, Fc, mfps)
+            base = ops.base_sigmas(model, prof, latent)
+            sig1 = base if j["repaint"] is None else vd.guide_sigmas(j["repaint"], base)
+            j["sig1"] = _text(sig1)
+            if prof.get("sigmas_2"):
+                s2 = prof["sigmas_2"]
+                j["sig2"] = _text(s2 if j["repaint"] is None else vd.guide_sigmas(min(j["repaint"], s2[0]), s2))
+            j["guider"] = ops.guider(model, conds[j["ck"]], conds.get(negative or ""), mfps, prof)
+            j["video"], j["audio"] = ops.sample(model, j["guider"], int(seed) + j["gi"], j["sig1"], latent, clip_audio,
+                                                prof["sampler"])
             del latent
             ops.free()                                 # stage 1 activations out before the next clip / stage 2
             j["t"] += time.perf_counter() - tg
@@ -462,26 +639,27 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                 tg = time.perf_counter()
                 video = ops.upsample(j["video"], upscale_model, vae)
                 h2, w2 = video["samples"].shape[3:]
-                video["noise_mask"] = torch.from_numpy(vd.latent_mask(j["region_crop"], w2, h2, j["Fc"], fps, j["ts"], j["te"],
-                                                                      j["g"]["motion"], loop=loop, hold_first=not j["guided"]))
+                video["noise_mask"] = torch.from_numpy(vd.latent_mask(j["region_crop"], w2, h2, j["Fc"], j["mfps"], j["ts"],
+                                                                      j["te"], j["g"]["motion"], loop=loop,
+                                                                      hold_first=not j["guided"], times=j["times"]))
                 j["video"] = video
                 j["t"] += time.perf_counter() - tg
             for j in todo:
                 tg = time.perf_counter()
                 stage1_audio = j.pop("audio")
                 j["video"], _ = ops.sample(model, j["guider"], int(seed) + 1000 + j["gi"], j["sig2"], j["video"],
-                                           j.pop("sound_latent", None) or stage1_audio)
+                                           j.pop("sound_latent", None) or stage1_audio, prof["sampler"])
                 ops.free()
                 j["t"] += time.perf_counter() - tg
         conds.clear()
-        # 6. the VAE decode of every clip
+        # 6. the VAE decode of every clip, on the node's frames (H3 renders at its own 24 fps: mapped by time)
         for j in todo:
             tg = time.perf_counter()
             j.pop("guider", None)
             j.pop("audio", None)
             j.pop("sound_latent", None)
             decoded = ops.decode(vae, j.pop("video"))
-            decoded = decoded[:j["n"], ..., :3].cpu().to(torch.float16).numpy()
+            decoded = decoded[vm.time_index(j["n"], fps, decoded.shape[0], j["mfps"]), ..., :3].cpu().to(torch.float16).numpy()
             if loop:
                 decoded = vd.close_loop(decoded)       # the last frame = the first frame, exactly
             ops.free()
@@ -505,6 +683,8 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                              f"({x1 - x0}x{y1 - y0} px of the still), t {g['t_start']:g}-{t_end} s, "
                              f"motion {g['motion']:g}, {rows_t}: {g['prompt'][:60]}")
         rows = [r for x in rows for r in (x if isinstance(x, list) else [x])]
+        if jobs:
+            model_rows.insert(0, vm.describe(prof) + ("; 'negative' is not used at cfg 1" if not use_neg else ""))
 
         # composite: the untouched still, each clip pasted in (the first frame is the still itself)
         if bg is not None:
@@ -521,7 +701,7 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
                             f"{'two stages' if upscale_model is not None else 'one stage'} (stage 1 {stage1_mp:.2f} MP), "
                             f"{'into the background video, ' if bg is not None else ''}"
                             f"{'loop, ' if loop else ''}{'with the sound, ' if audio is not None else ''}"
-                            f"{time.perf_counter() - t0:.0f} s", *rows]
+                            f"{time.perf_counter() - t0:.0f} s", *model_rows, *rows]
                            + ([f"frames written to {folder}"] if folder else []))
         log.info("[KUBA regions] video: %s", report.split("\n")[0])
         moving = moving.astype(np.float32)
@@ -532,4 +712,4 @@ class KUBA_RegionVideoSampler(io.ComfyNode):
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_RegionVideoSampler": KUBA_RegionVideoSampler}
-NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_RegionVideoSampler": "kubakub region video sampler (ltx)"}
+NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_RegionVideoSampler": "kubakub region video sampler"}

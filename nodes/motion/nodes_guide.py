@@ -1,8 +1,9 @@
 """
 nodes_guide.py
 
-kubakub motion guide (ltx): a rough moving clip (a director sequence, a shader, a 3D previz) becomes a finished video
-that keeps the clip's motion. The guide is VAE-encoded and LTX 2.x (22B distilled) samples from it instead of from
+kubakub motion guide: a rough moving clip (a director sequence, a shader, a 3D previz) becomes a finished video
+that keeps the clip's motion. The guide is VAE-encoded and the video model (any LTX 2.x or MiniMax H3, see
+video_models.py) samples from it instead of from
 pure noise: `repaint` is the noise level it starts at. `repaint_mask` (where) and `curve` (when) come in two ways
 (`mask_does`), because of what was measured on the GPU: any guide left untouched next to a repainted place anchors
 the look, so a noise mask never gives 'stone here, previz there'. 'shows the repaint' therefore repaints the whole
@@ -10,7 +11,7 @@ clip and shows it through the mask and the curve over the guide; 'limits the cha
 change things inside it and keeps the guide's look (for a guide that is a finished picture already). Measured on a band of light sweeping over a facade (512x320,
 25 frames): from 0.91 the stone, windows and light are repainted and the band is 5 px off the guide's; from 0.725 it
 follows and barely repaints; from 1.0 the guide is ignored. An optional second stage after the x2 latent upscaler.
-The LTX steps are the region video sampler's (nodes_video._OPS, core's own node implementations); the logic is in
+The model steps are the region video sampler's (nodes_video._OPS, core's own node implementations); the logic is in
 kubakub/video.py. V3 node schema, registered via ../__init__.py.
 """
 
@@ -28,6 +29,7 @@ from comfy_api.latest import io
 from ...kubakub import maskfields as mf
 from ...kubakub import sound as so
 from ...kubakub import video as vd
+from ...kubakub import video_models as vm
 from ...kubakub.io_types import SoundType
 from . import nodes_video as nv
 
@@ -48,29 +50,30 @@ class KUBA_MotionGuide(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="KUBA_MotionGuide",
-            display_name="kubakub motion guide (ltx)",
+            display_name="kubakub motion guide",
             category="kubakub/2d/motion",
-            search_aliases=["ltx", "video to video", "v2v", "previz", "restyle", "motion control"],
+            search_aliases=["ltx", "h3", "minimax", "video to video", "v2v", "previz", "restyle", "motion control"],
             description=(
                 "A rough moving clip becomes a finished video that keeps its motion. Connect a clip as 'guide' (the "
                 "frames of a kubakub director sequence, a kubakub shader, a 3D previz, moving masks over a "
-                "picture), say in 'prompt' what it should look like, and LTX 2.x repaints it: what moves, where "
+                "picture), say in 'prompt' what it should look like, and the video model (any LTX 2.x or MiniMax "
+                "H3) repaints it: what moves, where "
                 "and when stays yours. 'repaint' is how far it may go: 0.91 repaints everything and still "
                 "follows, lower keeps more of the guide's own look, 1 ignores the guide. No guide connected = a "
                 "sample (a band of light sweeping over the sample facade)."),
             inputs=[
-                io.Model.Input("model", tooltip="LTX 2.5 22B distilled (UNETLoader)."),
-                io.Clip.Input("clip", tooltip="Gemma text encoder for LTX (CLIPLoader, type ltxv)."),
-                io.Vae.Input("vae", tooltip="LTX video VAE."),
-                io.Vae.Input("audio_vae", tooltip="LTX audio VAE (the model is audio-video)."),
+                io.Model.Input("model", tooltip=nv.MODEL_TIP),
+                io.Clip.Input("clip", tooltip=nv.CLIP_TIP),
+                io.Vae.Input("vae", tooltip=nv.VAE_TIP),
+                io.Vae.Input("audio_vae", optional=True, tooltip=nv.AUDIO_VAE_TIP),
                 io.Image.Input("guide", optional=True,
                                tooltip="The clip whose motion is kept: director sequence frames, a shader, a previz "
-                                       "render. Rough is fine, LTX repaints it. Empty = a built-in sample."),
+                                       "render. Rough is fine, the model repaints it. Empty = a built-in sample."),
                 io.String.Input("prompt", multiline=True, default=PROMPT,
                                 tooltip="What the video should look like. Also say what moves (the same as in the "
                                         "guide): the prompt and the guide should agree."),
                 io.Float.Input("repaint", default=0.91, min=0.3, max=1.0, step=0.01,
-                               tooltip="How much LTX repaints. 0.91 = everything is repainted, the motion still "
+                               tooltip="How much the model repaints. 0.91 = everything is repainted, the motion still "
                                        "follows the guide (the tested value). 0.95-0.98 = freer, follows less. "
                                        "0.7 = follows closely and keeps the guide's own look. 1 = the guide is ignored."),
                 io.Int.Input("seed", default=42, min=0, max=0xFFFFFFFFFFFFFFFF,
@@ -82,7 +85,8 @@ class KUBA_MotionGuide(io.ComfyNode):
                                tooltip="Size of the first stage (the guide is scaled to it, sides in steps of 32). "
                                        "With the upscaler the video is twice as wide and high. 0.2 is safe on 12 GB."),
                 io.LatentUpscaleModel.Input("upscale_model", optional=True,
-                                            tooltip="LTX latent spatial upscaler x2: adds a sharper second stage."),
+                                            tooltip="LTX latent spatial upscaler x2: adds a sharper second stage "
+                                                    "(LTX only; H3 has none)."),
                 io.Audio.Input("audio", optional=True,
                                tooltip="A sound the video is sampled with (held as it is), e.g. the director's. "
                                        "It is passed on, cut to the video's length."),
@@ -93,11 +97,11 @@ class KUBA_MotionGuide(io.ComfyNode):
                                        "shrinks to fit."),
                 io.Boolean.Input("guide_size", advanced=True, default=False,
                                  tooltip="Scale the frames back to the guide's own size (needs RAM for a large "
-                                         "guide). Off = the size LTX rendered."),
+                                         "guide). Off = the size the model rendered."),
                 io.String.Input("negative", advanced=True, multiline=True, optional=True, default=NEGATIVE,
                                 tooltip="What the video should avoid."),
                 io.Mask.Input("repaint_mask", optional=True,
-                              tooltip="Where the repaint is: white = LTX's picture, black = your guide as it is, grey = "
+                              tooltip="Where the repaint is: white = the model's picture, black = your guide as it is, grey = "
                                       "a mix. One mask, or one per frame (kubakub mask animate, a shader's masks, an ID "
                                       "pass): a moving mask lets the repaint travel over the picture. Empty = "
                                       "everywhere."),
@@ -117,19 +121,21 @@ class KUBA_MotionGuide(io.ComfyNode):
                                tooltip="curve: how a ramp starts and stops."),
                 io.Boolean.Input("keep_exact", default=True, optional=True, advanced=True,
                                  tooltip="mask_does = limits the change: where nothing may change the guide's own pixels "
-                                         "are put back after decoding, so they stay exact. Off = LTX's decoded picture "
+                                         "are put back after decoding, so they stay exact. Off = the model's decoded picture "
                                          "everywhere."),
                 io.Combo.Input("mask_does", options=list(MASK_DOES), default=MASK_DOES[0], optional=True,
                                tooltip="What the mask and the curve do. shows the repaint: the whole clip is repainted "
                                        "and shown through them over your guide, so the new look travels over the "
-                                       "picture or comes in over time. limits the change: LTX may only change things "
+                                       "picture or comes in over time. limits the change: the model may only change things "
                                        "inside the mask and keeps your guide's look everywhere (for a guide that is a "
                                        "finished picture, when only a part should come alive)."),
+                *nv.schedule_inputs(),
                 SoundType.Input("sound", optional=True,
                                 tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release, band, threshold, gap), set "
                                         "once for every node that listens, so all of them step on the same beat. Connected, it comes before '"
                                         "audio' and before this node's own sound settings."),
             ],
+            hidden=[io.Hidden.prompt, io.Hidden.unique_id],
             outputs=[
                 io.Image.Output("frames", tooltip="The video, as long as the guide."),
                 io.Float.Output("fps", tooltip="The frame rate, passed through for Create Video."),
@@ -140,14 +146,18 @@ class KUBA_MotionGuide(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, clip, vae, audio_vae, prompt, repaint, seed, fps, megapixels, guide=None,
+    def execute(cls, model, clip, vae, prompt, repaint, seed, fps, megapixels, audio_vae=None, guide=None,
                 upscale_model=None, audio=None, max_frames=121, stage2_max_mp=0.6, guide_size=False,
                 negative=NEGATIVE, repaint_mask=None, curve="constant", cycle=2.0, curve_from=0.0, curve_to=1.0,
-                easing="linear", keep_exact=True, mask_does=MASK_DOES[0], sound=None) -> io.NodeOutput:
+                easing="linear", keep_exact=True, mask_does=MASK_DOES[0], sound=None, schedule="auto",
+                steps=0) -> io.NodeOutput:
         audio, heard, cabled = so.take(sound, audio)
-        ops = nv._OPS
+        fam, prof, ops = nv.model_setup(cls, model, schedule, steps, clip=clip, vae=vae, audio_vae=audio_vae)
         t0 = time.perf_counter()
         notes = []
+        if upscale_model is not None and fam == "h3":
+            notes.append("upscale_model: there is no latent upscaler for MiniMax H3, so one stage")
+            upscale_model = None
         if audio is not None and audio["waveform"].dim() != 3:              # [channels, samples] -> a batch of one
             audio = dict(audio, waveform=audio["waveform"].reshape(1, -1, audio["waveform"].shape[-1]))
         if guide is None:
@@ -156,7 +166,7 @@ class KUBA_MotionGuide(io.ComfyNode):
         else:
             src = guide[..., :3].float().cpu().numpy()
         if len(src) < 2:
-            notes.append("the guide is one picture: there is no motion to keep, LTX invents its own")
+            notes.append("the guide is one picture: there is no motion to keep, the model invents its own")
         if len(src) > int(max_frames):
             notes.append(f"the guide has {len(src)} frames: cut to max_frames = {int(max_frames)}")
             src = src[:int(max_frames)]
@@ -166,10 +176,14 @@ class KUBA_MotionGuide(io.ComfyNode):
             mp = float(stage2_max_mp) / 4              # the second stage is 2x per side: keep it inside the cap
             notes.append(f"first stage at {mp:.2f} megapixels, so that the second stays under stage2_max_mp")
         w1, h1 = vd.guide_size(gw, gh, mp)
-        pixels = torch.from_numpy(vd.guide_frames(src, w1, h1))
-        F = pixels.shape[0]
-        sig1 = vd.guide_sigmas(repaint)
-        sig2 = vd.guide_sigmas(min(float(repaint), vd.GUIDE_SIGMAS_2[0]), vd.GUIDE_SIGMAS_2)
+        F, mfps = vm.model_frames(fam, (n - 1) / float(fps), float(fps))
+        if fam == "h3":                                # H3 runs at 24 fps: the guide's frames on its time
+            pixels = torch.from_numpy(vd.guide_frames(src[vm.time_index(F, mfps, n, float(fps))], w1, h1, total=F))
+        else:
+            pixels = torch.from_numpy(vd.guide_frames(src, w1, h1))
+            F = pixels.shape[0]
+        s2 = prof.get("sigmas_2") or vd.GUIDE_SIGMAS_2
+        sig2 = vd.guide_sigmas(min(float(repaint), s2[0]), s2)
 
         # where and when: a mask and a curve over the frames, 0-1 each
         where = None
@@ -193,26 +207,36 @@ class KUBA_MotionGuide(io.ComfyNode):
         def noise_mask(video, start):
             """What may change, as LTX reads it for a stage that starts at noise level `start`."""
             s = video["samples"]
-            return torch.from_numpy(vd.repaint_level(vd.repaint_latent(where, when, n, s.shape[2], s.shape[4], s.shape[3]), start))
+            groups = vd.frame_groups(n, s.shape[2]) if fam == "h3" else None
+            return torch.from_numpy(vd.repaint_level(vd.repaint_latent(where, when, n, s.shape[2], s.shape[4], s.shape[3],
+                                                                       groups), start))
 
         pbar = ops.progress(4 if upscale_model is not None else 3)
         latent = ops.vae_encode(vae, pixels)
+        first_px = pixels[0:1].clone() if fam == "h3" and prof["task"] == "ref2va" else None
         del pixels
+        sig1 = vd.guide_sigmas(repaint, ops.base_sigmas(model, prof, latent))
         if limit:
             latent["noise_mask"] = noise_mask(latent, sig1[0])
         text = (prompt or "").strip() or PROMPT
-        pos, neg = ops.encode_text(clip, text), ops.encode_text(clip, negative or "")
+        use_neg = fam != "h3" or float(prof["cfg"]) != 1.0
+        pos = ops.condition(clip, vae, text, first_px, None, F, prof["task"])
+        neg = ops.encode_text(clip, negative or "") if use_neg else None
         pbar.update(1)
         held = None
         if audio is not None:                          # the sound, held: both stages get this same latent
             sr = int(audio["sample_rate"])
-            a0, an = vd.audio_range(0, F, fps, sr)
+            a0, an = 0, int(round(F / mfps * sr))
             seg = audio["waveform"][:1, :, a0:a0 + an].float().cpu()
             if seg.shape[-1] < an:
                 seg = torch.nn.functional.pad(seg, (0, an - seg.shape[-1]))
-            held = ops.sound_audio(audio_vae, seg, sr)
-        guider = ops.guider(model, pos, neg, fps)
-        video, sound = ops.sample(model, guider, int(seed), _text(sig1), latent, held or ops.empty_audio(audio_vae, F, fps))
+            if audio_vae is None:
+                notes.append("the sound needs audio_vae (the model's audio VAE): sampled without it, passed on as it is")
+            else:
+                held = ops.sound_audio(audio_vae, seg, sr)
+        guider = ops.guider(model, pos, neg, mfps, prof)
+        video, sound = ops.sample(model, guider, int(seed), _text(sig1), latent,
+                                  held or ops.empty_audio(audio_vae, F, mfps), prof["sampler"])
         del latent
         ops.free()
         pbar.update(1)
@@ -220,10 +244,11 @@ class KUBA_MotionGuide(io.ComfyNode):
             video = ops.upsample(video, upscale_model, vae)
             if limit:
                 video["noise_mask"] = noise_mask(video, sig2[0])
-            video, _ = ops.sample(model, guider, int(seed) + 1000, _text(sig2), video, held or sound)
+            video, _ = ops.sample(model, guider, int(seed) + 1000, _text(sig2), video, held or sound, prof["sampler"])
             ops.free()
             pbar.update(1)
-        decoded = ops.decode(vae, video)[:n, ..., :3].float().cpu().clamp_(0, 1)
+        decoded = ops.decode(vae, video)
+        decoded = decoded[vm.time_index(n, float(fps), decoded.shape[0], mfps), ..., :3].float().cpu().clamp_(0, 1)
         del video
         ops.free()
         pbar.update(1)
@@ -248,11 +273,12 @@ class KUBA_MotionGuide(io.ComfyNode):
         lines = [f"{n} frames at {fps:g} fps ({n / fps:.2f} s), guide {gw}x{gh} -> {ow}x{oh}"
                  + (f", scaled back to {gw}x{gh}" if back else "")
                  + f", {'two stages' if upscale_model is not None else 'one stage'}, {time.perf_counter() - t0:.0f} s",
+                 vm.describe(prof) + ("; 'negative' is not used at cfg 1" if not use_neg else ""),
                  f"repaint {r:g}: sampled through {_text(sig1)}" + (f"; second stage {_text(sig2)}" if upscale_model is not None else "")]
         if masked:
             lines.append((f"repaint mask: {len(where)} frame(s)" if where is not None else "no repaint mask (everywhere)")
                          + (f"; curve {curve}, {cycle:g} s, from {curve_from:g} to {curve_to:g}" if when is not None else "")
-                         + (f": LTX may change {share * 100:.0f} % of the clip and keeps the guide's look"
+                         + (f": the model may change {share * 100:.0f} % of the clip and keeps the guide's look"
                             + ("; the guide's own pixels where nothing may change" if keep_exact else "") if limit else
                             f": the repainted clip shows on {share * 100:.0f} % of the clip, your guide on the rest"))
             lines += curve_lines
@@ -273,4 +299,4 @@ class KUBA_MotionGuide(io.ComfyNode):
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_MotionGuide": KUBA_MotionGuide}
-NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_MotionGuide": "kubakub motion guide (ltx)"}
+NODE_DISPLAY_NAME_MAPPINGS = {"KUBA_MotionGuide": "kubakub motion guide"}

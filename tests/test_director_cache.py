@@ -155,7 +155,7 @@ e4 = sequence(st, frames=False, export="png8", export_scale=0.5, export_name="ca
 check("export: written again when the earlier export was deleted", "not written again" not in e4.result[3]
       and len(glob.glob(os.path.join(root, "cachetest_*"))) == 2)
 
-# ------------------------------------------------------------------ M1: skip_h3_frames only with keyframe clips (h3)
+# ------------------------------------------------------------------ M1: skip_h3_frames only with keyframe clips
 schema = nd.KUBA_DirectorSequence.define_schema()
 check("skip_h3_frames defaults to off", next(i for i in schema.inputs if i.id == "skip_h3_frames").default is False)
 graph_plain = {"3": {"class_type": "KUBA_Director", "inputs": {}},
@@ -170,7 +170,7 @@ full = sequence(st_l, frames=True, sequence_scale=0.5, skip_h3_frames=False)
 no_h3 = sequence(st_l, prompt=graph_plain, frames=True, sequence_scale=0.5, skip_h3_frames=True)
 with_h3 = sequence(st_l, prompt=graph_h3, frames=True, sequence_scale=0.5, skip_h3_frames=True)
 check("skip on without a keyframe clips node: every frame rendered", torch.equal(no_h3.result[0], full.result[0])
-      and "no kubakub keyframe clips (h3)" in no_h3.result[3])
+      and "no kubakub keyframe clips" in no_h3.result[3])
 check("skip on with a keyframe clips node: placeholders under the clip", not torch.equal(with_h3.result[0], full.result[0])
       and "placeholders" in with_h3.result[3])
 no_clip = sequence(director(variant(clips=[])).result[11], prompt=graph_h3, frames=True, sequence_scale=0.5, skip_h3_frames=True)

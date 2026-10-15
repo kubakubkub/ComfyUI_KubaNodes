@@ -110,13 +110,14 @@ def dependency_runs(spans):
     return runs
 
 
-def clip_anchors(markers, fps, i0, i1, h3_frames):
+def clip_anchors(markers, fps, i0, i1, h3_frames, mfps=H3_FPS):
     """Markers set to pin their frame ('anchor': true) inside a keyframe clip (sequence frames i0..i1), at least
     2 frames from both ends -> [(sequence frame, H3 frame)], the H3 frame by the same mapping as frame_map. H3 is
-    guided through the director's picture at these frames (core MiniMaxH3AddGuide)."""
+    guided through the director's picture at these frames (core MiniMaxH3AddGuide; LTX: LTXVAddGuide). mfps: the
+    model's frame rate (H3 24, LTX the sequence's)."""
     if i1 - i0 < 4:
         return []
-    used = min(h3_frames, int(round((i1 - i0) / float(fps) * H3_FPS)) + 1)
+    used = min(h3_frames, int(round((i1 - i0) / float(fps) * mfps)) + 1)
     out, seen = [], set()
     for m in markers or []:
         if not isinstance(m, dict) or not m.get("anchor"):
@@ -139,15 +140,25 @@ def h3_length(duration_s):
     return 5 + 17 * max(0, math.ceil((need - 5) / 17))
 
 
+def model_length(family, duration_s, fps):
+    """(frames, fps) a keyframe clip of duration_s is rendered with: H3 17k + 5 at 24 fps, LTX 8k + 1 at the
+    sequence's fps."""
+    if family == "h3":
+        return h3_length(duration_s), H3_FPS
+    need = max(9, int(round(duration_s * fps)) + 1)
+    return ((need - 1 + 7) // 8) * 8 + 1, float(fps)
+
+
 def h3_size(w, h, megapixels=0.85, grid=32):
     """Work size for H3 with the sequence's aspect (multiples of the grid)."""
     s = math.sqrt(megapixels * 1e6 / max(1, w * h))
     return max(grid, int(round(w * s / grid)) * grid), max(grid, int(round(h * s / grid)) * grid)
 
 
-def frame_map(n_seq, duration_s, h3_frames):
-    """For each of the n_seq sequence frames of the clip (first .. last), the H3 frame index at the same time."""
-    used = min(h3_frames, int(round(duration_s * H3_FPS)) + 1)
+def frame_map(n_seq, duration_s, h3_frames, mfps=H3_FPS):
+    """For each of the n_seq sequence frames of the clip (first .. last), the model's frame index at the same time
+    (mfps: the model's frame rate, H3 24)."""
+    used = min(h3_frames, int(round(duration_s * mfps)) + 1)
     if n_seq <= 1:
         return [0]
     return [int(round(j / (n_seq - 1) * (used - 1))) for j in range(n_seq)]

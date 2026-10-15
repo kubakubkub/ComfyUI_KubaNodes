@@ -1,7 +1,7 @@
 """
 clip_cache.py
 
-In-memory caches of kubakub region video sampler (LTX) and kubakub keyframe clips (h3): rendered clips and enhanced
+In-memory caches of kubakub region video sampler and kubakub keyframe clips: rendered clips and enhanced
 prompts, so that changing one clip of a timeline does not render (or enhance) the others again.
 Key = a content hash of everything that shapes the result; an entry is valid only while the same model objects are
 alive (weak references: a reloaded or re-patched model, e.g. another LoRA, is a new object and misses).

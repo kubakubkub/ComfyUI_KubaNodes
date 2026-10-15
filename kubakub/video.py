@@ -147,18 +147,19 @@ def crop_plan(mask: np.ndarray, target_px: float = 450_000, context_px: int = 64
 
 def latent_mask(region_crop: np.ndarray, lat_w: int, lat_h: int, frames: int, fps: float,
                 t_start: float = 0.0, t_end: float = -1.0, motion: float = 1.0, dilate: int = 1,
-                loop: bool = False, hold_first: bool = True):
+                loop: bool = False, hold_first: bool = True, times=None):
     """
     Noise mask [1, 1, T_lat, lat_h, lat_w] (float32): motion inside the region during
     t_start..t_end (t_end < 0 = to the end), 0 elsewhere; latent frame 0 is always 0 (the
     first frame stays the still). loop: the last latent frame is 0 too, so the clip comes
     back to the still (its last 8 frames) and can repeat. hold_first off: the first and the last
     frame are repainted like the others (a clip that follows a moving guide: the guide is its start).
+    times: the time (s) of each latent frame for a model on another grid (MiniMax H3); default the LTX grid.
     """
     m = cv2.resize(region_crop.astype(np.float32), (lat_w, lat_h), interpolation=cv2.INTER_AREA) > 0.02
     if dilate > 0:
         m = cv2.dilate(m.astype(np.uint8), np.ones((2 * dilate + 1, 2 * dilate + 1), np.uint8)) > 0
-    times = latent_frame_times(frames, fps)
+    times = latent_frame_times(frames, fps) if times is None else np.asarray(times, np.float64)
     end = float("inf") if t_end < 0 else t_end
     active = (times >= t_start) & (times <= end)
     if hold_first:
@@ -233,11 +234,12 @@ def guide_size(w: int, h: int, megapixels: float) -> tuple:
     return x * SPATIAL, y * SPATIAL
 
 
-def guide_frames(frames: np.ndarray, w: int, h: int) -> np.ndarray:
-    """A guide clip (F, H, W, 3) at the LTX size and a valid LTX length: the last frame is repeated up to 8k + 1."""
+def guide_frames(frames: np.ndarray, w: int, h: int, total=None) -> np.ndarray:
+    """A guide clip (F, H, W, 3) at the model's size and a valid LTX length: the last frame is repeated up to 8k + 1
+    (or up to `total` frames for a model on another grid)."""
     out = [cv2.resize(f, (w, h), interpolation=cv2.INTER_AREA if f.shape[1] >= w else cv2.INTER_CUBIC)
            if f.shape[:2] != (h, w) else f for f in frames]
-    out += [out[-1]] * (ltx_frames(len(out)) - len(out))
+    out += [out[-1]] * ((ltx_frames(len(out)) if total is None else int(total)) - len(out))
     return np.ascontiguousarray(np.stack(out), dtype=np.float32)
 
 
@@ -259,12 +261,25 @@ def repaint_level(amount: np.ndarray, start: float) -> np.ndarray:
     return np.where(amount > 0.002, floor + (1.0 - floor) * np.sqrt(amount), 0.0).astype(np.float32)
 
 
-def repaint_latent(mask, values, n: int, lat_t: int, lat_w: int, lat_h: int):
+def frame_groups(n: int, lat_t: int) -> list:
+    """For a model whose latent frames are not 8 frames each (MiniMax H3): the n frames shared out over lat_t latent
+    frames by time (frame 0 alone in the first)."""
+    groups = [[] for _ in range(lat_t)]
+    for f in range(n):
+        groups[0 if f == 0 else max(1, min(lat_t - 1, int(round(f / max(1, n - 1) * (lat_t - 1)))))].append(f)
+    for i in range(1, lat_t):                     # a latent frame no frame fell into takes its nearest one
+        if not groups[i]:
+            groups[i] = [min(n - 1, int(round(i / max(1, lat_t - 1) * (n - 1))))]
+    return groups
+
+
+def repaint_latent(mask, values, n: int, lat_t: int, lat_w: int, lat_h: int, groups=None):
     """How much of every place at every moment is open (0-1), at the latent's size: [1, 1, lat_t, lat_h, lat_w]
     float32, or None when neither a mask nor a curve is given.
     mask    None or [M, H, W] 0-1: white = repaint, black = the guide stays (M frames; fewer than n: the last holds)
     values  None or one number per frame, 0-1: how much of the repaint that frame gets (a curve over time)
     n       the frames of the guide; a latent frame stands for 8 of them (the first for frame 0) and takes their mean
+    groups  the frames of each latent frame for another grid (frame_groups), instead of 8 each
     """
     if mask is None and values is None:
         return None
@@ -278,7 +293,7 @@ def repaint_latent(mask, values, n: int, lat_t: int, lat_w: int, lat_h: int):
 
     out = np.zeros((lat_t, lat_h, lat_w), np.float32)
     for i in range(lat_t):
-        fs = [0] if i == 0 else range(TEMPORAL * (i - 1) + 1, TEMPORAL * i + 1)
+        fs = groups[i] if groups is not None else [0] if i == 0 else range(TEMPORAL * (i - 1) + 1, TEMPORAL * i + 1)
         for f in fs:
             v = 1.0 if values is None else float(values[min(f, n - 1)])
             out[i] += v if mask is None else at(f) * v

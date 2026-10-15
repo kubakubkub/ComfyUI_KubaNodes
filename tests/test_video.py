@@ -132,8 +132,15 @@ class _StubOps:
         self.calls.append(("encode_text", clip.name))
         return [[torch.tensor([float(len(text))]), {}]]
 
-    def guider(self, model, pos, neg, fps):
-        return (float(pos[0][0][0]), float(neg[0][0][0]))
+    def condition(self, clip, vae, text, first, last, frames, task=None):
+        self.calls.append(("encode_text", clip.name))
+        return [[torch.tensor([float(len(text))]), {"first": first, "last": last}]]
+
+    def base_sigmas(self, model, prof, latent=None):
+        return list(prof["sigmas"]) if prof.get("sigmas") else [1.0 - k / prof["steps"] for k in range(prof["steps"] + 1)]
+
+    def guider(self, model, pos, neg, fps, prof=None):
+        return (float(pos[0][0][0]), float(neg[0][0][0]) if neg is not None else 0.0)
 
     def empty_audio(self, audio_vae, frames, fps):
         return {"samples": torch.zeros(1, 1, 1, 1)}
@@ -142,8 +149,9 @@ class _StubOps:
         self.calls.append(("sound_audio", audio_vae.name))
         return {"samples": waveform.mean().reshape(1, 1, 1, 1) + 0.25, "noise_mask": torch.zeros(1, 1, 1, 1)}
 
-    def sample(self, model, guider, seed, sigmas, video, audio):
+    def sample(self, model, guider, seed, sigmas, video, audio, sampler_name="euler_ancestral"):
         self.calls.append(("sample", model.name))
+        self.sigmas_seen = getattr(self, "sigmas_seen", []) + [(sigmas, sampler_name)]
         self.audio_seen = getattr(self, "audio_seen", []) + [audio]
         s = (video["samples"] + float(video["noise_mask"].mean()) + guider[0] * 1e-3 + (seed % 97) * 1e-4
              + float(audio["samples"].mean()))
@@ -165,7 +173,7 @@ class _NoOps(_StubOps):
     """Any model step fails the test."""
 
     def __getattribute__(self, k):
-        if k in ("vae_encode", "enhance", "encode_text", "sample", "upsample", "decode", "progress"):
+        if k in ("vae_encode", "enhance", "encode_text", "condition", "sample", "upsample", "decode", "progress"):
             raise AssertionError(f"a model step ran: {k}")
         return object.__getattribute__(self, k)
 
@@ -391,7 +399,8 @@ def test_loop_and_sound():
 def test_material():
     """A clip on 'material' (a kubakub shader) moves the animated regions: guided sampling from material_repaint."""
     schema = nv.KUBA_RegionVideoSampler.define_schema()
-    assert [i.id for i in schema.inputs][-1] == "material" and schema.inputs[-1].optional and schema.inputs[-1].tooltip
+    mat = next(i for i in schema.inputs if i.id == "material")
+    assert mat.optional and mat.tooltip
     seen = {"pixels": [], "sigmas": [], "masks": []}
 
     class Seen(_StubOps):
@@ -399,10 +408,10 @@ def test_material():
             seen["pixels"].append(pixels.clone())
             return super().vae_encode(vae, pixels)
 
-        def sample(self, model, guider, seed, sigmas, video, audio):
+        def sample(self, model, guider, seed, sigmas, video, audio, sampler_name="euler_ancestral"):
             seen["sigmas"].append(sigmas)
             seen["masks"].append(video["noise_mask"].clone())
-            return super().sample(model, guider, seed, sigmas, video, audio)
+            return super().sample(model, guider, seed, sigmas, video, audio, sampler_name)
 
     rules = "[default]\nstrategy = keep\n[W_F1_C01]\nanimate = on\nvideo_prompt = light rises\n"
     ramp = torch.linspace(0.0, 1.0, 17)[:, None, None, None].expand(17, 192, 320, 3).clone()
@@ -416,7 +425,7 @@ def test_material():
     g = seen["pixels"][0]
     assert float((g[4] - g[12]).abs().max()) > 0.2, "the material's frames are in the crop"
     assert torch.equal(g[4][0, 0], seen_still_corner(g, plain)), "outside the region the crop stays the still"
-    assert seen["sigmas"][0] != nv.SIGMAS_1 and seen["sigmas"][0].startswith("0.8"), seen["sigmas"]
+    assert seen["sigmas"][0] != nv._text(nv.vm.LTX_DISTILLED) and seen["sigmas"][0].startswith("0.8"), seen["sigmas"]
     assert float(seen["masks"][0][0, 0, 0].max()) > 0.0, "a guided clip is repainted from its first frame on"
     assert "repainted from noise level 0.8" in out[1], out[1]
     ops = Seen()
@@ -435,7 +444,7 @@ def test_material():
         v.clear()
     nv._CLIP_CACHE.clear()
     same = _run(_plan(rules), Seen(), material=STILL).args
-    assert seen["sigmas"][0] == nv.SIGMAS_1 and "moves them freely" in same[1], same[1]
+    assert seen["sigmas"][0] == nv._text(nv.vm.LTX_DISTILLED) and "moves them freely" in same[1], same[1]
     for v in seen.values():
         v.clear()
     short = _run(_plan(rules), Seen(), material=torch.rand(5, 96, 160, 3)).args

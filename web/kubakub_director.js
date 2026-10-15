@@ -1225,7 +1225,7 @@ class Director {
     }
     this.syncEval(); this.drawTimeline(); this.scheduleDraft();
   }
-  // ---- H3 clips (rendered by the 'kubakub keyframe clips (h3)' node after the director)
+  // ---- H3 clips (rendered by the 'kubakub keyframe clips' node after the director)
   addClip() {
     const t = this.tl.time, ms = this.tl.markers.map(m => m.t).sort((a, b) => a - b);
     let a = [...ms].reverse().find(m => m <= t + 1e-6), b = ms.find(m => m > t + 1e-6);
@@ -1287,7 +1287,7 @@ class Director {
     const layers = this.layers.filter(q => q.kind === "image" || q.kind === "paint");
     const refBox = (c, v, label) => `<label style="white-space:nowrap;font-size:12px"><input type="checkbox" data-cf="ref" value="${esc(v)}" ${c.refs.includes(v) ? "checked" : ""}> ${esc(label)}</label>`;
     P.innerHTML = `<h3>h3 clips</h3>
-      <div class="kkd-lstatus">Rendered by the <b>kubakub keyframe clips (h3)</b> node after <b>kubakub director sequence</b>. Keyframes: the frames at start and end, H3 animates between them (fl2va). Reference: layers / music / the sequence as references (ref2va). Named markers inside a clip become its timeline beats.</div>
+      <div class="kkd-lstatus">Rendered by the <b>kubakub keyframe clips</b> node after <b>kubakub director sequence</b>. Keyframes: the frames at start and end, H3 animates between them (fl2va). Reference: layers / music / the sequence as references (ref2va). Named markers inside a clip become its timeline beats.</div>
       <div class="kkd-sub">for all clips</div>
       <div class="kkd-field"><span>look</span><textarea data-h3="look" placeholder="the look: light, colours, materials, mood">${esc(H.look)}</textarea></div>
       <div class="kkd-field"><span>camera</span><input type="text" data-h3="camera" value="${esc(H.camera)}" placeholder="locked-off, no camera movement (default)"><span></span></div>
@@ -2654,7 +2654,7 @@ class Director {
           <button class="kkd-pill" data-id="tl-key" data-tip="Keyframe the selected layer (or lamp) as it is now|K">◆ key</button>
           <span data-id="tl-time">0.00 s</span>
           <button class="kkd-pill" data-id="tl-mark" data-tip="A marker at the playhead (double click it on the ruler to rename, drag to move)|M">+ marker</button>
-          <button class="kkd-pill" data-id="tl-h3" data-tip="H3 clips: let MiniMax H3 animate a stretch of the timeline between its start and end frame (keyframes) or from references (layers, music, the sequence) · needs the 'keyframe clips (h3)' node after the director">h3 clips</button>
+          <button class="kkd-pill" data-id="tl-h3" data-tip="H3 clips: let MiniMax H3 (or LTX) animate a stretch of the timeline between its start and end frame (keyframes) or from references (layers, music, the sequence) · needs the 'keyframe clips' node after the director">h3 clips</button>
           <button class="kkd-pill" data-id="tl-snap" aria-pressed="true" data-tip="Scrubbing and dragged keyframes / markers snap to beats, markers and keyframes · hold Ctrl to move freely">snap</button>
           <span class="kkd-grow"></span>
           <button class="kkd-pill" data-id="tl-audio" data-tip="Load a sound (mp3, wav, ogg …) · or drop it onto the window · beats are found automatically">♪ audio</button>
