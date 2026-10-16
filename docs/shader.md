@@ -400,6 +400,34 @@ written to. Pictures you connect are clamped at their edges, not repeated; the b
 
 A mistake in the code is reported with the line number of what you pasted: `line 12: 'foo' : undeclared identifier`.
 
+## Pasting an OSL shader
+
+A pattern shader in OSL (Open Shading Language, as written for Blender Cycles, Houdini, Arnold, RenderMan) works
+the same way: paste the whole text, from `shader name(` (or `surface name(`) to its last `}`, with any functions
+above it, into `code`. The node sees it is OSL and translates it.
+
+| in OSL | here |
+|---|---|
+| `float Scale = 5 [[ float min = 0.1, float max = 50, string help = "..." ]]` | a slider with that range and text; without a range one around the value |
+| `int Invert = 0 [[ string widget = "checkBox" ]]` | a 0-1 slider |
+| `color Tint = color(1, 0.5, 0.2)` | a colour to pick |
+| a float input named `time` or `frame` | follows the clock |
+| `point Pos = P`, other inputs with an expression | keep their value |
+| `string NoiseType = "perlin"` | put in where it is used |
+| `P` | the place in the picture: x across, y up, the picture height = 1, z = 0 |
+| `u`, `v` | 0-1 across and up |
+| `N`, `Ng`, `I` | (0, 0, 1) towards you, (0, 0, -1) |
+| `time` | the clock |
+| `output color` | shown (the first one); `output float` as grey; `Ci` when there is no colour output. A line `// output: Fac` picks another |
+| `noise("perlin" / "uperlin" / "cell" / "hash" / "simplex", ...)`, `snoise`, `cellnoise`, `pnoise` | the same kinds of noise, our own: alike, not the same numbers as Blender |
+| `diffuse(N)`, `emission()` ... (closures) | white: `Ci = col * emission()` shows col. There is no renderer here, so a surface shows its colour, not its lit look |
+| `texture("wood.png", u, v)` | reads the picture on `image0` (no files are opened) |
+| `transform("object", P)` | P as it is: object, world and camera are all the picture |
+
+Not possible: displacement and volume shaders, `getattribute` (gives 0), `trace`, `spline`, structs. The report says
+what was approximated, and a mistake names the line of your OSL text. Everything the node does with other shaders
+works with these too: `controls`, the mask, regions (`kRegion` ...), sound, the arrow.
+
 ## Writing your own
 
 Two forms work. The Shadertoy form:

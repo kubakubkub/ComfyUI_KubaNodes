@@ -1,4 +1,4 @@
-"""kubakub shader: frames and masks from a preset, a pasted Shadertoy or a GLSL fragment shader, with time, a loop,
+"""kubakub shader: frames and masks from a preset, a pasted Shadertoy, an OSL shader or a GLSL fragment shader, with time, a loop,
 a sound, a field and pictures as inputs (text side kubakub/shadertoy.py, picture side kubakub/shader_render.py)."""
 
 from __future__ import annotations
@@ -115,7 +115,8 @@ class KUBA_Shader(io.ComfyNode):
                             "depth", "fog"],
             description=(
                 "Moving pictures and masks drawn by a shader: pick a preset, or paste the code of a Shadertoy (the "
-                "Image tab) or your own GLSL fragment shader. The node gives it the time, a loop, the sound (level, "
+                "Image tab), an OSL pattern shader (as written for Blender, Houdini, Arnold) or your own GLSL fragment "
+                "shader. The node gives it the time, a loop, the sound (level, "
                 "low / mid / high, beats), a field and a mask from kubakub mask field, your regions, and up to four "
                 "pictures. Every "
                 "'uniform float name; // default min max' line of the shader is a control you set in 'controls'. "
@@ -133,7 +134,8 @@ class KUBA_Shader(io.ComfyNode):
                                         "code, press Ctrl+A, then Ctrl+C, and paste here; a 'Common' tab goes first, "
                                         "the 'Image' tab below it. You do not need to read the code: the node says in "
                                         "plain words what a shader needs and what cannot work (buffer tabs, cubemaps, "
-                                        "sound shaders). A complete GLSL ES 3.00 fragment shader works too."),
+                                        "sound shaders). A complete GLSL ES 3.00 fragment shader works too, and an OSL shader "
+                                        "('shader name(...)'): its inputs become the controls, see the shader guide."),
                 io.String.Input("controls", default="", multiline=True,
                                 tooltip="Values for the shader's controls, e.g. 'scale = 5, warp = 2' (commas or "
                                         "lines). Empty = the defaults. The report lists every control with its range."),
@@ -495,7 +497,7 @@ class KUBA_Shader(io.ComfyNode):
 
         sound = _sound_out(wave, sr_hz, secs)
 
-        what = ("your " + ("Shadertoy" if t.kind == "shadertoy" else "fragment shader")) if own else f"preset '{preset}'"
+        what = ("your " + ("OSL shader" if t.language == "osl" else "Shadertoy" if t.kind == "shadertoy" else "fragment shader")) if own else f"preset '{preset}'"
         if t.buffers:
             what += f" with {len(t.buffers)} buffer tab{'s' if len(t.buffers) > 1 else ''} ({', '.join(b.name for b in t.buffers)})"
         lines = [f"{frames} frames, {w}x{h}, {secs:.2f} s at {fps:g} fps", what + (f": {st.about(text)}" if not own and st.about(text) else "")]

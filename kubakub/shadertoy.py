@@ -28,6 +28,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from . import osl
+
 SHADER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shaders")
 CHANNELS = 4
 MAX_CODE = 400_000                                   # characters of pasted shader text
@@ -299,6 +301,7 @@ class Translated:
     uses: set = field(default_factory=set)            # which kubakub / Shadertoy names it reads
     buffers: list = field(default_factory=list)       # the Buffer A-D tabs of a Shadertoy, in the order they are drawn (Pass)
     inputs: dict = field(default_factory=dict)        # what the Image tab reads on a channel when it is not the node's picture
+    language: str = ""                                # 'osl' when it was pasted as an OSL shader (kubakub/osl.py)
 
     @property
     def listens(self) -> bool:
@@ -553,6 +556,10 @@ def translate(code: str) -> Translated:
         raise ShaderError("this is a link, not the shader's code, and the node does not download anything. " + HOW_TO_COPY)
     if not bare.strip():
         raise ShaderError("the shader is empty.")
+    from_osl = []
+    if osl.is_osl(bare):                              # an OSL shader: translated into a Shadertoy first
+        code, from_osl = osl.translate(code)
+        bare = _no_comments(code)
     parts = tabs(code)
     if parts:
         return _translate_tabs(code, parts)
@@ -568,7 +575,7 @@ def translate(code: str) -> Translated:
         raise ShaderError("this shader cannot run here: " + " Also: ".join(problems))
 
     controls = parse_controls(code)
-    notes = []
+    notes = list(from_osl)
 
     def drop_builtin(m):                              # the header declares these already
         return "" if m.group(1) in _BUILTIN or re.fullmatch(r"u_image\d", m.group(1)) else m.group(0)
@@ -606,7 +613,7 @@ def translate(code: str) -> Translated:
     if "iMouse" in uses:
         notes.append("iMouse is used: there is no mouse here, it reads as never pressed (0, 0, 0, 0)")
     optional = {int(n) for n in re.findall(r"image(\d)", " ".join(re.findall(r"^//\s*optional:(.*)$", code, flags=re.M)))}
-    return Translated(source, kind, controls, notes, channels, optional, uses)
+    return Translated(source, kind, controls, notes, channels, optional, uses, language="osl" if from_osl else "")
 
 
 @functools.lru_cache(maxsize=64)
