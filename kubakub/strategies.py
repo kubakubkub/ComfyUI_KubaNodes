@@ -193,10 +193,10 @@ def _inpaint_crop(adapter, canvas, changed, cp: ops.CropPlan, inpaint, alpha, pr
         else:
             pos, neg = adapter.conds_for(prompt, negative, work_img, latent)
         if reference.startswith("style") and style is not None:
-            pos = adapter.add_reference(pos, style.latent)       # crop first, style image second
+            pos, neg = adapter.add_extra(pos, neg, style.latent)       # crop first, style image second
         if reference.startswith("material") and material is not None:      # ... or the material picture, where the region is
             shown = ops.resize(ops.crop(material, cp), cp.work_w, cp.work_h)
-            pos = adapter.add_reference(pos, adapter.encode(shown))
+            pos, neg = adapter.add_extra(pos, neg, adapter.encode(shown))
     else:
         pos, neg = adapter.conds_for(prompt, negative)
     out = adapter.sample(latent, pos, neg, noise_mask=work_mask[:, None], denoise=float(denoise),

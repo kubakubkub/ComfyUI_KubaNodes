@@ -467,7 +467,7 @@ class KUBA_Versions(io.ComfyNode):
         first = st.StyleReference(ad, start, 1.0)
         pos, neg = ad.conds_for(prompt, negative, first.pixels, first.latent)
         if style is not None:
-            pos = ad.add_reference(pos, st.StyleReference(ad, style, 1.0).latent)
+            pos, neg = ad.add_extra(pos, neg, st.StyleReference(ad, style, 1.0).latent)
         gw, gh = st.fif_size([0, 0, dw, dh], mp * 1024 * 1024, ad.grid)
         out = ad.sample(ad.empty_latent(gw, gh), pos, neg, denoise=1.0, pixel_size=(gw, gh),
                         **st._entry_sampling(e, settings))

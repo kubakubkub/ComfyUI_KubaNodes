@@ -120,6 +120,10 @@ class Adapter:
     def add_reference(self, cond: list, latent: torch.Tensor) -> list:
         return cond
 
+    def add_extra(self, pos: list, neg: list, latent: torch.Tensor) -> tuple[list, list]:
+        """One more reference after the crop (a style or material picture): on the positive."""
+        return self.add_reference(pos, latent), neg
+
     prefetches = False                 # True: encodes each region's crop image with its text (encode them all first)
 
     def prefetch(self, key, prompt: str, negative: str, pixels: torch.Tensor, need_negative: bool = True) -> None:
@@ -233,6 +237,56 @@ class Flux2Adapter(Adapter):
         return flux2_schedule(total, seq)[-(steps + 1):]
 
 
+class Flux3Adapter(Adapter):
+    """Flux 3 Klein (core Flux3): the crop as reference latent on the positive AND the negative (as core
+    ReferenceMultiLatent: the base runs at cfg 3.5), core schedule with the model's own shift. The base wants
+    50 steps at cfg 3.5; the sd file or a LoRA on the base (the distill LoRA) 20 steps at cfg 1."""
+    family = "flux3"
+    default_sampler = "euler"
+    default_scheduler = "simple"
+    default_region_mp = 1.0
+
+    @classmethod
+    def detect(cls, model) -> bool:
+        klass = getattr(comfy.model_base, "Flux3", None)
+        return klass is not None and isinstance(getattr(model, "model", None), klass)
+
+    @property
+    def geometry(self) -> geo.Geometry:
+        return geo.GEOMETRIES["flux2"]          # same VAE and 2x2 patch: 16 px grid
+
+    @property
+    def _distilled(self) -> bool:
+        """BFL's step distilled file (a flow map: it has ref_time_in) or a LoRA on the base (the distill LoRA)."""
+        try:
+            if getattr(self.model.get_model_object("diffusion_model"), "flow_map", False):
+                return True
+        except Exception:
+            pass
+        return bool(getattr(self.model, "patches", None))
+
+    @property
+    def default_steps(self) -> int:
+        return 20 if self._distilled else 50
+
+    @property
+    def default_cfg(self) -> float:
+        return 1.0 if self._distilled else 3.5
+
+    def add_reference(self, cond: list, latent: torch.Tensor) -> list:
+        return node_helpers.conditioning_set_values(cond, {"reference_latents": [latent]}, append=True)
+
+    def conds_for(self, prompt: str, negative: str, pixels: torch.Tensor | None = None,
+                  latent: torch.Tensor | None = None, key=None) -> tuple[list, list]:
+        pos, neg = self.cond(prompt), self.cond(negative)
+        if latent is not None:
+            pos, neg = self.add_extra(pos, neg, latent)
+        return pos, neg
+
+    def add_extra(self, pos: list, neg: list, latent: torch.Tensor) -> tuple[list, list]:
+        return self.add_reference(pos, latent), self.add_reference(neg, latent)
+
+
 class QwenImage21Adapter(Adapter):
     """
     Qwen Image 2.1 (core QwenImage21): the reference crop goes through the
@@ -318,7 +372,7 @@ class QwenImage21Adapter(Adapter):
         return node_helpers.conditioning_set_values(cond, {"reference_latents": [latent]}, append=True)
 
 
-ADAPTERS = [Flux2Adapter, QwenImage21Adapter]
+ADAPTERS = [Flux2Adapter, Flux3Adapter, QwenImage21Adapter]
 
 
 def make_adapter(model, clip, vae, family: str = "auto") -> Adapter:

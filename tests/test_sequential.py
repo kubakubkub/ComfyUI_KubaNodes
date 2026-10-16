@@ -49,6 +49,9 @@ class FakeAdapter:
     def add_reference(self, cond, latent):
         return [[cond[0][0], {"reference_latents": [latent]}]]
 
+    def add_extra(self, pos, neg, latent):
+        return self.add_reference(pos, latent), neg
+
     def conds_for(self, prompt, negative, pixels=None, latent=None):
         pos = self.cond(prompt)
         if latent is not None:
