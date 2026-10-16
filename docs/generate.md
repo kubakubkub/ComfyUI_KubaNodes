@@ -119,7 +119,7 @@ Test without a model: `tests/test_plan.py`.
 
 ## kubakub region sampler
 
-Runs a region plan on an image with one model (sequential inpaint). Inputs: `model`, `clip`, `vae` (Flux 2 Klein 4B or 9B is detected
+Runs a region plan on an image with one model (sequential inpaint). Inputs: `model`, `clip`, `vae` (Flux 2 Klein 4B or 9B, Flux 3 Klein and Qwen Image 2.1 are detected
 automatically; other models use the generic KSampler path), `plan`, and
 `image`, the canvas, exactly the size of the regions (never resized to fit).
 
@@ -144,18 +144,20 @@ details like vines), `none` lets the region be freely repainted inside its mask
 
 | input | default | |
 |---|---|---|
-| steps, cfg | 0, 0 | used where the plan says 0; 0 = the model's default (Klein 4 / 1, Qwen 2.1 25 / 1; set 8 / 1 for the Qwen 2.1 turbo model) |
+| steps, cfg | 0, 0 | used where the plan says 0; 0 = the model's default (Klein 4 / 1, Qwen 2.1 25 / 1; set 8 / 1 for the Qwen 2.1 turbo model; Flux 3 Klein sd file or base + distill LoRA 20 / 1, Flux 3 base 50 / 3.5) |
 | sampler_name | euler | |
 | scheduler | simple | generic models only; Flux 2 uses its own schedule |
 | region_mp | 1.0 | work megapixels per region crop |
 | max_upscale | 4.0 | small regions are scaled up at most this much |
 | which regions | empty | process only these regions (plan syntax: `W_F1_*`, `group:Windows`), to work on a few |
 | seed_offset (advanced) | 0 | added to every region seed |
-| adapter (advanced) | auto | flux2 / generic |
+| adapter (advanced) | auto | flux2 / flux3 / qwen_image21 / generic |
 | style | optional | a style image for the regions whose plan says `reference = style`: a second reference next to the region's own crop, at about 1 megapixel. Of a batch the first image is used |
 | material | optional | a picture the painted regions start from, e.g. the `images` of a kubakub shader: see *A shader as the material of your regions* below |
 | change | optional | a mask: how much each place of a painted region may change, e.g. the `masks` of a kubakub shader |
 | material_at (advanced) | 0.3 | a clip on `material` or `change`: which of its frames is used, 0 = the first, 1 = the last |
+| upsampler | optional | a prompt upsampler (Load CLIP: `qwen3.5_9b_flux3_prompt_upsampler_w4a8`, type `flux3`): every painted region's short prompt becomes a full instruction while it looks at the region's crop (and the style picture when `reference = style`); the first pass's instruction while it looks at the whole picture. The instructions are in the report and kept for the session, so a queue only asks for new ones (about 6-9 s each) |
+| first_pass | 0 | 0 = off. Above 0: the whole picture is first edited once at this denoise from one instruction made of the plan's prompts, with the picture as reference, and pasted where the painted regions are; then every region refines it at its own denoise. See *Flux 3 Klein* below |
 
 Without a `style` image, regions with `reference = style` use their own crop
 (`reference = self`); the report names how many. The report also says when a
@@ -233,6 +235,26 @@ one of the steps), so a soft ramp becomes 4 or 5 bands, and only the brightest b
 that joins one step later already changes much less. More steps give a finer map. In the kubakub director the
 region data of a fill is 512 pixels on its longer side, so the outline of a region can show small steps there; the
 node draws at full size.
+
+## Flux 3 Klein in the region sampler
+
+Detected from the model (core Flux 3, ComfyUI 0.41 or newer). The crop and a style picture go in as references on the
+positive and the negative, as core *Set Reference Multi Latent* does. Files (huggingface.co/black-forest-labs/
+flux-3-image-klein-comfy, accept the licence on the page): text encoder `qwen3vl_4b_int8_convrot` (Load CLIP, type
+`flux3`), the `flux2-vae`, and one of:
+
+| model | steps / cfg | |
+|---|---|---|
+| `flux3_image_klein_sd_int8_convrot` (BFL's step distilled file) | 20 / 1 (the default at 0; 8-16 work) | the one to start with: follows an edit most completely |
+| `flux3_image_klein_base_int8_convrot` + Kijai's distill LoRA (`flux3_klein_sd_lora_rank_256_bf16`, LoraLoaderModelOnly 0.8) | 20 / 1 (the default at 0 with any LoRA on the base) | more variety from window to window, the least change outside an edit |
+| `flux3_image_klein_base_int8_convrot` alone | 50 / 3.5 (the default at 0) | the most atmosphere, about 2.5x slower |
+
+Found on a 12 GB laptop GPU (2026-10-16): int8 was faster than NVFP4 and as good as bf16 (bf16 does not fit and
+offloads). A region at 1.0 took about 9 s (sd file) to 10 s (base + LoRA); 0.8 changed almost nothing, as with Klein.
+Flux 3 keeps the geometry of an edited picture exactly (every window, door and the black around the facade stay
+where they are), so `first_pass = 1.0` followed by regions at 0.5 gives one coherent picture with the detail of the
+regions. With the upsampler connected short prompts work: a plain "make the windows stained glass" left the windows
+alone, the upsampled instruction changed every one of them.
 
 ## Qwen Image 2.1 in the region sampler
 

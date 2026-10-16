@@ -52,21 +52,21 @@ class KUBA_RegionSampler(io.ComfyNode):
             node_id="KUBA_RegionSampler",
             display_name="kubakub region sampler",
             category="kubakub/2d/generate",
-            search_aliases=['inpaint', 'regional prompt', 'klein', 'qwen'],
+            search_aliases=['inpaint', 'regional prompt', 'klein', 'qwen', 'flux 3', 'prompt upsampler'],
             description=(
                 "Run a region plan on an image, region by region. inpaint: the region is cut out "
                 "with context, scaled uniformly to about region_mp on the model grid, inpainted "
                 "with its own prompt and the crop as reference, colour matched and pasted back. "
                 "frame_in_frame: the region gets its own scene generated from scratch, placed "
                 "through its mask, and its border is harmonized. Later regions see earlier ones. "
-                "Flux 2 Klein and Qwen Image 2.1 are detected automatically. Results are kept in RAM "
+                "Flux 2 Klein, Flux 3 Klein and Qwen Image 2.1 are detected automatically. Results are kept in RAM "
                 "across queues: a region whose crop pixels, masks, prompt, seed, settings and models are "
                 "unchanged is pasted from the cache, so changing one prompt re-samples only that region "
                 "(and later regions whose crops overlap it). A kubakub shader can be the material of the "
                 "regions: its picture on 'material' is what the model paints from, its mask on 'change' says "
                 "how much each place may change."),
             inputs=[
-                io.Model.Input("model", tooltip="The image model (Flux 2 Klein, Qwen Image 2.1 or a "
+                io.Model.Input("model", tooltip="The image model (Flux 2 Klein, Flux 3 Klein, Qwen Image 2.1 or a "
                                                 "generic model), with any LoRAs already applied."),
                 io.Clip.Input("clip", tooltip="The text encoder that matches the model."),
                 io.Vae.Input("vae", tooltip="The VAE that matches the model."),
@@ -75,9 +75,10 @@ class KUBA_RegionSampler(io.ComfyNode):
                                                 "(e.g. the 3840x2160 facade render or photo)."),
                 io.Int.Input("steps", advanced=True, default=0, min=0, max=200,
                              tooltip="Used where the plan says steps = 0. 0 = the model's default "
-                                     "(Klein 4, Qwen Image 2.1 25)."),
+                                     "(Klein 4, Qwen Image 2.1 25, Flux 3 Klein 50 for the base, 20 for the sd file or a "
+                                     "LoRA on the base)."),
                 io.Float.Input("cfg", advanced=True, default=0.0, min=0.0, max=30.0, step=0.1, round=0.01,
-                               tooltip="Used where the plan says cfg = 0. 0 = the model's default (1.0)."),
+                               tooltip="Used where the plan says cfg = 0. 0 = the model's default (1.0; the Flux 3 base 3.5)."),
                 io.Combo.Input("sampler_name", advanced=True, options=comfy.samplers.KSampler.SAMPLERS, default="euler",
                                tooltip="Sampler for every region (euler is a safe default)."),
                 io.Combo.Input("scheduler", advanced=True, options=comfy.samplers.KSampler.SCHEDULERS, default="simple",
@@ -101,7 +102,7 @@ class KUBA_RegionSampler(io.ComfyNode):
                 io.Int.Input("seed_offset", default=0, min=0, max=0xFFFFFFFF, advanced=True,
                              tooltip="Added to every region seed, for a new variation of all regions."),
                 io.Combo.Input("adapter", options=adapters.families(), default="auto", advanced=True,
-                               tooltip="Model family; auto detects Flux 2 and Qwen Image 2.1."),
+                               tooltip="Model family; auto detects Flux 2, Flux 3 and Qwen Image 2.1."),
                 # new inputs go last: saved workflows store the widget values by position
                 io.Image.Input("style", optional=True,
                                tooltip="A style image for the regions whose plan says reference = style: the "
@@ -121,6 +122,19 @@ class KUBA_RegionSampler(io.ComfyNode):
                               tooltip="How much each place of a painted region may change, e.g. the masks of a "
                                       "kubakub shader: white = all of the region's denoise, black = nothing. With a 4 "
                                       "or 5 step model the map has that many levels."),
+                io.Clip.Input("upsampler", optional=True,
+                              tooltip="A prompt upsampler (load qwen3.5_9b_flux3_prompt_upsampler with a Load CLIP "
+                                      "node, type flux3). Connected, it turns every region's short prompt into a full "
+                                      "instruction while it looks at the region's crop (and the style picture), and the "
+                                      "first pass's instruction while it looks at the whole picture. Flux 3 Klein follows "
+                                      "such an instruction far better. The instructions are in the report and kept for the "
+                                      "session; about 6-9 s for each new one."),
+                io.Float.Input("first_pass", default=0.0, min=0.0, max=1.0, step=0.05, optional=True,
+                               tooltip="0 = off. Above 0: the whole picture is first edited in one pass at this denoise "
+                                       "(1.0 = a full edit) from one instruction made of the plan's prompts, with the "
+                                       "picture as reference, and pasted where the painted regions are; then every "
+                                       "region refines it at its own denoise (0.5 works well). One coherent picture "
+                                       "first, the detail from the regions."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The image with all processed regions pasted in."),
@@ -133,7 +147,8 @@ class KUBA_RegionSampler(io.ComfyNode):
     @classmethod
     def execute(cls, model, clip, vae, plan, image, steps, cfg, sampler_name, scheduler, region_mp,
                 max_upscale, schedule="auto", only="", seed_offset=0, adapter="auto",
-                style=None, material_at=0.3, material=None, change=None) -> io.NodeOutput:
+                style=None, material_at=0.3, material=None, change=None, upsampler=None,
+                first_pass=0.0) -> io.NodeOutput:
         ad = adapters.make_adapter(model, clip, vae, adapter)
         ad.set_schedule(schedule)
         log.info("[KUBA regions] sampler: adapter %s, grid %d px, schedule %s", ad.family, ad.grid, ad.schedule)
@@ -182,7 +197,8 @@ class KUBA_RegionSampler(io.ComfyNode):
         out, changed, results = st.run_plan(
             ad, mat.canvas, plan, settings, only=pick,
             progress=(lambda i, n: pbar.update_absolute(i, n)) if pbar else None,
-            check_interrupt=stop, change=mat.change, material=mat.reference)
+            check_interrupt=stop, change=mat.change, material=mat.reference, upsampler=upsampler,
+            first_pass=float(first_pass or 0.0))
         report = (f"adapter {ad.family}, grid {ad.grid}, schedule {ad.schedule}; cache {rc.RESULTS.stats()}\n"
                   + st.results_report(results) + "".join(f"\n{line}" for line in mat.lines)
                   + "".join(f"\nnote: {n}" for n in notes))
@@ -245,7 +261,7 @@ class KUBA_SeamPass(io.ComfyNode):
                 io.Int.Input("tile_px", default=1024, min=256, max=2048, step=16, advanced=True,
                              tooltip="Tile size at 1:1 (about 1 MP for 1024)."),
                 io.Combo.Input("adapter", options=adapters.families(), default="auto", advanced=True,
-                               tooltip="Model family; auto detects Flux 2 and Qwen Image 2.1."),
+                               tooltip="Model family; auto detects Flux 2, Flux 3 and Qwen Image 2.1."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The image with blended seams."),

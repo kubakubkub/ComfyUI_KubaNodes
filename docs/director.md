@@ -174,11 +174,12 @@ under the button; the result comes back as a new layer "<name> · diffused" righ
 with a soft edge (compare with the eye, delete, undo). Paint layers are the sketch-and-prompt route: paint where
 something should appear, prompt it, diffuse.
 
-The **diffusion** pill holds the settings, saved with the composition: model (klein 4b default, klein 9b), three
+The **diffusion** pill holds the settings, saved with the composition: model (flux 3 klein when its files are installed, else klein 4b; klein 9b), three
 LoRA slots with strength (the ones made for the chosen model are listed first, e.g. Kubakub_FluxKlein4B), steps,
 size (megapixels the model works at), context, edge band, seed (-1 = new each time), reference (the crop as
 reference latent). VAE: flux2_full_encoder_small_decoder when installed (fast decode), else flux2-vae.
 Speed on a 12 GB laptop GPU (klein 4b + one LoRA, 1 MP, 4 steps): ~15 s the first time (loading), ~8 s after.
+flux 3 klein: BFL's step distilled file `flux3_image_klein_sd_int8_convrot` with `qwen3vl_4b_int8_convrot`, 8 steps by default (the slider goes to 20; 16 = the model card's), cfg 1. It keeps what is around the shape as it is and follows an edit prompt closely; see [generate](generate.md), *Flux 3 Klein*.
 
 ## Light layers: relight the scene inside the director
 

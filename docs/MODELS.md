@@ -20,6 +20,7 @@ downloads. `--check` only reports.
 | | in place of the turbo model: a base file you already have + the [turbo LoRA](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/tree/main/loras) (by hand) | loras | same settings, see [generate](generate.md) |
 | | better decoder: [texture-fix VAE](https://huggingface.co/madebyollin/texture-fix-vae-for-qwen-image-2.1) (by hand) | vae | replaces the VAE above |
 | **4 LTX 2.5** | [transformer int8 convrot, gemma4 text encoder, video + audio VAE, latent upscaler x2](https://huggingface.co/Lightricks/LTX-2.5) | diffusion_models, text_encoders, vae, latent_upscale_models | 04, director_video_ltx, motion_guide |
+| **Flux 3 Klein** (by hand) | [flux3_image_klein_sd_int8_convrot, qwen3vl_4b_int8_convrot, qwen3.5_9b_flux3_prompt_upsampler_w4a8](https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy) (accept the licence on the page) | diffusion_models, text_encoders | any region workflow: swap the loaders (CLIP type flux3), the flux2-vae of set 1; the upsampler goes to the sampler's `upsampler` input, see [generate](generate.md) |
 | **5 SAM 3.1** | [sam3.1_multiplex_fp16](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints) | checkpoints | regions_sam3_masks (+ [KJNodes](https://github.com/kijai/ComfyUI-KJNodes) Points Editor) |
 | **MiniMax H3** | open ComfyUI's template *video_minimax_h3_i2v* (Workflow > Browse templates), ComfyUI offers its models | | director_h3_clips |
 

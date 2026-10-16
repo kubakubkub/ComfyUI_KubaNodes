@@ -87,10 +87,11 @@ def plan_of(rules, regions=None):
 
 def test_region_sampler():
     schema = nsm.KUBA_RegionSampler.define_schema()
-    check("sampler: style, material_at, material and change are the last inputs, optional",
-          ids(schema.inputs)[-4:] == ["style", "material_at", "material", "change"]
-          and all(i.optional and bool(i.tooltip) for i in schema.inputs[-4:]))
-    check("sampler: the old inputs keep their order", ids(schema.inputs)[:-4] == [
+    check("sampler: style, material_at, material, change, upsampler and first_pass are the last inputs, optional",
+          ids(schema.inputs)[-6:] == ["style", "material_at", "material", "change", "upsampler", "first_pass"]
+          and all(i.optional and bool(i.tooltip) for i in schema.inputs[-6:]))
+    check("sampler: first_pass is off (0) unless set", schema.inputs[-1].default == 0.0)
+    check("sampler: the old inputs keep their order", ids(schema.inputs)[:-6] == [
         "model", "clip", "vae", "plan", "image", "steps", "cfg", "sampler_name", "scheduler", "region_mp",
         "max_upscale", "schedule", "only", "seed_offset", "adapter"])
     check("sampler: outputs unchanged", ids(schema.outputs) == ["image", "changed", "report"])

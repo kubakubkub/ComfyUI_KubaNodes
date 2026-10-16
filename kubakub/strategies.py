@@ -29,6 +29,7 @@ import torch
 
 from . import ops
 from . import region_cache as rc
+from . import upsampler as up
 from .types import RegionPlan
 
 log = logging.getLogger("KUBA.regions")
@@ -55,6 +56,7 @@ class RegionResult:
     seconds: float = 0.0
     crop: dict = field(default_factory=dict)
     note: str = ""
+    instruction: str = ""           # what the prompt upsampler made of the region's prompt
 
 
 def _crop_zero_pad(t: torch.Tensor, cp: ops.CropPlan, fill) -> torch.Tensor:
@@ -235,6 +237,62 @@ def cover(img: torch.Tensor, w: int, h: int) -> torch.Tensor:
     return r[:, y0:y0 + h, x0:x0 + w]
 
 
+KEEP = ("Keep the rest unchanged: the position and size of every window, door, pilaster, cornice and wall field, "
+        "the straight-on camera, the framing and the black around the facade.")
+
+
+def first_pass_instruction(entries: list, rids: list, family: str = "") -> str:
+    """One edit instruction for the whole picture from the plan's own prompts (each distinct prompt once, in plan
+    order). Flux 3 is told which picture it is by its reference token."""
+    prompts = list(dict.fromkeys(entries[r]["prompt"].strip().rstrip(".") for r in rids if entries[r]["prompt"].strip()))
+    head = "In <ref_image_0>, change" if family == "flux3" else "Edit this picture of a facade: change"
+    return f"{head} the materials and details and keep the geometry exactly: " + "; ".join(prompts) + ". " + KEEP
+
+
+def first_pass_edit(adapter, canvas, changed, rp: RegionPlan, todo: list, settings: SamplerSettings,
+                    region_mp: float, denoise: float, upsampler=None, cache=None):
+    """The whole picture edited once (the 2026-10-14 'draft' test, now as one edit with the picture as its
+    reference): one instruction from the prompts of the painted regions (through the upsampler when connected,
+    which then looks at the whole picture), sampled at about region_mp at `denoise` from the picture itself,
+    scaled back and pasted where the painted regions are (feathered; keep regions stay pixel exact).
+    Returns (canvas, changed, a RegionResult for the report)."""
+    t0 = time.perf_counter()
+    entries = rp.plan["regions"]
+    paint = [r for r in todo if entries[r]["strategy"] == "inpaint" and entries[r]["prompt"].strip()]
+    if not paint:
+        return canvas, changed, RegionResult(-1, "first pass", "skipped", note="no painted region has a prompt")
+    text = first_pass_instruction(entries, paint, getattr(adapter, "family", ""))
+    if upsampler is not None:
+        text, _ = up.expand(upsampler, text, [canvas])
+    H, W = int(canvas.shape[1]), int(canvas.shape[2])
+    gw, gh = fif_size([0, 0, W, H], region_mp * 1024 * 1024, adapter.grid)
+    sampling = _entry_sampling(entries[paint[0]], settings)
+    key = pic = None
+    if cache is not None:
+        key = cache.key("first", rc.digest(canvas), text, float(denoise), tuple(sorted(sampling.items())), (gw, gh))
+        pic = cache.get(key)
+    cached = pic is not None
+    if pic is None:
+        work = ops.resize(canvas, gw, gh)
+        latent = adapter.encode(work)
+        pos, neg = adapter.conds_for(text, "", work, latent)
+        out = adapter.sample(latent, pos, neg, denoise=float(denoise), pixel_size=(gw, gh), **sampling)
+        pic = ops.resize(adapter.decode(out)[:1, ..., :3].float().cpu(), W, H)
+        if cache is not None:
+            cache.put(key, pic)
+    region = rp.regions.mask(paint)[:1].float().cpu()
+    if rp.regions.scope is not None:
+        region = region * rp.regions.scope[:1].float().cpu()
+    alpha = ops.feather_alpha(region, max(int(entries[r]["feather_px"]) for r in paint))
+    canvas = canvas * (1 - alpha[..., None]) + pic * alpha[..., None]
+    changed = torch.maximum(changed, alpha)
+    dt = time.perf_counter() - t0
+    log.info("[KUBA regions] first pass: whole picture at %dx%d, denoise %.2f, %d prompt(s), %.1fs%s", gw, gh,
+             denoise, len(set(entries[r]["prompt"] for r in paint)), dt, " cached" if cached else "")
+    return canvas, changed, RegionResult(-1, "first pass", "done", dt, {}, note=f"whole picture at {gw}x{gh}, "
+                                         f"denoise {denoise:g}" + (" (cached)" if cached else ""), instruction=text)
+
+
 def frame_in_frame(adapter, canvas, changed, rp: RegionPlan, rid: int, e: dict,
                    settings: SamplerSettings, region_mp: float, cache=None):
     """
@@ -333,7 +391,7 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
              progress: Callable[[int, int], None] | None = None,
              check_interrupt: Callable[[], None] | None = None,
              use_cache: bool = True, change: torch.Tensor | None = None,
-             material: torch.Tensor | None = None):
+             material: torch.Tensor | None = None, upsampler=None, first_pass: float = 0.0):
     """
     Run every region of the plan in plan order with its strategy: inpaint (S1)
     or frame_in_frame (S4); keep is skipped. Returns (canvas, changed_mask
@@ -344,6 +402,10 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
     With use_cache (and an adapter with a model and vae) every region's result
     is kept across queues (region_cache.RESULTS): an unchanged region whose
     crop pixels are unchanged is pasted from the cache instead of sampled.
+    upsampler (a CLIP that generates text, kubakub/upsampler.py): every painted region's prompt becomes a full
+    instruction about its crop (and the style picture when its reference is style), before anything is encoded.
+    first_pass > 0: the whole picture is edited once at this denoise from one instruction made of the plan's
+    prompts, and pasted where the painted regions are; then the regions refine it (first_pass_edit).
     """
     H, W = canvas.shape[1], canvas.shape[2]
     rw, rh = rp.regions.size
@@ -357,7 +419,6 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
             and (only is None or only(entries[i]))]
 
     region_mp = settings.region_mp or getattr(adapter, "default_region_mp", 1.0)
-    adapter.encode_prompts([entries[i]["prompt"] for i in todo] + [entries[i]["negative"] for i in todo])
     cache = rc.run_cache(adapter, use_cache)
     prefetches = bool(getattr(adapter, "prefetches", False))
 
@@ -396,6 +457,32 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
         if ref == "material":
             return f"material:{mat_digest}" if material is not None else "self"
         return ref
+
+    results: list[RegionResult] = []
+    instructions: dict[int, str] = {}
+    if first_pass > 0 and todo:
+        canvas, changed, fp = first_pass_edit(adapter, canvas, changed, rp, todo, settings, region_mp, first_pass,
+                                              upsampler=upsampler, cache=cache)
+        results.append(fp)
+    if upsampler is not None:
+        # every painted region's prompt -> a full instruction about its own crop (and the style picture); on a copy,
+        # the plan given stays as it is. The crops are those of the canvas before any region is painted.
+        entries = [dict(e) for e in entries]
+        t0, asked = time.perf_counter(), 0
+        for rid in todo:
+            e = entries[rid]
+            if e["strategy"] != "inpaint" or not e["prompt"].strip():
+                continue
+            pics = [ops.crop(canvas, crop_plan(e))]
+            if reference_of(e).startswith("style") and settings.style is not None:
+                pics.append(settings.style)
+            text, hit = up.expand(upsampler, e["prompt"], pics)
+            asked += not hit
+            instructions[rid] = e["prompt"] = text
+        if instructions:
+            log.info("[KUBA regions] upsampler: %d instruction(s), %d new, %.1fs", len(instructions), asked,
+                     time.perf_counter() - t0)
+    adapter.encode_prompts([entries[i]["prompt"] for i in todo] + [entries[i]["negative"] for i in todo])
 
     def s1_args(e):
         sampling = _entry_sampling(e, settings)
@@ -436,7 +523,6 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
             log.info("[KUBA regions] encoded %d region(s) with their images first, %.1fs", len(want),
                      time.perf_counter() - t0)
 
-    results: list[RegionResult] = []
     for n, rid in enumerate(todo):
         if check_interrupt:
             check_interrupt()
@@ -486,6 +572,9 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
     for e in entries:
         if e["strategy"] == "keep":
             results.append(RegionResult(e["region_id"], e["name"], "skipped", note="keep"))
+    for r in results:
+        if r.region_id in instructions:
+            r.instruction = instructions[r.region_id]
     return canvas, changed, results
 
 
@@ -493,7 +582,7 @@ sequential_inpaint = run_plan   # the M1 step 4 name
 
 
 def results_report(results: list[RegionResult]) -> str:
-    done = [r for r in results if r.status == "done"]
+    done = [r for r in results if r.status == "done" and r.region_id >= 0]
     total = sum(r.seconds for r in done)
     n_cached = sum(1 for r in done if "cached" in r.note)
     lines = [f"{len(done)} regions done in {total:.1f}s"
@@ -502,5 +591,10 @@ def results_report(results: list[RegionResult]) -> str:
     for r in results:
         box = r.crop.get("box", "")
         extra = f"box {box} x{r.crop.get('scale')} work {r.crop.get('work')}" if r.crop else ""
-        lines.append(f"{r.region_id:>3} {r.name[:18]:<18} {r.status:<7} {r.seconds:5.1f}s {extra} {r.note}".rstrip())
+        rid = "  -" if r.region_id < 0 else f"{r.region_id:>3}"
+        lines.append(f"{rid} {r.name[:18]:<18} {r.status:<7} {r.seconds:5.1f}s {extra} {r.note}".rstrip())
+    said = [r for r in results if r.instruction]
+    if said:
+        lines.append("instructions (from the plan's prompts; with the upsampler, what it wrote):")
+        lines += [f"  {r.name}: {r.instruction}" for r in said]
     return "\n".join(lines)

@@ -1891,7 +1891,7 @@ class Director {
   }
   diffGraph(image, mask, L, request) {
     const pre = (this.m.diffusion?.presets || []).find(p => p.name === this.diff.preset) || this.m.diffusion?.presets?.[0];
-    if (!pre) throw new Error("no Klein model found (flux-2-klein-4b / 9b with qwen_3 text encoder and flux2 vae)");
+    if (!pre) throw new Error("no Klein model found (flux3_image_klein_sd with qwen3vl_4b, or flux-2-klein-4b / 9b with qwen_3; and the flux2 vae)");
     const g = { u: { class_type: "UNETLoader", inputs: { unet_name: pre.unet, weight_dtype: "default" } },
       c: { class_type: "CLIPLoader", inputs: { clip_name: pre.clip, type: pre.type, device: "default" } },
       v: { class_type: "VAELoader", inputs: { vae_name: pre.vae } } };
@@ -1973,7 +1973,7 @@ class Director {
         ${sorted.filter(fits).length ? `<optgroup label="for ${esc(pre?.name || "")}">${sorted.filter(fits).map(n => opt(n, l.name)).join("")}</optgroup>` : ""}
         <optgroup label="all loras">${sorted.filter(n => !fits(n)).map(n => opt(n, l.name)).join("")}</optgroup></select>
         <input type="range" data-dls="${i}" min="-1" max="2" step="0.05" value="${esc(l.strength)}" style="width:70px" data-tip="LoRA strength"><span class="v" data-dlv="${i}">${(+l.strength).toFixed(2)}</span></div>`).join("")}
-      <div class="kkd-field"><span>steps</span><input type="range" data-df="steps" min="1" max="12" step="1" value="${esc(D.steps)}"><span class="v">${esc(D.steps)}</span></div>
+      <div class="kkd-field"><span>steps</span><input type="range" data-df="steps" min="1" max="20" step="1" value="${esc(D.steps)}"><span class="v">${esc(D.steps)}</span></div>
       <div class="kkd-field" data-tip="Working size of the model: bigger = more detail, slower"><span>size</span><input type="range" data-df="megapixels" min="0.25" max="2" step="0.05" value="${esc(D.megapixels)}"><span class="v">${(+D.megapixels).toFixed(2)} MP</span></div>
       <div class="kkd-field" data-tip="Extra room around the layer the model sees, as a share of its size"><span>context</span><input type="range" data-df="context" min="0" max="1" step="0.05" value="${esc(D.context)}"><span class="v">${Math.round(D.context * 100)}%</span></div>
       <div class="kkd-field" data-tip="Width of the blended edge around the shape (preview pixels)"><span>edge band</span><input type="range" data-df="band" min="0" max="64" step="1" value="${esc(D.band)}"><span class="v">${esc(D.band)} px</span></div>

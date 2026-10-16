@@ -1838,7 +1838,11 @@ class KUBA_DirectorSequence(io.ComfyNode):
 # ------------------------------------------------------------------------------------------------ diffusion
 # Models the window offers for "diffuse" (resolved against what is installed; first match wins). LoRAs are
 # listed in full; the window puts the ones whose path mentions the preset's size first.
-DIFFUSION_PRESETS = [                # the first one found is the window's default: NVFP4 = 2x faster on Blackwell
+DIFFUSION_PRESETS = [                # the first one found is the window's default
+    # Flux 3 Klein, BFL's step distilled file (cfg 1 from the adapter); 8 steps keep the window quick, 16 = the card's
+    {"name": "flux 3 klein", "unet": ["flux3_image_klein_sd"], "clip": ["qwen3vl_4b_int8", "qwen3vl_4b_bf16"], "type": "flux3",
+     "vae": ["flux2-vae", "flux2_vae"], "steps": 8, "lora_hint": "flux3"},
+    # NVFP4 = 2x faster on Blackwell
     {"name": "klein 4b nvfp4", "unet": ["klein-4b-nvfp4", "klein_4b_nvfp4"], "clip": ["qwen_3_4b_fp4", "qwen_3_4b"], "type": "flux2",
      "vae": ["flux2_full_encoder_small_decoder", "flux2-vae", "flux2_vae"], "steps": 4, "lora_hint": "4b"},
     {"name": "klein 4b", "unet": ["flux-2-klein-4b", "klein_4b", "klein-4b"], "clip": ["qwen_3_4b"], "type": "flux2",
@@ -1929,7 +1933,7 @@ class KUBA_DirectorDiffuse(io.ComfyNode):
                 io.Float.Input("denoise", default=0.6, min=0.0, max=1.0, step=0.01,
                                tooltip="How much changes: 0 = nothing, 1 = painted from scratch inside the mask."),
                 io.Int.Input("steps", default=4, min=1, max=100,
-                             tooltip="Sampling steps (4 suits distilled models such as Flux 2 Klein)."),
+                             tooltip="Sampling steps (4 suits Flux 2 Klein, 8-16 Flux 3 Klein)."),
                 io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF,
                              tooltip="Random seed; another seed gives another variant."),
                 io.Float.Input("megapixels", default=1.0, min=0.1, max=4.0, step=0.05,
