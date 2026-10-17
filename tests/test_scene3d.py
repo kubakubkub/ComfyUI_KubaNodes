@@ -132,6 +132,18 @@ try:
     check("main plane normal faces the camera (-Y)", np.allclose(nrm, [0, -1, 0], atol=1e-4), str(nrm))
     check("main plane is the wall front (y = 0)", abs(float(pt @ nrm)) < 0.02, str(pt))
 
+    # a perfectly flat wall far along the normal (a single box sent live from Houdini): float32 positions
+    flat = dict(scene, position=np.zeros_like(scene["position"]), normal=np.zeros_like(scene["normal"]))
+    flat["position"][..., 1] = 28.0
+    flat["normal"][..., 1] = -1.0
+    try:
+        fpt, fn = si.main_plane(flat)
+        fl, fo = si.shelf_labels((flat["position"] - fpt) @ fn, flat["faceid"] > 0)
+        check("one flat wall far away: main plane and one shelf", abs(float(fpt @ fn) + 28.0) < 1e-3 and len(fo) == 1,
+              f"{fpt} {fo}")
+    except ValueError as e:
+        check("one flat wall far away: main plane and one shelf", False, str(e))
+
     signed = (scene["position"] - pt) @ nrm
     lab, offs = si.shelf_labels(signed, scene["faceid"] > 0, min_share=0.001)
     check("shelves: wall 0, window -0.3, ledge +0.4, kiosk +1.0",

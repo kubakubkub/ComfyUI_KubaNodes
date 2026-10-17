@@ -30,7 +30,7 @@ from comfy_api.latest import io, ui
 from ...kubakub import save_paths as sp
 from ...kubakub import viewer as vw
 from ...kubakub.io_types import ProjectorType, RegionsType, SceneType, ViewerType
-from ...kubakub.scene3d import autocam, bridge, scene_ids, scene_view as sv, surroundings as sr
+from ...kubakub.scene3d import autocam, bridge, live, scene_ids, scene_view as sv, surroundings as sr
 from ...kubakub.types import Regions
 from ...kubakub import imio
 from ...kubakub import samples
@@ -99,6 +99,48 @@ except Exception as _e:  # noqa: BLE001
 
 def _img(a):
     return torch.from_numpy(np.ascontiguousarray(a, dtype=np.float32))[None]
+
+
+LIVE_SOURCES = ("file", *live.APPS)
+
+
+def live_root():
+    return live.folder(kst.get("live_folder", ""))
+
+
+def _live_scene(file, camera, source, width=0, height=0):
+    """
+    source = live blender / live houdini: the scene the open app sends (its kubakub live link) -> dict file, camera,
+    width, height, live_camera, line (the report's first line); nothing sent yet: file "" = the sample building.
+    source = file: the inputs as they are.
+    """
+    out = {"file": file, "camera": camera, "width": width, "height": height, "live_camera": None, "line": ""}
+    app = live.APPS.get(source)
+    if app is None:
+        return out
+    name = live.NAMES[app]
+    ans, note = live.resolve(live_root(), app, kst.number("live_wait", 60))
+    if ans is None:
+        out.update(file="", line=f"live: {note}. To link: {live.HOW_TO[app]}, then press refresh. The sample "
+                                 "building until then.")
+        return out
+    size = ans.get("size") or [0, 0]
+    out.update(file=ans["file"], width=width or int(size[0]), height=height or int(size[1]))
+    if camera.strip():
+        seen = "camera " + camera.strip()                  # a name typed on the node wins
+    else:
+        out["camera"] = ans.get("camera", "")
+        if ans.get("view") and not out["camera"]:
+            if not (out["width"] and out["height"]):
+                raise ValueError(f"{name} sent a view without a frame size: set width and height on the node")
+            out["live_camera"] = live.blender_camera(ans["view"], out["width"], out["height"])
+        seen = ("your viewport view" if ans.get("how") == "viewport"
+                else "camera " + (ans.get("view", {}).get("name") or out["camera"] or "auto"))
+    sent = time.strftime("%H:%M:%S", time.localtime(ans.get("time", 0)))
+    out["line"] = (f"live from {name} {ans.get('version', '')}: {ans.get('source', '?')}, {seen}, sent {sent}"
+                   + (f", frame {out['width']}x{out['height']}" if ans.get("size") and not (width and height) else "")
+                   + (f" ({note})" if note else ""))
+    return out
 
 
 def _depth_vis(depth):
@@ -180,6 +222,12 @@ class KUBA_SceneRender(io.ComfyNode):
                                     tooltip="From kubakub projector: where the projector stands (metres from the wall, "
                                             "height, throw). Used instead of the file's camera; set width / height to "
                                             "the projector's resolution."),
+                io.Combo.Input("source", options=list(LIVE_SOURCES), default="file", optional=True,
+                               tooltip="file: the path in 'file'. live blender / live houdini: the scene open in that "
+                                       "app right now (its kubakub live link, tools/blender or tools/houdini): press "
+                                       "refresh on this node and the app sends the scene as it is, seen from your "
+                                       "viewport (or the camera you look through; a name in 'camera' wins). Your scene "
+                                       "file is not saved or changed."),
             ],
             outputs=[
                 io.Image.Output("clay", tooltip="Workbench clay render from the projection camera."),
@@ -200,6 +248,14 @@ class KUBA_SceneRender(io.ComfyNode):
     @classmethod
     def fingerprint_inputs(cls, file="", **kwargs):
         h = hashlib.sha256(json.dumps(kwargs, sort_keys=True, default=str).encode())
+        live_camera = None
+        try:
+            L = _live_scene(file, kwargs.get("camera") or "", kwargs.get("source", "file"),
+                            int(kwargs.get("width") or 0), int(kwargs.get("height") or 0))
+            file, live_camera = L["file"], (None if kwargs.get("projector") else L["live_camera"])
+            kwargs.update(camera=L["camera"], width=L["width"], height=L["height"])
+        except Exception as e:  # noqa: BLE001  (execute reports it)
+            h.update(f"live error {e} {time.time()}".encode("utf-8", "replace"))
         p = bridge.clean_path(file) or samples.model(folder_paths.get_temp_directory())   # as in execute
         try:
             st = os.stat(p)
@@ -209,7 +265,8 @@ class KUBA_SceneRender(io.ComfyNode):
             folder = bridge.cache_folder(p, cache_root(),
                                          (kwargs.get("camera") or "").strip(), int(kwargs.get("width") or 0),
                                          int(kwargs.get("height") or 0), int(kwargs.get("frame", -1)),
-                                         float(kwargs.get("unit_scale") or 1.0), projector=kwargs.get("projector"))
+                                         float(kwargs.get("unit_scale") or 1.0), projector=kwargs.get("projector"),
+                                         live_camera=live_camera)
             ok = os.path.isfile(os.path.join(folder, "scene.json")) and any(
                 f.startswith("ids_") for f in os.listdir(folder))
             h.update(bridge.folder_token(folder, ok))
@@ -220,14 +277,20 @@ class KUBA_SceneRender(io.ComfyNode):
     @classmethod
     def execute(cls, file, width, height, frame, passes, preview_pass, shelf_min_step_m, plane_angle_deg,
                 plane_offset_m, layer_bands_m, camera="", save_folder="", blender_path="",
-                unit_scale=1.0, min_size_m=0.5, projector=None) -> io.NodeOutput:
+                unit_scale=1.0, min_size_m=0.5, projector=None, source="file") -> io.NodeOutput:
         t0 = time.perf_counter()
+        L = _live_scene(file, camera, source, width, height)
+        file, camera, width, height, live_camera, live_line = (L["file"], L["camera"], L["width"], L["height"],
+                                                               L["live_camera"], L["line"])
+        if projector:                                  # a connected projector wins over the app's view
+            live_camera = None
         projector = autocam.spec(projector) if projector else None
         sample = not bridge.clean_path(file)
         if sample:                                     # nothing pasted yet: the sample building
             file = samples.model(folder_paths.get_temp_directory())
         folder, cached, _ = bridge.export(file, cache_root(), camera=camera.strip(), width=width, height=height,
-                                          frame=frame, blender=blender_path, unit_scale=unit_scale, projector=projector)
+                                          frame=frame, blender=blender_path, unit_scale=unit_scale, projector=projector,
+                                          live_camera=live_camera)
         t_export = time.perf_counter() - t0
         wanted = [p for p in passes.replace(",", " ").split() if p]
         bad = [p for p in wanted if p not in scene_ids.PASSES]
@@ -289,6 +352,7 @@ class KUBA_SceneRender(io.ComfyNode):
         export_txt = ("cached" if cached else
                       f"{t_export:.1f} s (Blender {info['blender']}, Cycles {info.get('cycles_device', '?')})")
         report = "\n".join([
+            *([live_line] if live_line else []),
             f"{os.path.basename(info['file'])}: {info['faces']} faces, {len(info['objects'])} objects, "
             f"{info['width']}x{info['height']}, model covers {summary['coverage'] * 100:.0f} %",
             f"camera {cam['name']} ({cam['how']}), {cam['type']} {cam['lens_mm']:.1f} mm, shift "
@@ -299,7 +363,7 @@ class KUBA_SceneRender(io.ComfyNode):
             f"ID passes: {passes_txt}",
             f"export {export_txt}, ID passes {'reused' if reused else 'built'}, total {time.perf_counter() - t0:.1f} s",
             f"folder: {ids_dir}", *summary["notes"], *info.get("notes", []),
-            *([samples.note("3D file", "file")] if sample else [])])
+            *([samples.note("3D file", "file")] if sample and not live_line else [])])
         size = np.array(info["bbox_max"]) - np.array(info["bbox_min"])
         if size.max() < 2.0 or size.max() > 2000.0:
             report += (f"\nWARNING: the model is {size.max():.3g} m at its largest - wrong units? Distances need "
@@ -308,7 +372,7 @@ class KUBA_SceneRender(io.ComfyNode):
         preview = _img(prev)
         scene_out = {"folder": folder, "ids": ids_dir, "file": info["file"], "blender": blender_path,
                      "unit_scale": float(unit_scale), "frame": int(frame), "camera": camera.strip(),
-                     "projector": projector}
+                     "projector": projector, "live_camera": live_camera}
         return io.NodeOutput(_img(clay), preview, _img(_depth_vis(depth)), _img(nrm),
                              torch.from_numpy(fg.astype(np.float32))[None], ids_dir,
                              json.dumps(info, indent=1), report, scene_out, _img(_depth_gray(depth)),

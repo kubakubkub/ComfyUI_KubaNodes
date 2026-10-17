@@ -20,6 +20,8 @@
 # blender =                   # path to blender.exe (empty = found in Program Files or on PATH)
 # blender_worker = on         # keep one Blender process loaded between jobs (off = start it for every job)
 # blender_idle = 600          # seconds an idle Blender process stays loaded
+# live_folder =               # scene render source = live blender / houdini: the hand-off folder (empty = ~/kubakub_live)
+# live_wait = 60              # seconds a refresh waits for the app to answer
 # Network (the only node that uses it: scene surroundings, one request per new place on the map):
 # surroundings_download = on  # allow it (off by default): the node sends the place's coordinates and radius to
 #                             # overpass-api.de (OpenStreetMap) and, for terrain = real heights, asks the open

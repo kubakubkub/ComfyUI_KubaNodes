@@ -188,9 +188,9 @@ def main_plane(scene, bin_m=0.01):
     nrm /= np.linalg.norm(nrm)
     if nrm @ -fwd < 0:
         nrm = -nrm
-    s = p[members] @ nrm
+    s = (p[members] @ nrm).astype(np.float64)       # float32 would swallow the pad of a perfectly flat wall
     lo, hi = float(s.min()), float(s.max())
-    hist, edges = np.histogram(s, bins=max(1, int(np.ceil((hi - lo) / bin_m))), range=(lo, hi + 1e-9))
+    hist, edges = np.histogram(s, bins=max(1, int(np.ceil((hi - lo) / bin_m))), range=(lo, hi + 1e-6))
     k = int(np.argmax(np.convolve(hist, [1, 2, 1], mode="same") if len(hist) >= 3 else hist))   # one flat wall: 1 bin
     peak = (edges[k] + edges[k + 1]) / 2
     near = np.abs(s - peak) <= 1.5 * bin_m
@@ -213,10 +213,10 @@ def shelf_labels(signed, fg, min_sep_m=0.05, min_share=0.002, max_shelves=16, bi
     distance to the main plane (at least min_sep_m apart, each holding min_share of the pixels);
     every pixel goes to the nearest shelf.
     """
-    s = signed[fg]
+    s = signed[fg].astype(np.float64)
     lo, hi = float(s.min()), float(s.max())
     nb = max(1, int(np.ceil((hi - lo) / bin_m)))
-    hist, edges = np.histogram(s, bins=nb, range=(lo, hi + 1e-9))
+    hist, edges = np.histogram(s, bins=nb, range=(lo, hi + 1e-6))
     centres = (edges[:-1] + edges[1:]) / 2
     sm = np.convolve(hist, np.ones(3) / 3, mode="same")
     peaks = [i for i in np.argsort(-sm) if sm[i] > 0]

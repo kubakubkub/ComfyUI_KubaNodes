@@ -47,6 +47,46 @@ already read. Example: `example_workflows/scene3d_to_regions.json`.
   scaled into metres; the report warns when a model is under 2 m or over 2 km.
 - The last output `scene` feeds the two nodes below.
 
+### Live from Blender or Houdini: model, press refresh
+
+Instead of a file path, the scene that is open in Blender or Houdini right now: you model, move the view, press
+**refresh from blender** / **refresh from houdini** on the node, and everything after it runs on the new state.
+
+**Blender**
+1. Edit > Preferences > Add-ons > Install from Disk > `tools/blender/kubakub_live.py` (in this pack), tick
+   **kubakub live**. The 3D view's sidebar (N) gets a **kubakub** tab with the link state and a *send now* button.
+2. In ComfyUI: on kubakub scene render set **`source` = live blender** (the `file` field hides, a **refresh from
+   blender** button appears). Press it.
+3. Blender saves a copy of the scene into the live folder (your .blend is not saved, renamed or changed) and
+   answers; the node renders that copy.
+
+**Houdini**
+1. Once: run `python_embeded\python.exe ComfyUI\custom_nodes\ComfyUI_KubaNodes\tools\houdini\install_houdini_link.py`
+   (asks per Houdini version found in Documents; writes `packages/kubakub_live.json` there, nothing else;
+   `--remove` takes it out again). Restart Houdini, then shelf tab **+** > Shelves > **kubakub**.
+2. Per session: press **comfy link** on the kubakub shelf (press it again to stop; the status bar says the state).
+3. In ComfyUI: `source` = **live houdini**, press **refresh from houdini**. Houdini writes what /obj displays at the
+   current frame as Alembic (hidden objects are left out; your .hip is not saved) and sends the view.
+   The export uses a temporary Alembic ROP in /out that is removed again; Houdini may still mark the .hip as changed.
+
+- **Camera**: `camera` empty = what you look through: the viewport view (perspective or orthographic, with the
+  viewport's field of view along the render's long side), or the camera you look through (Blender: Numpad 0;
+  Houdini: the viewport's camera menu, with its focal length, aperture, resolution and screen window offset). A
+  camera name in `camera` wins; a connected projector wins over both.
+- **Frame size**: Blender = the scene's render resolution; Houdini = the camera's resolution, or for a viewport view
+  the viewport's shape at 1920 across (the report says it). `width` / `height` on the node win.
+- **Nothing changed** since the last refresh (no edit, same view, frame and size) = the app answers with the same
+  copy, so the node and everything after it come from the cache. A change = a new copy (the last 3 are kept).
+- **App closed** (or the link off): the scene as it was last sent, said in the report; nothing sent yet = the
+  sample building with a note. The app busy for longer than `live_wait` seconds (e.g. rendering): the last copy,
+  with a note. Blender and Houdini can be open at the same time: each answers only its own refresh.
+- The link is files in one local folder, no network and no port: `live_folder` in kubakub.ini (default
+  `~/kubakub_live`, i.e. your user folder); Blender's add-on preferences name the same folder, the Houdini
+  installer copies the setting into the package. The report's first line says where the scene came from (app,
+  file, viewport or camera, time of sending).
+- Cinema 4D: not yet (it can answer the same files, see `kubakub/scene3d/live.py`).
+- Model free test: `tests/test_live.py` (fake apps answer through the folder).
+
 ### Architecture passes: windows, columns, left / centre / right, floors
 
 Three passes of kubakub scene render group the facade the way you talk about it (no AI model, from the 3D

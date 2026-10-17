@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<shelfDocument>
+  <!-- kubakub live: link Houdini to kubakub scene render in ComfyUI (source = live houdini) -->
+  <toolshelf name="kubakub" label="kubakub">
+    <memberTool name="kubakub_comfy_link"/>
+    <memberTool name="kubakub_send_now"/>
+  </toolshelf>
+
+  <tool name="kubakub_comfy_link" label="comfy link" icon="SHELF_link">
+    <helpText><![CDATA[Turns the link to ComfyUI on or off. While on, a refresh on kubakub scene render (source = live houdini) gets what /obj displays and your viewport view.]]></helpText>
+    <script scriptType="python"><![CDATA[import kubakub_live
+kubakub_live.toggle()]]></script>
+  </tool>
+
+  <tool name="kubakub_send_now" label="send now" icon="SHELF_export">
+    <helpText><![CDATA[Sends the scene and the view now; ComfyUI's next refresh uses it even when the link is off.]]></helpText>
+    <script scriptType="python"><![CDATA[import kubakub_live
+kubakub_live.send_now()]]></script>
+  </tool>
+</shelfDocument>

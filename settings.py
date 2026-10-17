@@ -12,6 +12,8 @@ Pack settings with plain names, in kubakub.ini next to this file (the same file 
     blender =                   # blender.exe (empty = Program Files / PATH)
     blender_worker = on         # keep one Blender process loaded between jobs
     blender_idle = 600          # seconds before that process quits
+    live_folder =               # scene render source = live blender / houdini: the hand-off folder (empty = ~/kubakub_live)
+    live_wait = 60              # seconds a refresh waits for the app's answer
     save_anywhere = off         # on: save_folder inputs may name any folder (off = inside ComfyUI/output)
     remote_paths = off          # on: with --listen the director's routes still read files by path
 

@@ -746,6 +746,22 @@ def main(job=None):
         loc, look = on_ground(Vector(view["location"])), Vector(view["look_at"])
         rot = (look - loc).to_track_quat("-Z", "Y").to_matrix().to_4x4()
         cmat = Matrix.Translation(loc) @ rot
+    elif job.get("live_camera"):                      # what the user looks through in the open 3D app (live.py)
+        L = job["live_camera"]
+        how = "live"
+        cam_name = L.get("name") or "live view"
+        cdata = bpy.data.cameras.new("kuba_live")
+        cdata.type = "ORTHO" if L.get("type") == "ORTHO" else "PERSP"
+        cdata.sensor_width = cdata.sensor_height = 36.0
+        cdata.sensor_fit = L.get("sensor_fit", "HORIZONTAL")
+        if cdata.type == "ORTHO":
+            cdata.ortho_scale = float(L["ortho_scale"]) * unit_scale
+        else:
+            cdata.lens = float(L["lens"])
+        cdata.shift_x, cdata.shift_y = float(L.get("shift_x", 0.0)), float(L.get("shift_y", 0.0))
+        cdata.clip_start, cdata.clip_end = 0.05, 100000.0
+        cmat = S @ Matrix([list(map(float, row)) for row in L["matrix"]])
+        cam_copy = None                                   # not an import: no lens shift flip
     elif projector:
         how = "projector"
         cam_name = projector.get("name") or "projector"
@@ -930,7 +946,7 @@ LOADED = {}
 
 def _scene_key(job):
     return json.dumps([job.get("file"), job.get("camera"), job.get("frame"), job.get("unit_scale"), job.get("view"),
-                       job.get("projector"), job.get("surroundings")])
+                       job.get("projector"), job.get("surroundings"), job.get("live_camera")])
 
 
 def serve(idle_s=600.0):
