@@ -4,6 +4,60 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## 0.5.0 (2026-10-18)
+
+Flux 3 Klein, and your 3D app live: paint the whole facade in one pass that knows where each material goes, and
+take the scene open in Blender or Houdini straight into scene render.
+
+**Behaves differently than in 0.4.0:**
+- **A typo in `which regions` stops the node in every node.** The region sampler, versions, the region video
+  sampler and regions to svg / pdf / dxf read the field like all the others now: a text that cannot be read or
+  matches no region stops with a message listing the regions there are. Before, some of them silently painted
+  nothing. The video sampler still runs when the regions are found but none of them is animated, and says so.
+
+**Known limits:**
+- The live link is for Blender (4.2 or newer) and Houdini; Cinema 4D is not done yet. Houdini may mark the .hip as
+  changed after a refresh (a temporary Alembic node is added and removed in /out).
+- The boxes of the first pass are a Flux 3 feature: Flux 2 Klein and Qwen Image get the plan's prompts as one list.
+- The prompt upsampler words its instructions differently from run to run, so the same settings can give paler or
+  richer results; keep the run you like (the instruction is in the report).
+
+- **Flux 3 Klein in the region sampler.** Detected from the model, with the crop and a style picture as
+  references. BFL's step distilled file `flux3_image_klein_sd_int8_convrot` is the one to start with (8-20
+  steps); the base file works alone (50 steps, more atmosphere) or with a distill LoRA. About 9 s a region on a
+  12 GB laptop GPU. The director has a *flux 3 klein* preset.
+- **One pass for the whole facade, each material in its place.** `first_pass` on the region sampler edits the
+  whole picture once from the plan's prompts. With Flux 3 every prompt is tied to the boxes of its regions, so the
+  glass goes into the windows and the copper onto the pilasters, and the boxes come from your regions (nothing to
+  type). The new input **after first pass** either lets every region refine it (the detail) or stops there:
+  *whole picture only* paints a 75 region facade in under a minute instead of twenty. Only the painted regions
+  change; `keep` regions and the black stay exact.
+- **A prompt upsampler.** Connect `qwen3.5_9b_flux3_prompt_upsampler` (Load CLIP, type flux3) to the region
+  sampler: every short region prompt becomes a full instruction written while looking at the region's crop.
+  "make the windows stained glass" left Flux 3 cold, the upsampled instruction changed every window.
+- **Live from Blender or Houdini.** On kubakub scene render, `source` = *live blender* / *live houdini* and a
+  **refresh** button: the scene as it is open right now, seen through your viewport or a camera you pick from a
+  list. Only the scene render runs on refresh; nothing changed = from the cache. Centimetre and millimetre scenes
+  are found (`unit_scale` 0 = auto). Install the Blender add-on or the Houdini package once:
+  [docs/live-link.md](docs/live-link.md), step by step. Nothing goes over the network: the link is files in one
+  folder.
+- **Paste an OSL shader.** kubakub shader takes a pattern shader written for Cycles, Houdini, Arnold or RenderMan:
+  its inputs become sliders and colours, and a mistake names the line of your OSL text.
+- **Video with any LTX or H3 model.** The region video sampler, motion guide and keyframe clips see the family
+  from the model and the schedule from the file names (dev or distilled LTX, H3 fl2va / ref2va, step LoRAs), with
+  schedule and steps as widgets.
+- **Tidier nodes: fine-tuning folds away.** On the classic canvas every kubakub node folds its fine-tuning inputs
+  (sampler names, seed offsets, scales ...) behind one **more settings (n)** row; click it to open them. An input
+  you changed from its default, or one with a cable, always stays visible, so nothing that changes the result is
+  hidden; open or closed is saved per node in the workflow. Nodes 2.0 (Vue nodes) use their own *Show advanced
+  inputs* instead.
+- **`which regions`: one reading everywhere.** Comma or Enter = or in every field, and a name or tag with spaces
+  (`ground door`, `tag:floor 1`) is found as a whole in every node.
+- **Fixes.** The spot plan keeps its notes; a sound start past the sound's end no longer fails; one still image
+  works as video material; the pick regions list is per workflow and sees into subgraphs; the live link no longer
+  trips over a file the other side is reading at that moment (Windows); a flat wall no longer breaks the ID passes
+  of scene render.
+
 ## 0.4.0 (2026-10-13)
 
 Shaders, and less to type: moving pictures drawn by a shader, as a mask, a fill or the material your regions are

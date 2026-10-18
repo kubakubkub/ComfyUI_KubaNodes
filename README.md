@@ -13,22 +13,18 @@ regions of starter 01 connected):
 
 ## What's new
 
-**0.4.0**, shaders, and less to type:
-- **Shaders.** *kubakub shader* draws moving pictures and masks: 74 presets sorted by type, each with sliders
-  under **adjust**, your own code or a pasted Shadertoy, 3D scenes with a depth output. Draw an arrow on the node
-  for the direction. *kubakub shader mix* fades between two of them.
-- **A shader as the material of your regions.** Connect a shader to the region sampler and Flux 2 Klein or Qwen
-  Image paints along its forms; in video each region moves as its shader moves. Shaders can read your regions:
-  a colour, a pace or a pattern per window.
-- **A prompt per region with nothing to type but the prompt.** *kubakub region prompt*: pick the regions, write
-  the prompt, set strategy and denoise as fields; chain several. The **pick regions** button under every
-  `which regions` field lists your groups, floors and names.
-- **One sound for every node that listens.** *kubakub sound* holds the sound and its tempo; masks, shaders and
-  mask swaps step on the same beat.
-- **From a generated 3D model to the wall.** *kubakub align 3d model*, *kubakub form height* and *kubakub height
-  animate*: place a model from an image-to-3D workflow on your facade and let its forms grow out of the wall.
-- **Fewer nodes, faster Qwen.** Six small nodes became settings of another (saved workflows still run), and the
-  Qwen example uses the 8 step turbo model.
+**0.5.0**, Flux 3 Klein, and your 3D app live:
+- **Flux 3 Klein in the region sampler**, with the crop and a style picture as references, about 9 s a region on
+  a 12 GB laptop GPU; a *flux 3 klein* preset in the director.
+- **The whole facade in one pass, each material in its place.** `first_pass` with Flux 3 tells the model which
+  regions each prompt is for (boxes taken from your regions). *after first pass = whole picture only* paints a
+  75 region facade in under a minute; or let every region refine it for the full detail.
+- **A prompt upsampler** turns your short region prompts into full instructions while it looks at each crop.
+- **Live from Blender or Houdini.** kubakub scene render takes the scene open in your app, through your viewport
+  or a camera from a list; press refresh. Installing the add-ons: [docs/live-link.md](docs/live-link.md).
+- **Tidier nodes:** the fine-tuning inputs fold behind one *more settings* row (changed ones stay visible).
+- **Paste an OSL shader** into kubakub shader; **video with any LTX or H3 model**; and every `which regions`
+  field reads your text the same way and names the regions when a typo matches none.
 
 Everything that changed, version by version: [CHANGELOG.md](CHANGELOG.md). Updates arrive through ComfyUI Manager
 (*Update*) or `git pull`; a problem or a wish: [open an issue](https://github.com/kubakubkub/ComfyUI_KubaNodes/issues).
