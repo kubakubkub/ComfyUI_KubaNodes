@@ -31,6 +31,7 @@ from ...kubakub.io_types import PlanType
 log = logging.getLogger("KUBA.regions")
 
 CATEGORY = "kubakub/2d/generate"
+AFTER_FIRST_PASS = ("regions refine it", "nothing: whole picture only")
 
 
 def only_filter(text: str):
@@ -134,7 +135,17 @@ class KUBA_RegionSampler(io.ComfyNode):
                                        "(1.0 = a full edit) from one instruction made of the plan's prompts, with the "
                                        "picture as reference, and pasted where the painted regions are; then every "
                                        "region refines it at its own denoise (0.5 works well). One coherent picture "
-                                       "first, the detail from the regions."),
+                                       "first, the detail from the regions. Flux 3 Klein is told where each prompt "
+                                       "goes: the boxes of its regions (its layout table), so the window prompt "
+                                       "lands in the windows and the wall prompt on the wall."),
+                io.Combo.Input("after_first_pass", display_name="after first pass", options=list(AFTER_FIRST_PASS),
+                               default=AFTER_FIRST_PASS[0], optional=True,
+                               tooltip="Only with first_pass above 0. 'regions refine it': every painted region is "
+                                       "then sampled from its crop at its own denoise (the detail; ~10 s each). "
+                                       "'nothing: whole picture only': the first pass is the result, one sample for "
+                                       "the whole facade (fast, one light, nothing stitched; the plan's per-region "
+                                       "denoise is not used, first_pass is the one denoise). Either way only the "
+                                       "painted regions change; keep regions and the black stay pixel exact."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The image with all processed regions pasted in."),
@@ -148,7 +159,7 @@ class KUBA_RegionSampler(io.ComfyNode):
     def execute(cls, model, clip, vae, plan, image, steps, cfg, sampler_name, scheduler, region_mp,
                 max_upscale, schedule="auto", only="", seed_offset=0, adapter="auto",
                 style=None, material_at=0.3, material=None, change=None, upsampler=None,
-                first_pass=0.0) -> io.NodeOutput:
+                first_pass=0.0, after_first_pass=None) -> io.NodeOutput:
         ad = adapters.make_adapter(model, clip, vae, adapter)
         ad.set_schedule(schedule)
         log.info("[KUBA regions] sampler: adapter %s, grid %d px, schedule %s", ad.family, ad.grid, ad.schedule)
@@ -174,9 +185,13 @@ class KUBA_RegionSampler(io.ComfyNode):
                          "it is not used. Write 'reference = style' into the plan.")
         elif style is not None:
             notes.append(f"style image used by {len(want_style)} region(s)")
+        whole_only = after_first_pass == AFTER_FIRST_PASS[1]
+        if whole_only and not first_pass:
+            notes.append("'after first pass' says whole picture only, but first_pass is 0 (off): the regions are "
+                         "sampled one by one. Set first_pass (e.g. 0.8) for one pass over the whole picture.")
         for n in notes:
             log.info("[KUBA regions] sampler: %s", n)
-        stop = comfy.model_management.throw_exception_if_processing_interrupted
+        stop =comfy.model_management.throw_exception_if_processing_interrupted
         rw, rh = plan.regions.size
         mat = ma.Prepared(image)
         if (image.shape[2], image.shape[1]) == (rw, rh):      # a wrong size is said by run_plan
@@ -198,7 +213,7 @@ class KUBA_RegionSampler(io.ComfyNode):
             ad, mat.canvas, plan, settings, only=pick,
             progress=(lambda i, n: pbar.update_absolute(i, n)) if pbar else None,
             check_interrupt=stop, change=mat.change, material=mat.reference, upsampler=upsampler,
-            first_pass=float(first_pass or 0.0))
+            first_pass=float(first_pass or 0.0), regions_after=not whole_only)
         report = (f"adapter {ad.family}, grid {ad.grid}, schedule {ad.schedule}; cache {rc.RESULTS.stats()}\n"
                   + st.results_report(results) + "".join(f"\n{line}" for line in mat.lines)
                   + "".join(f"\nnote: {n}" for n in notes))

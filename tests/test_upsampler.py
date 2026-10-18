@@ -155,9 +155,78 @@ def test_first_pass():
     check("nothing painted: no first pass", not fa3.calls)
 
 
+def test_boxes():
+    """Flux 3: the first pass ties every prompt to the boxes of its regions; 'whole picture only' stops there."""
+    import json
+    up.CACHE = up.Instructions()
+    two = RULES + "[region:2]\nprompt = blue glass\n"
+    entries = plan_of(two).plan["regions"]
+    sentence, table = st.box_instruction(entries, [1, 2], 480, 270)
+    rows = json.loads(table)
+    check("box table: one row per region, in Flux 3's format", [r["id"] for r in rows] == ["obj_1", "obj_2"]
+          and rows[0]["desc"] == "red glass" and rows[1]["desc"] == "blue glass", table)
+    check("... bbox = [ymin, xmin, ymax, xmax] on 0..1000", rows[0]["bbox"] == [222, 167, 519, 333], str(rows[0]))
+    check("the sentence ties each prompt to its boxes", "<obj_1> becomes red glass" in sentence
+          and "<obj_2> becomes blue glass" in sentence and "Keep the rest unchanged" in sentence, sentence)
+    # many regions: one prompt's boxes that share a row are merged, so the table stays short
+    many = [{"prompt": "glass", "bbox": [10 + 30 * i, 100 + 200 * (i % 2), 20, 40]} for i in range(60)]
+    boxes = st.layout_boxes(many, list(range(60)))
+    check("60 windows in 2 rows: 2 row boxes", len(boxes) == 1 and len(boxes[0][1]) == 2, str(boxes))
+    check("... each the union of its row", boxes[0][1][0] == [10, 100, 10 + 30 * 58 + 20, 140], str(boxes[0][1][0]))
+    tall = many + [{"prompt": "glass", "bbox": [0, 0, 8, 400]}]       # a pilaster over both rows
+    tb = st.layout_boxes(tall, list(range(61)))[0][1]
+    check("a tall box does not swallow the rows it crosses", len(tb) == 3 and [0, 0, 8, 400] in tb, str(tb))
+    few = st.layout_boxes(many[:10], list(range(10)))
+    check("10 windows stay 10 boxes", len(few[0][1]) == 10)
+
+    fa = seq.FakeAdapter()
+    fa.family = "flux3"
+    img = seq.canvas_img()
+    out, _, results = st.run_plan(fa, img, plan_of(two), st.SamplerSettings(), first_pass=1.0)
+    first = fa.calls[0]["prompt"]
+    check("Flux 3 first pass: the instruction carries the box table", '"bbox"' in first and "<obj_2>" in first, first)
+    check("... then the regions refine it", len(fa.calls) == 3)
+    fa2 = seq.FakeAdapter()
+    fa2.family = "flux3"
+    out2, changed2, r2 = st.run_plan(fa2, img, plan_of(two), st.SamplerSettings(), first_pass=1.0, regions_after=False)
+    check("whole picture only: one sample, no region crops", len(fa2.calls) == 1, str(len(fa2.calls)))
+    win = torch.ones(270, 480, dtype=torch.bool)
+    win[60:140, 80:160] = False
+    win[60:140, 320:400] = False
+    check("... keep regions stay pixel exact", torch.equal(out2[0][win], img[0][win]))
+    check("... the painted regions changed", float(changed2[0, 100, 120]) == 1.0)
+    rep = st.results_report(r2)
+    check("... the report says the regions were painted by the first pass alone",
+          "2 painted by the first pass alone" in rep and "in pass" in rep, rep)
+    # the change map: black stays pixel exact in the first pass too
+    change = torch.ones(1, 270, 480)
+    change[:, :, 300:] = 0.0
+    fa3 = seq.FakeAdapter()
+    fa3.family = "flux3"
+    out3, _, _ = st.run_plan(fa3, img, plan_of(two), st.SamplerSettings(), first_pass=1.0, regions_after=False,
+                             change=change)
+    check("change map black: the first pass leaves it as it is", torch.equal(out3[0, :, 300:], img[0, :, 300:]))
+    # an upsampler that drops the box names: the plan's sentence is used, the report says so
+    fu = FakeUpsampler()
+    fu.decode = lambda ids: "a facade with glass windows"
+    fa4 = seq.FakeAdapter()
+    fa4.family = "flux3"
+    _, _, r4 = st.run_plan(fa4, img, plan_of(two), st.SamplerSettings(), first_pass=1.0, regions_after=False,
+                           upsampler=fu)
+    check("upsampler lost the box names: the plan's sentence with the table is used",
+          fa4.calls[0]["prompt"].startswith("In <ref_image_0>, change only") and '"bbox"' in fa4.calls[0]["prompt"])
+    check("... and the report says so", "lost box names" in st.results_report(r4))
+    check("the upsampler is asked about the sentence only (the table is appended after)",
+          '"bbox"' not in fu.asked[0]["prompt"] and "<obj_1>" in fu.asked[0]["prompt"])
+    fa5 = seq.FakeAdapter()                     # Flux 2 / Qwen: no layout table
+    st.run_plan(fa5, img, plan_of(two), st.SamplerSettings(), first_pass=1.0)
+    check("other models: no box table", '"bbox"' not in fa5.calls[0]["prompt"])
+
+
 test_expand()
 test_regions()
 test_first_pass()
+test_boxes()
 print()
 print("FAILED: " + ", ".join(failures) if failures else "all upsampler tests passed")
 sys.exit(1 if failures else 0)

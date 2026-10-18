@@ -157,7 +157,8 @@ details like vines), `none` lets the region be freely repainted inside its mask
 | change | optional | a mask: how much each place of a painted region may change, e.g. the `masks` of a kubakub shader |
 | material_at (advanced) | 0.3 | a clip on `material` or `change`: which of its frames is used, 0 = the first, 1 = the last |
 | upsampler | optional | a prompt upsampler (Load CLIP: `qwen3.5_9b_flux3_prompt_upsampler_w4a8`, type `flux3`): every painted region's short prompt becomes a full instruction while it looks at the region's crop (and the style picture when `reference = style`); the first pass's instruction while it looks at the whole picture. The instructions are in the report and kept for the session, so a queue only asks for new ones (about 6-9 s each) |
-| first_pass | 0 | 0 = off. Above 0: the whole picture is first edited once at this denoise from one instruction made of the plan's prompts, with the picture as reference, and pasted where the painted regions are; then every region refines it at its own denoise. See *Flux 3 Klein* below |
+| first_pass | 0 | 0 = off. Above 0: the whole picture is first edited once at this denoise from one instruction made of the plan's prompts, with the picture as reference, and pasted where the painted regions are; then every region refines it at its own denoise. Flux 3 is told where each prompt goes (the boxes of its regions). See *Flux 3 Klein* below |
+| after first pass | regions refine it | only with first_pass above 0. *regions refine it*: then every painted region is sampled from its crop at its own denoise (the detail, ~10 s a region). *nothing: whole picture only*: the first pass is the result, one sample for the whole facade (~45 s; the plan's per-region denoise is not used). Either way only the painted regions change, `keep` regions and black on the `change` map stay pixel exact |
 
 Without a `style` image, regions with `reference = style` use their own crop
 (`reference = self`); the report names how many. The report also says when a
@@ -255,6 +256,23 @@ Flux 3 keeps the geometry of an edited picture exactly (every window, door and t
 where they are), so `first_pass = 1.0` followed by regions at 0.5 gives one coherent picture with the detail of the
 regions. With the upsampler connected short prompts work: a plain "make the windows stained glass" left the windows
 alone, the upsampled instruction changed every one of them.
+
+**Where each prompt goes (Flux 3).** The first pass does not just list the plan's prompts: every prompt is tied to
+the boxes of its regions, in Flux 3's layout format (the one the core node *FLUX.3 Layout Prompt* writes: `<obj_1>
+<obj_2> become stained glass; <obj_9> becomes copper` and a table of boxes on 0..1000). The boxes come from the
+regions, you never type coordinates. Many regions (more than 48 boxes): the boxes of one prompt that share a floor
+and have about the same height become one row box, so a row of windows is one box and a pilaster over all floors
+keeps its own. The report says how many boxes were used; with the upsampler, it rewrites the sentence and the table
+is added after it (if its text loses a box name, the plan's sentence is used and the report says so).
+
+Test on a real facade matrix (2026-10-18, sd int8, 75 regions, 4 prompts: glass, marble frames, copper pilasters,
+ochre wall; first_pass 1.0, *whole picture only*): 30-60 s for the whole facade instead of 21 min region by region.
+Each material landed on its own parts (the portals carved marble as the plan says; without boxes they had turned
+copper), the black stayed black. At `region_mp` 1.0 the facade is made at 1360x768 and scaled to the matrix, so
+for a 4K matrix use 2.0 (1936x1088, about 45 s on 12 GB) or let the regions refine it for the full detail. The
+upsampler's wording changes from run to run: once the richest coloured glass, once paler glass with whiter marble.
+A good way of working: *whole picture only* for variations of the whole facade (a minute each), then the chosen
+one with *regions refine it*.
 
 ## Qwen Image 2.1 in the region sampler
 

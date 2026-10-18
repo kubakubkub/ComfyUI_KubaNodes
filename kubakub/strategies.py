@@ -19,6 +19,7 @@ drive this with a fake adapter and no model.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import time
@@ -249,22 +250,93 @@ def first_pass_instruction(entries: list, rids: list, family: str = "") -> str:
     return f"{head} the materials and details and keep the geometry exactly: " + "; ".join(prompts) + ". " + KEEP
 
 
+MAX_BOXES = 48      # a longer layout table: the boxes of one prompt that share a row are merged
+
+
+def _row_merge(boxes: list) -> list:
+    """Boxes [x0, y0, x1, y1] of about the same height (at most 1.5 x) that overlap by half of that height
+    vertically = one row: their union. A tall box (a pilaster over all floors) never swallows a row of short ones."""
+    rows: list = []
+    for b in sorted(boxes, key=lambda b: (b[1] + b[3]) / 2):
+        for r in rows:
+            hr, hb = r[3] - r[1], b[3] - b[1]
+            if (max(hr, hb) <= 1.5 * min(hr, hb)
+                    and min(r[3], b[3]) - max(r[1], b[1]) >= 0.5 * min(hr, hb)):
+                r[:] = [min(r[0], b[0]), min(r[1], b[1]), max(r[2], b[2]), max(r[3], b[3])]
+                break
+        else:
+            rows.append(list(b))
+    return sorted(rows, key=lambda r: (r[1], r[0]))
+
+
+def layout_boxes(entries: list, rids: list, cap: int = MAX_BOXES) -> list:
+    """[(prompt, [[x0, y0, x1, y1] in pixels, ...]), ...]: each distinct prompt once in plan order with the boxes of
+    its regions; above `cap` boxes, the boxes of one prompt that share a row become one, then one per prompt."""
+    groups: dict = {}
+    for r in rids:
+        p = entries[r]["prompt"].strip().rstrip(".")
+        x, y, w, h = (int(v) for v in entries[r]["bbox"])
+        if p and w > 0 and h > 0:
+            groups.setdefault(p, []).append([x, y, x + w, y + h])
+    out = [(p, sorted(b, key=lambda b: (b[1], b[0]))) for p, b in groups.items()]
+    if sum(len(b) for _, b in out) > cap:
+        out = [(p, _row_merge(b)) for p, b in out]
+    if sum(len(b) for _, b in out) > cap:
+        out = [(p, [[min(v[0] for v in b), min(v[1] for v in b), max(v[2] for v in b), max(v[3] for v in b)]])
+               for p, b in out]
+    return out
+
+
+def box_instruction(entries: list, rids: list, W: int, H: int) -> tuple[str, str]:
+    """Flux 3's layout format (as the core node FLUX.3 Layout Prompt writes it): a sentence that ties every prompt to
+    its boxes <obj_N>, and the table [{"id", "bbox": [ymin, xmin, ymax, xmax] on 0..1000, "desc"}].
+    -> (sentence, table as JSON text); the instruction is sentence + ' ' + table."""
+    rows, parts = [], []
+    for prompt, boxes in layout_boxes(entries, rids):
+        ids = []
+        for x0, y0, x1, y1 in boxes:
+            n = len(rows) + 1
+            ids.append(f"<obj_{n}>")
+            rows.append({"id": f"obj_{n}", "bbox": [round(y0 / H * 1000), round(x0 / W * 1000),
+                                                     round(y1 / H * 1000), round(x1 / W * 1000)], "desc": prompt})
+        parts.append(" ".join(ids) + (" becomes " if len(ids) == 1 else " become ") + prompt)
+    sentence = ("In <ref_image_0>, change only what is inside the boxes, each into its own material, and keep every "
+                "shape exactly: " + "; ".join(parts) + ". " + KEEP)
+    return sentence, json.dumps(rows, ensure_ascii=False)
+
+
 def first_pass_edit(adapter, canvas, changed, rp: RegionPlan, todo: list, settings: SamplerSettings,
-                    region_mp: float, denoise: float, upsampler=None, cache=None):
+                    region_mp: float, denoise: float, upsampler=None, cache=None, change=None):
     """The whole picture edited once (the 2026-10-14 'draft' test, now as one edit with the picture as its
     reference): one instruction from the prompts of the painted regions (through the upsampler when connected,
     which then looks at the whole picture), sampled at about region_mp at `denoise` from the picture itself,
-    scaled back and pasted where the painted regions are (feathered; keep regions stay pixel exact).
+    scaled back and pasted where the painted regions are (feathered; keep regions stay pixel exact; where the
+    change map is black nothing is pasted). Flux 3 gets every prompt tied to the boxes of its regions (its layout
+    table, the 2026-10-16 bbox test); other models one list of the prompts.
     Returns (canvas, changed, a RegionResult for the report)."""
     t0 = time.perf_counter()
     entries = rp.plan["regions"]
     paint = [r for r in todo if entries[r]["strategy"] == "inpaint" and entries[r]["prompt"].strip()]
     if not paint:
         return canvas, changed, RegionResult(-1, "first pass", "skipped", note="no painted region has a prompt")
-    text = first_pass_instruction(entries, paint, getattr(adapter, "family", ""))
-    if upsampler is not None:
-        text, _ = up.expand(upsampler, text, [canvas])
     H, W = int(canvas.shape[1]), int(canvas.shape[2])
+    boxes = getattr(adapter, "family", "") == "flux3"
+    note = ""
+    if boxes:
+        sentence, table = box_instruction(entries, paint, W, H)
+        n_boxes = table.count('"id"')
+        if upsampler is not None:                   # it rewrites the sentence; the table is appended as it is
+            said, _ = up.expand(upsampler, sentence, [canvas])
+            if all(f"<obj_{i}>" in said for i in range(1, n_boxes + 1)):
+                sentence = said
+            else:
+                note = ", the upsampler's text lost box names so the plan's sentence is used"
+        text = sentence + " " + table
+        note = f", {n_boxes} box(es)" + note
+    else:
+        text = first_pass_instruction(entries, paint, getattr(adapter, "family", ""))
+        if upsampler is not None:
+            text, _ = up.expand(upsampler, text, [canvas])
     gw, gh = fif_size([0, 0, W, H], region_mp * 1024 * 1024, adapter.grid)
     sampling = _entry_sampling(entries[paint[0]], settings)
     key = pic = None
@@ -284,13 +356,16 @@ def first_pass_edit(adapter, canvas, changed, rp: RegionPlan, todo: list, settin
     if rp.regions.scope is not None:
         region = region * rp.regions.scope[:1].float().cpu()
     alpha = ops.feather_alpha(region, max(int(entries[r]["feather_px"]) for r in paint))
+    if change is not None:                      # as the regions: black on the change map stays pixel exact
+        alpha = alpha * (change[:1].float().cpu().clamp(0.0, 1.0) * 8.0).clamp(0.0, 1.0)
     canvas = canvas * (1 - alpha[..., None]) + pic * alpha[..., None]
     changed = torch.maximum(changed, alpha)
     dt = time.perf_counter() - t0
-    log.info("[KUBA regions] first pass: whole picture at %dx%d, denoise %.2f, %d prompt(s), %.1fs%s", gw, gh,
-             denoise, len(set(entries[r]["prompt"] for r in paint)), dt, " cached" if cached else "")
+    log.info("[KUBA regions] first pass: whole picture at %dx%d, denoise %.2f, %d prompt(s)%s, %.1fs%s", gw, gh,
+             denoise, len(set(entries[r]["prompt"] for r in paint)), note, dt, " cached" if cached else "")
     return canvas, changed, RegionResult(-1, "first pass", "done", dt, {}, note=f"whole picture at {gw}x{gh}, "
-                                         f"denoise {denoise:g}" + (" (cached)" if cached else ""), instruction=text)
+                                         f"denoise {denoise:g}{note}" + (" (cached)" if cached else ""),
+                                         instruction=text)
 
 
 def frame_in_frame(adapter, canvas, changed, rp: RegionPlan, rid: int, e: dict,
@@ -391,7 +466,8 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
              progress: Callable[[int, int], None] | None = None,
              check_interrupt: Callable[[], None] | None = None,
              use_cache: bool = True, change: torch.Tensor | None = None,
-             material: torch.Tensor | None = None, upsampler=None, first_pass: float = 0.0):
+             material: torch.Tensor | None = None, upsampler=None, first_pass: float = 0.0,
+             regions_after: bool = True):
     """
     Run every region of the plan in plan order with its strategy: inpaint (S1)
     or frame_in_frame (S4); keep is skipped. Returns (canvas, changed_mask
@@ -406,6 +482,8 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
     instruction about its crop (and the style picture when its reference is style), before anything is encoded.
     first_pass > 0: the whole picture is edited once at this denoise from one instruction made of the plan's
     prompts, and pasted where the painted regions are; then the regions refine it (first_pass_edit).
+    regions_after = False (with first_pass > 0): the first pass is the whole result; the painted regions are not
+    sampled one by one (frame_in_frame regions still are: they make their own scene).
     """
     H, W = canvas.shape[1], canvas.shape[2]
     rw, rh = rp.regions.size
@@ -462,8 +540,15 @@ def run_plan(adapter, canvas: torch.Tensor, rp: RegionPlan, settings: SamplerSet
     instructions: dict[int, str] = {}
     if first_pass > 0 and todo:
         canvas, changed, fp = first_pass_edit(adapter, canvas, changed, rp, todo, settings, region_mp, first_pass,
-                                              upsampler=upsampler, cache=cache)
+                                              upsampler=upsampler, cache=cache, change=change)
         results.append(fp)
+        if not regions_after and fp.status == "done":
+            for rid in todo:
+                if entries[rid]["strategy"] == "inpaint":
+                    results.append(RegionResult(rid, entries[rid]["name"], "in pass",
+                                                note="painted by the first pass" if entries[rid]["prompt"].strip()
+                                                else "no prompt: left as it is"))
+            todo = [rid for rid in todo if entries[rid]["strategy"] == "frame_in_frame"]
     if upsampler is not None:
         # every painted region's prompt -> a full instruction about its own crop (and the style picture); on a copy,
         # the plan given stays as it is. The crops are those of the canvas before any region is painted.
@@ -585,9 +670,12 @@ def results_report(results: list[RegionResult]) -> str:
     done = [r for r in results if r.status == "done" and r.region_id >= 0]
     total = sum(r.seconds for r in done)
     n_cached = sum(1 for r in done if "cached" in r.note)
+    in_pass = sum(1 for r in results if r.status == "in pass" and r.note.startswith("painted"))
+    first = next((r for r in results if r.region_id < 0 and r.status == "done"), None)
     lines = [f"{len(done)} regions done in {total:.1f}s"
              + (f" ({total / len(done):.1f}s each)" if done else "")
-             + (f", {n_cached} from the cache" if n_cached else "")]
+             + (f", {n_cached} from the cache" if n_cached else "")
+             + (f"; {in_pass} painted by the first pass alone ({first.seconds:.1f}s)" if in_pass and first else "")]
     for r in results:
         box = r.crop.get("box", "")
         extra = f"box {box} x{r.crop.get('scale')} work {r.crop.get('work')}" if r.crop else ""
