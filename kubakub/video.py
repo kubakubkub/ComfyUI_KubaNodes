@@ -43,29 +43,18 @@ def latent_frame_times(frames: int, fps: float):
     return np.asarray(t)
 
 
-def only_filter(only):
+def only_filter(only, entries=(), node="kubakub region video sampler"):
     """
-    The 'only' text as a predicate on plan entries, or None (empty = all). Comma or line separated; each part is
-    a name wildcard ('W_F1_*') or a plan selector (plan.py: 'group:Windows', 'tag:front', 'region:3-7',
-    'tag:front group:Windows' = and, '!x' = not). A part that is no valid selector stays a name wildcard.
+    The 'only' text as a predicate on plan entries, or None (empty = all): the one reading of every 'which
+    regions' input (plan.py pick_or_say): names with wildcards ('W_F1_*'), 'group:Windows', 'tag:front',
+    'region:3-7', comma or new line = or, space = and, '!x' = not. A text that cannot be read, or matches no
+    region of the plan, is an error that names the regions there are.
     """
-    import fnmatch
     from . import plan as rp
-    pats = [p.strip().lower() for p in (only or "").replace("\n", ",").split(",") if p.strip()]
-    if not pats:
+    if not (only or "").replace(",", " ").strip():
         return None
-    sections = []
-    for p in pats:
-        try:
-            sections.append(rp.selector(p))
-        except rp.PlanError:
-            sections.append(None)
-
-    def hit(e):
-        name = str(e.get("name", "")).lower()
-        return any(fnmatch.fnmatchcase(name, p) or (s is not None and s.match(e) is not None)
-                   for p, s in zip(pats, sections))
-    return hit
+    ids = set(rp.pick_or_say({"regions": list(entries)}, only, node))
+    return lambda e: int(e["region_id"]) in ids
 
 
 def clip_groups(entries, only=None):
@@ -76,7 +65,7 @@ def clip_groups(entries, only=None):
     repainted from when a material clip guides it.
     """
     groups = {}
-    wanted = only_filter(only)
+    wanted = only_filter(only, entries)
     for e in entries:
         if not e.get("animate"):
             continue

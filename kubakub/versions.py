@@ -392,16 +392,15 @@ def parse_pick(text: str, n: int) -> list[int]:
 def only_regions(plan: dict, only: str) -> tuple[dict, int]:
     """(plan, how many regions are still painted) where every region the selectors of `only` do not match is
     set to keep ('W_F1_*, group:M_Pilasters': plan selector syntax, space = AND, comma = OR). Empty = the plan
-    as it is. The input is not changed."""
+    as it is; a text that cannot be read or matches nothing is a SheetError. The input is not changed."""
     from . import plan as rp
     only = (only or "").strip()
     if not only:
         return plan, len(plan["order"])
-    try:
-        section = rp.selector(only)
-    except rp.PlanError as e:
-        raise SheetError(f"only: {e}") from None
-    hit = {e["region_id"] for e in plan["regions"] if section.match(e) is not None}
+    try:                                    # the one reading of every 'which regions' input
+        hit = set(rp.pick_or_say(plan, only, ""))
+    except ValueError as e:
+        raise SheetError(str(e)) from None
     entries = [e if e["region_id"] in hit else {**e, "strategy": "keep"} for e in plan["regions"]]
     order = [i for i in plan["order"] if i in hit]
     return {**plan, "regions": entries, "order": order}, len(order)

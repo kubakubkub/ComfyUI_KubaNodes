@@ -20,7 +20,7 @@ Houdini or TouchDesigner.
 |---|---|---|
 | regions | | From any kubakub regions node. Empty (and no mask) = the windows of the sample facade. |
 | mask | | Instead of regions: a mask or a mask batch. Each mask is a region; with `split_shapes` every separate shape is one. |
-| which regions | `*` | In plan syntax: `W_F1_*`, `group:Windows`, `tag:front`, comma = or, space = and, `!` = not. |
+| which regions | `*` | In plan syntax: `W_F1_*`, `group:Windows`, `tag:front`, comma or new line = or, space = and, `!` = not. |
 | field | edge distance | See the table below. |
 | per | each region | `each region`: every region runs from black to white on its own (all windows open at once). `all together`: one ramp over all of them (a wipe across the facade). |
 | angle | 0 | direction: 0 = left to right, 90 = top to bottom, 180 = right to left. |

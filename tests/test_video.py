@@ -221,7 +221,11 @@ def test_lazy_status():
     assert lz(plan=_plan(RULES2), fps=8.0, enhance_prompt=False, enhance_clip=None, **none)[-1] == "audio_vae", \
         "enhance off: the enhancer is not loaded"
     assert lz(plan=_plan(RULES2), fps=8.0, **MODELS) == [], "all loaded: nothing more"
-    assert lz(plan=_plan(RULES2), fps=8.0, only="X_*", **none) == [], "'only' matches nothing"
+    try:                                        # a typo stops before any model is loaded, naming the regions
+        lz(plan=_plan(RULES2), fps=8.0, only="X_*", **none)
+        raise AssertionError("'only' that matches no region: an error")
+    except ValueError as e:
+        assert "which regions = 'X_*' matches no region (there are: W_F1_C01" in str(e), str(e)
     bg = torch.zeros(9, 192, 320, 3)
     far = RULES2.replace("lamps flicker", "lamps flicker\nt_start = 5").replace("flies past", "flies past\nt_start = 5")
     assert lz(plan=_plan(far), fps=8.0, background=bg, **none) == [], "time range outside the background video"
@@ -258,11 +262,16 @@ def test_only_selectors():
     assert ids("group:Windows") == [0, 1] and ids("group:win*, wall") == [0, 1, 3], "group selector"
     assert ids("tag:front") == [0, 2] and ids("tag:front group:Windows") == [0], "tag, space = and"
     assert ids("region:2-3") == [2, 3] and ids("group:Windows !W_F1_C01") == [1], "region range, not"
-    assert ids("X_*") == [] and ids("bogus:thing") == [] and ids("group:") == [], "no match / no selector: nothing"
+    for bad, said in (("X_*", "matches no region"), ("bogus:thing", "cannot be read"), ("group:", "cannot be read")):
+        try:
+            ids(bad)
+            raise AssertionError(f"{bad!r}: an error")
+        except ValueError as e:
+            assert said in str(e) and "kubakub region video sampler" in str(e), str(e)
     assert vd.only_filter("  ,\n") is None
 
-    out = _run(_plan(RULES2), _NoOps(), models={}, only="group:Doors").args
-    assert "which regions = 'group:Doors' matches no animated region" in out[1] and "W_F1_C01" in out[1], out[1]
+    out = _run(_plan(RULES2), _NoOps(), models={}, only="wall").args     # a region that is there but does not move
+    assert "which regions = 'wall' matches no animated region" in out[1] and "W_F1_C01" in out[1], out[1]
     assert torch.equal(out[0][3], STILL[0]) and float(out[4].max()) == 0, "nothing rendered, empty mask"
     nv._CLIP_CACHE.clear()
     ops = _StubOps()

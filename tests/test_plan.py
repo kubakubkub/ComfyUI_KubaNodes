@@ -162,6 +162,39 @@ def expect_error(name, rules, fragment):
         check(name, fragment in str(e), str(e))
 
 
+def test_one_reading():
+    """Every 'which regions' input reads its text the same way (plan.pick_ids): lists by comma or new line, names
+    and tags with spaces, and an unreadable part is an error (2026-10-18: the region sampler, versions, the video
+    sampler and regions to svg had their own readings)."""
+    t = {"regions": [{"region_id": 0, "name": "wall", "group_id": "walls", "tags": []},
+                     {"region_id": 1, "name": "W_F1_01", "group_id": "Windows", "tags": ["front", "floor 1"]},
+                     {"region_id": 2, "name": "W_F1_02", "group_id": "Windows", "tags": ["side"]},
+                     {"region_id": 3, "name": "ground door", "group_id": "Doors", "tags": ["front"]}]}
+    ids = lambda text: rp.pick_ids(t, text)  # noqa: E731
+    check("empty, blank and * = all", ids("") == ids(" \n ") == ids("*") == [0, 1, 2, 3])
+    check("new line = comma", ids("wall\nW_F1_02") == ids("wall, W_F1_02") == [0, 2])
+    check("a name with a space inside a list", ids("wall, ground door") == [0, 3] and ids("Ground Door") == [3])
+    check("a tag with a space", ids("tag:floor 1") == [1], str(ids("tag:floor 1")))
+    check("space = and, ! = not, as in the rules", ids("group:Windows tag:front") == [1] and ids("tag:front !W_*") == [3])
+    check("table order, each region once", ids("W_F1_02, wall, W_F1_*") == [0, 1, 2])
+    check("matches nothing: empty (the nodes say so)", ids("nothing_here") == [])
+    try:
+        ids("floor:1")
+        check("a part that is no selector and no name: an error", False)
+    except rp.PlanError:
+        check("a part that is no selector and no name: an error", True)
+    try:
+        rp.pick_or_say(t, "X_*", "kubakub node")
+        check("pick_or_say: no match names the regions there are", False)
+    except ValueError as e:
+        check("pick_or_say: no match names the regions there are",
+              str(e).startswith("kubakub node: which regions = 'X_*' matches no region (there are: wall, W_F1_01"), str(e))
+    try:
+        rp.pick_or_say(t, "X_*", "")
+    except ValueError as e:
+        check("pick_or_say without a node: the message itself", str(e).startswith("which regions = 'X_*'"), str(e))
+
+
 def test_errors():
     expect_error("unknown key with hint", "[default]\ndenoize = 0.5", "did you mean 'denoise'")
     expect_error("bad strategy", "[default]\nstrategy = paint", "must be one of")
@@ -174,7 +207,7 @@ def test_errors():
 
 
 if __name__ == "__main__":
-    for t in (test_resolve, test_negation_and_bare_settings, test_then, test_reserved_and_comments, test_errors):
+    for t in (test_resolve, test_negation_and_bare_settings, test_then, test_reserved_and_comments, test_one_reading, test_errors):
         t()
     print()
     if failures:

@@ -34,16 +34,13 @@ CATEGORY = "kubakub/2d/generate"
 AFTER_FIRST_PASS = ("regions refine it", "nothing: whole picture only")
 
 
-def only_filter(text: str):
-    """'W_F1_*, group:M_Pilasters' -> predicate on plan entries (plan selector syntax), or None."""
-    text = (text or "").strip()
-    if not text:
+def only_filter(text: str, plan_dict: dict, node: str = "kubakub region sampler"):
+    """'W_F1_*, group:M_Pilasters' -> predicate on plan entries, or None for all (the one reading of every
+    'which regions' input, kubakub/plan.py pick_or_say: a text that cannot be read or matches nothing is an error)."""
+    if not (text or "").strip():
         return None
-    try:
-        section = rp.selector(text)
-    except rp.PlanError as e:
-        raise ValueError(f"kubakub region sampler: {rp.WHICH} = '{text}' cannot be read ({e}). {rp.WHICH_TIP}") from None
-    return lambda entry: section.match(entry) is not None
+    ids = set(rp.pick_or_say(plan_dict, text, node))
+    return lambda entry: entry["region_id"] in ids
 
 
 class KUBA_RegionSampler(io.ComfyNode):
@@ -167,7 +164,7 @@ class KUBA_RegionSampler(io.ComfyNode):
                                       scheduler=scheduler, region_mp=region_mp,
                                       max_upscale=max_upscale, seed_offset=seed_offset,
                                       style=style[:1] if style is not None else None)
-        pick = only_filter(only)
+        pick = only_filter(only, plan.plan)
         notes = []
         if image.shape[0] > 1:
             log.warning("[KUBA regions] image batch has %d images; using the first.", image.shape[0])

@@ -436,7 +436,7 @@ class KUBA_Versions(io.ComfyNode):
                        f"cache {rc.RESULTS.stats()}"]
         if only and painted is not None:
             report += [f"only = {only}: {painted} region(s) painted, the others stay as they are"
-                       + ("; no region matches, nothing was painted" if painted == 0 else "")]
+                       + ("; the chosen regions all stay as they are (keep), nothing was painted" if painted == 0 else "")]
         report += [text for _, text in sorted(lines)]
         saved = cls._save({k: outs[k] for k in numbers}, by_number, recipes, save_folder, final, bool(picks))
         save_path = os.path.dirname(saved[0]) if saved else ""

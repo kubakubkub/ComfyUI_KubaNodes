@@ -33,6 +33,7 @@ import kubapack.nodes.regions.nodes_canvas as nc  # noqa: E402
 import kubapack.nodes.regions.nodes_sources as ns  # noqa: E402
 import kubapack.nodes.regions.nodes_vector as nv  # noqa: E402
 from kubakub import sam_prompts as sp  # noqa: E402
+from kubakub import plan as rp  # noqa: E402
 from kubakub.director.render import select_regions  # noqa: E402
 from kubakub.types import Regions  # noqa: E402
 
@@ -171,9 +172,13 @@ check("select: same as the plan selector of regions to mask",
 check("select: space = and, ! = not (new)", sel("group:Windows tag:front") == [1] and sel("tag:front !W_*") == [3])
 check("select: a name with a space still matches (first selector)", sel("ground door") == [3] and sel("wall, ground door") == [0, 3]
       and sel("tag:floor 1") == [1] and sel("ground d*") == [3])
-check("select: nothing matches -> empty", sel("nothing_here") == [])
+try:
+    sel("nothing_here")
+    check("select: nothing matches -> an error naming the regions", False)
+except ValueError as e:
+    check("select: nothing matches -> an error naming the regions", "matches no region (there are: wall" in str(e), str(e))
 for text in ("W_F1_*", "group:Windows, wall", "tag:side\nwall", "ground door", "tag:floor 1", "w_f1_01", "group:win*", "x, tag:front"):
-    old = [r["region_id"] for r in table["regions"] if any(nv._old_match(r, p.strip().lower())
+    old = [r["region_id"] for r in table["regions"] if any(rp._one_pattern(r, p.strip().lower())
                                                            for p in text.replace("\n", ",").split(",") if p.strip())]
     check(f"select {text!r}: everything the first selector matched", set(old) <= set(sel(text)), f"{old} vs {sel(text)}")
 

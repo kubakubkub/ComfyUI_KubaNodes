@@ -9,7 +9,6 @@ Logic in vector.py. V3 node schema, registered via ../__init__.py.
 
 from __future__ import annotations
 
-import fnmatch
 import logging
 import os
 
@@ -28,32 +27,11 @@ CATEGORY = "kubakub/2d/regions"
 MODES = ("outline", "centerline")
 
 
-def _old_match(r: dict, p: str) -> bool:
-    """The first selector of this node: one lowercase pattern, a name wildcard or group: / tag:."""
-    name, group = str(r.get("name", "")).lower(), str(r.get("group_id", "")).lower()
-    tags = [str(t).lower() for t in r.get("tags", [])]
-    return bool(p.startswith("group:") and fnmatch.fnmatchcase(group, p[6:]) or
-                p.startswith("tag:") and any(fnmatch.fnmatchcase(t, p[4:]) for t in tags) or
-                not p.startswith(("group:", "tag:")) and fnmatch.fnmatchcase(name, p))
-
-
 def select_ids(table: dict, text: str):
-    """
-    Region ids for a plan selector, as in regions to mask ('W_F1_*, group:Windows', 'tag:front !W_F0_*';
-    comma or new line = or, space = and, '!' = not); empty = all. A pattern the node's first selector
-    matched differently (a name with a space in it) keeps that match, so saved workflows select the same regions.
-    """
-    from ...kubakub.director.render import select_regions
-    regions = table.get("regions", [])
-    pats = [p.strip() for p in (text or "").replace("\n", ",").split(",") if p.strip()]
-    if not pats:
-        return [int(r["region_id"]) for r in regions]
-    hit = set()
-    for p in pats:
-        new = {int(i) for i in select_regions(table, p)}
-        old = {int(r["region_id"]) for r in regions if _old_match(r, p.lower())}
-        hit |= new if old <= new else old
-    return [int(r["region_id"]) for r in regions if int(r["region_id"]) in hit]
+    """Region ids for a 'which regions' text, the one reading of every node (kubakub/plan.py pick_or_say:
+    'W_F1_*, group:Windows', 'tag:front !W_F0_*'; comma or new line = or, space = and, '!' = not; names with
+    spaces as the node's first selector read them); empty = all; unreadable or no match = an error."""
+    return [int(i) for i in rp.pick_or_say(table, text, "kubakub regions to svg / pdf / dxf")]
 
 
 class KUBA_RegionsToVector(io.ComfyNode):

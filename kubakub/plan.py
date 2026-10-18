@@ -108,21 +108,47 @@ GONE = {"material": "connect a kubakub shader to the sampler's 'material' input"
 WHICH = "which regions"                             # the label of every input that picks regions
 WHICH_HINT = "W_F1_*, group:Windows"
 WHICH_TIP = ("Written as in kubakub region plan: names with wildcards ('W_F1_*'), 'group:Windows', 'tag:front', "
-             "'region:3-7'; comma = or, space = and, '!' = not.")
+             "'region:3-7'; comma or Enter = or, space = and, '!' = not.")
+
+
+def _one_pattern(r: dict, p: str) -> bool:
+    """A part read as one pattern, spaces included (the first selector of the nodes): a name wildcard,
+    'group:x y' or 'tag:x y'. p is lower case."""
+    if p.startswith("group:"):
+        return fnmatch.fnmatchcase(str(r.get("group_id", "")).lower(), p[6:])
+    if p.startswith("tag:"):
+        return any(fnmatch.fnmatchcase(str(t).lower(), p[4:]) for t in r.get("tags", []))
+    return fnmatch.fnmatchcase(str(r.get("name", "")).lower(), p)
 
 
 def pick_ids(table: dict | None, text: str) -> list[int]:
-    """The region ids a 'which regions' text means, in table order. '' and '*' = all. A text that is exactly one
-    region's name (also one with spaces in it) is that region. Raises PlanError for a text that cannot be read."""
+    """The region ids a 'which regions' text means, in table order: the one reading of every node that picks regions
+    (and of plan entries: they carry the same name / group_id / tags). '' and '*' = all. Comma or new line = or;
+    in each part space = and, '!' = not (the plan's selector). A part that is exactly one region's name is that
+    region, and a part read as one pattern with its spaces ('door main', 'tag:floor 1') keeps what it matched, so
+    names with spaces work everywhere. Raises PlanError for a part that is neither."""
     regions = (table or {}).get("regions", [])
-    want = (text or "").strip()
-    if want in ("", "*"):
+    parts = [p.strip() for p in (text or "").replace("\n", ",").split(",") if p.strip()]
+    if not parts or parts == ["*"]:
         return [r["region_id"] for r in regions]
-    exact = [r["region_id"] for r in regions if str(r.get("name", "")).lower() == want.lower()]
-    if exact:
-        return exact
-    sec = selector(want)
-    return [r["region_id"] for r in regions if sec.match(r) is not None]
+    hit: set = set()
+    for p in parts:
+        low = p.lower()
+        exact = {r["region_id"] for r in regions if str(r.get("name", "")).lower() == low}
+        if exact:
+            hit |= exact
+            continue
+        one = {r["region_id"] for r in regions if _one_pattern(r, low)}
+        try:
+            sec = selector(p)
+        except PlanError:
+            if not one:
+                raise
+            hit |= one
+            continue
+        new = {r["region_id"] for r in regions if sec.match(r) is not None}
+        hit |= new if one <= new else one
+    return [r["region_id"] for r in regions if r["region_id"] in hit]
 
 
 RESERVED = ("then", "plan")                         # section headers that are not selectors
@@ -142,13 +168,14 @@ def header_of(text: str) -> str:
 
 def pick_or_say(table: dict | None, text: str, node: str) -> list[int]:
     """pick_ids for a node: a text that cannot be read, or that matches nothing, is a ValueError that names the
-    regions there are."""
+    regions there are (starting with 'node: ', or with the message itself when node is '')."""
+    head = f"{node}: " if node else ""
     try:
         ids = pick_ids(table, text)
     except PlanError as e:
-        raise ValueError(f"{node}: {WHICH} = '{(text or '').strip()}' cannot be read ({e}). {WHICH_TIP}") from None
+        raise ValueError(f"{head}{WHICH} = '{(text or '').strip()}' cannot be read ({e}). {WHICH_TIP}") from None
     if not ids and (table or {}).get("regions"):
-        raise ValueError(f"{node}: {no_match(table, text)}")
+        raise ValueError(f"{head}{no_match(table, text)}")
     return ids
 
 

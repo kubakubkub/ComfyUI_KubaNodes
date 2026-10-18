@@ -283,10 +283,18 @@ works, and a text typed by hand stays until you click a name.
 To make one choice for several nodes, connect the `which regions` output of this node to their
 `which regions` fields.
 
+**Typed by hand, one reading everywhere.** Every `which regions` field reads its text the same way: names with
+wildcards (`W_F1_*`), `group:Windows`, `tag:front`, `region:3-7`; comma or a new line = or, space = and, `!` =
+not; a name or tag with spaces in it (`ground door`, `tag:floor 1`) is found as a whole. A text that cannot be read,
+or that matches no region, stops the node with a message that lists the regions there are, in every node (before
+0.5.0 the region sampler, versions, the video sampler and regions to svg each had their own reading, and some of
+them silently painted nothing). The video sampler still runs when the regions are found but none of them is
+animated, and says so.
+
 | input | default | what it does |
 |---|---|---|
 | regions | | From any kubakub regions node. |
-| which regions | * | Plan selector: names with wildcards (`W_F1_*`), `group:Windows`, `tag:front`; comma = or, space = and, `!` = not. `*` or empty = all. |
+| which regions | * | Plan selector: names with wildcards (`W_F1_*`), `group:Windows`, `tag:front`; comma or new line = or, space = and, `!` = not. `*` or empty = all. |
 | grow_px | 0 | Grow (> 0) or shrink (< 0) the mask, in pixels. |
 | feather_px | 0 | Soft edge. It blurs the edge both ways, inwards and outwards, over about this many pixels in total. |
 | invert | off | On: everything except the selected regions. |

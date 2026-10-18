@@ -415,14 +415,39 @@ def test_versions():
     check("versions final: a 'keep' region of the plan is the input image, not its scaled-up draft",
           torch.equal(images[0][wall], canvas[0][wall]) and float((images[0][win] - canvas[0][win]).abs().mean()) > 0.05)
 
-    out, samples, cfgs = run(save_folder="", only="nothing_*")
-    check("versions: only that matches nothing paints nothing and says so", not samples
-          and "no region matches" in out[2] and torch.equal(out[0][0], canvas[0]))
+    try:                                        # the one reading of every 'which regions' input: a typo is an error
+        run(save_folder="", only="nothing_*")
+        check("versions: which regions that matches nothing is an error naming the regions", False)
+    except ValueError as e:
+        check("versions: which regions that matches nothing is an error naming the regions",
+              "kubakub versions: which regions = 'nothing_*' matches no region (there are: wall" in str(e), str(e))
     try:
         run(save_folder="", only="floor:1")
         check("versions: a wrong selector in only is an error", False)
     except ValueError as e:
-        check("versions: a wrong selector in only is an error", "kubakub versions: only:" in str(e), str(e))
+        check("versions: a wrong selector in only is an error",
+              "kubakub versions: which regions = 'floor:1' cannot be read" in str(e), str(e))
+
+
+def test_same_reading_everywhere():
+    """One text, one meaning: the region sampler, kubakub versions and the video sampler pick the same regions,
+    and say the same thing about a typo."""
+    from kubakub import video as vd
+    d = rp.resolve(seq.make_regions().table, "[default]\nanimate = on\nvideo_prompt = moves\n", seed=1)
+    for text in ("W_*", "group:Windows, sign", "!W_1", "wall\nsign", "region:1-2"):
+        sampler = sorted(e["region_id"] for e in d["regions"] if nsm.only_filter(text, d)(e))
+        versions = sorted(vs.only_regions(d, text)[0]["order"])
+        video = sorted(i for g in vd.clip_groups(d["regions"], text) for i in g["ids"])
+        check(f"same regions everywhere for {text!r}", sampler == versions == video == rp.pick_ids(d, text),
+              f"{sampler} {versions} {video}")
+    said = []
+    for f in (lambda: nsm.only_filter("Wx_*", d), lambda: vs.only_regions(d, "Wx_*"), lambda: vd.clip_groups(d["regions"], "Wx_*")):
+        try:
+            f()
+            said.append("")
+        except ValueError as e:
+            said.append(str(e).split(": ", 1)[-1] if not str(e).startswith("which") else str(e))
+    check("the same message about a typo everywhere", len(set(said)) == 1 and "matches no region (there are:" in said[0], str(said))
 
 
 def test_only_regions_and_cfg():
@@ -449,7 +474,7 @@ if __name__ == "__main__":
     try:
         for t in (test_region_sampler, test_material, test_seam_pass_schema, test_plan_preview, test_region_prompt,
                   test_frame_in_frame_regions,
-                  test_versions, test_only_regions_and_cfg):
+                  test_versions, test_same_reading_everywhere, test_only_regions_and_cfg):
             t()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
