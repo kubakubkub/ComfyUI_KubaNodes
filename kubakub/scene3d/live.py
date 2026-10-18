@@ -4,12 +4,15 @@ live.py
 The live link between a running 3D app and kubakub scene render (source = live blender / live houdini). Files in one
 local folder, no ports: setting live_folder (default ~/kubakub_live). Per app (blender, houdini):
 
-    <app>.alive          the app's add-on touches it every few seconds while it is open (json: version, pid)
-    request_<app>.json   ComfyUI asks for the scene as it is now: {"id": ..., "time": ...}
+    <app>.alive          the app's add-on touches it every few seconds while it is open (json: version, pid,
+                         "cameras": the camera names in the scene, for the node's live camera pick list)
+    request_<app>.json   ComfyUI asks for the scene as it is now: {"id": ..., "time": ..., "camera": a camera name
+                         from that list, "" = what you look through}
     live_<app>.json      the app's answer, written last: {"id": request id, "file": snapshot in this folder,
                          "camera": a camera name in the snapshot (or ""), "how": "viewport" / "camera",
                          "source": the open file's name, "version", "time", optional "size": [w, h] and
-                         "view": the camera seen from the app (below); on failure also "error"}
+                         "view": the camera seen from the app (below), "missing": the asked camera when the
+                         scene has none of that name ("" else; an older add-on leaves it out); on failure "error"}
     <snapshots>          the copies the app writes (.blend from Blender, .abc from Houdini); it keeps the last few
 
 "view" (apps whose snapshot cannot carry the viewport as a camera): {"matrix": 4x4 camera-to-world, rows,
@@ -25,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import uuid
 
@@ -42,18 +46,33 @@ def folder(setting: str = "") -> str:
 
 
 def _read(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+    # a file being replaced right now can be refused or (on some disks) read half: try again for a moment
+    for i in range(5):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            if i < 4:
+                time.sleep(0.01)
+    return None
 
 
 def _write(path, obj):
-    tmp = f"{path}.{os.getpid()}.tmp"
+    # on Windows a rename onto a file the other side is reading right now is refused: try again for a moment
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f)
-    os.replace(tmp, path)
+    for i in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == 19:
+                os.remove(tmp)
+                raise
+            time.sleep(0.01)
 
 
 def alive(root, app, now=None):
@@ -64,6 +83,14 @@ def alive(root, app, now=None):
     except OSError:
         return None
     return (_read(p) or {}) if age <= ALIVE_S else None
+
+
+def cameras(root, app):
+    """-> the camera names the open app lists (its .alive file), or None when the app is not linked."""
+    info = alive(root, app)
+    if info is None:
+        return None
+    return [str(c) for c in info.get("cameras") or [] if str(c).strip()]
 
 
 def _usable(root, ans):
@@ -82,9 +109,9 @@ def current(root, app):
     return _usable(root, _LAST.get((root, app)))
 
 
-def ask(root, app, wait_s=60.0, poll_s=0.1):
+def ask(root, app, wait_s=60.0, poll_s=0.1, camera=""):
     """
-    Ask the open app for the scene as it is now and wait for its answer.
+    Ask the open app for the scene as it is now, seen through `camera` ("" = what you look through), and wait.
     -> (answer dict or None, note). With the app closed: the last snapshot (or None) and a note saying so.
     """
     os.makedirs(root, exist_ok=True)
@@ -94,7 +121,7 @@ def ask(root, app, wait_s=60.0, poll_s=0.1):
         return last, (f"{name} is not linked right now (closed, or the kubakub live link is off): "
                       + ("the scene as it was last sent" if last else "nothing was sent yet"))
     rid = uuid.uuid4().hex[:12]
-    _write(os.path.join(root, f"request_{app}.json"), {"id": rid, "time": time.time()})
+    _write(os.path.join(root, f"request_{app}.json"), {"id": rid, "time": time.time(), "camera": camera.strip()})
     end = time.time() + wait_s
     while time.time() < end:
         raw = _read(os.path.join(root, f"live_{app}.json")) or {}
@@ -110,13 +137,14 @@ def ask(root, app, wait_s=60.0, poll_s=0.1):
                   + ("the scene as it was last sent" if last else "nothing was sent yet"))
 
 
-def resolve(root, app, wait_s=60.0, memo_s=5.0):
+def resolve(root, app, wait_s=60.0, memo_s=5.0, camera=""):
     """ask(), remembered for a few seconds, so the checks before a run and the run itself see one snapshot."""
-    hit = _MEMO.get((root, app))
+    key = (root, app, camera.strip())
+    hit = _MEMO.get(key)
     if hit and time.time() - hit[0] < memo_s:
         return hit[1], hit[2]
-    ans, note = ask(root, app, wait_s)
-    _MEMO[(root, app)] = (time.time(), ans, note)
+    ans, note = ask(root, app, wait_s, camera=camera)
+    _MEMO[key] = (time.time(), ans, note)
     return ans, note
 
 

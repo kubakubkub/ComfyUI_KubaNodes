@@ -43,36 +43,33 @@ already read. Example: `example_workflows/scene3d_to_regions.json`.
   ~9 s for shelves.
 - Model free test: `tests/test_scene3d.py` (synthetic facade through the passes and From ID Maps; with
   Blender installed also a real OBJ export).
-- `unit_scale` (optional): files in the wrong units (some FBX exports come in ~0.5 m wide) are
-  scaled into metres; the report warns when a model is under 2 m or over 2 km.
+- `unit_scale` (optional): **0 = auto** (the default): a model over 300 units across is read as centimetres
+  (a 2470 unit scan = 24.7 m), a very big one as millimetres, else as metres; the report says what it took. Any
+  other value is used as it is (e.g. 0.01 for cm, or for FBX exports that come in ~0.5 m wide); the report warns
+  when a model is under 2 m or over 2 km.
 - The last output `scene` feeds the two nodes below.
 
 ### Live from Blender or Houdini: model, press refresh
 
 Instead of a file path, the scene that is open in Blender or Houdini right now: you model, move the view, press
-**refresh from blender** / **refresh from houdini** on the node, and everything after it runs on the new state.
+**refresh from blender** / **refresh from houdini** on the node: only the scene render runs and its preview shows the
+new state. Press Run for the rest of the workflow; the render then comes from the cache.
 
-**Blender**
-1. Edit > Preferences > Add-ons > Install from Disk > `tools/blender/kubakub_live.py` (in this pack), tick
-   **kubakub live**. The 3D view's sidebar (N) gets a **kubakub** tab with the link state and a *send now* button.
-2. In ComfyUI: on kubakub scene render set **`source` = live blender** (the `file` field hides, a **refresh from
-   blender** button appears). Press it.
-3. Blender saves a copy of the scene into the live folder (your .blend is not saved, renamed or changed) and
-   answers; the node renders that copy.
+**Install** the Blender add-on or the Houdini package once: step by step in [live link](live-link.md) (also how to check it works, update and remove it).
 
-**Houdini**
-1. Once: run `python_embeded\python.exe ComfyUI\custom_nodes\ComfyUI_KubaNodes\tools\houdini\install_houdini_link.py`
-   (asks per Houdini version found in Documents; writes `packages/kubakub_live.json` there, nothing else;
-   `--remove` takes it out again). Restart Houdini, then shelf tab **+** > Shelves > **kubakub**.
-2. Per session: press **comfy link** on the kubakub shelf (press it again to stop; the status bar says the state).
-3. In ComfyUI: `source` = **live houdini**, press **refresh from houdini**. Houdini writes what /obj displays at the
-   current frame as Alembic (hidden objects are left out; your .hip is not saved) and sends the view.
-   The export uses a temporary Alembic ROP in /out that is removed again; Houdini may still mark the .hip as changed.
-
-- **Camera**: `camera` empty = what you look through: the viewport view (perspective or orthographic, with the
-  viewport's field of view along the render's long side), or the camera you look through (Blender: Numpad 0;
-  Houdini: the viewport's camera menu, with its focal length, aperture, resolution and screen window offset). A
-  camera name in `camera` wins; a connected projector wins over both.
+- **Blender**: `source` = **live blender**, press **refresh from blender**. Blender saves a copy of the scene into
+  the live folder (your .blend is not saved, renamed or changed) and answers; the node renders that copy.
+- **Houdini**: press **comfy link** on the kubakub shelf once per session, then `source` = **live houdini**, press
+  **refresh from houdini**. Houdini writes what /obj displays at the current frame as Alembic (hidden objects are
+  left out; your .hip is not saved) and sends the view.
+- **Camera**: the **camera: … ▾** button lists the cameras of the open scene (the link sends their names every
+  few seconds) plus **what you look through**: the viewport view (perspective or orthographic, with the viewport's
+  field of view along the render's long side), or the camera you look through (Blender: Numpad 0; Houdini: the
+  viewport's camera menu, with its focal length, aperture, resolution and screen window offset). A picked camera
+  is used whatever the viewport shows, so you can keep modelling in another view; a camera that was deleted or
+  renamed since = what you look through, and the report says so. A connected projector wins over all of them.
+  Houdini only exports the scene again when it changed: another camera or view reuses the last Alembic. After an
+  update of the pack: install the Blender add-on again / restart Houdini (the report says when the link is older).
 - **Frame size**: Blender = the scene's render resolution; Houdini = the camera's resolution, or for a viewport view
   the viewport's shape at 1920 across (the report says it). `width` / `height` on the node win.
 - **Nothing changed** since the last refresh (no edit, same view, frame and size) = the app answers with the same

@@ -22,6 +22,7 @@ bl_info = {
 import glob
 import json
 import os
+import threading
 import time
 
 import bpy
@@ -49,18 +50,33 @@ def live_folder():
 
 
 def _write_json(path, obj):
-    tmp = f"{path}.{os.getpid()}.tmp"
+    # on Windows a rename onto a file the other side is reading right now is refused: try again for a moment
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f)
-    os.replace(tmp, path)
+    for i in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == 19:
+                os.remove(tmp)
+                raise
+            time.sleep(0.01)
 
 
 def _read_json(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+    # a file being replaced right now can be refused or (on some disks) read half: try again for a moment
+    for i in range(5):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            if i < 4:
+                time.sleep(0.01)
+    return None
 
 
 def main_view():
@@ -130,24 +146,34 @@ def _signature(scene, view):
             scene.camera.name if scene.camera else "", v)
 
 
-def send(rid):
-    """Answer request `rid`: a new snapshot when something changed, else the last one again."""
+def cameras(scene):
+    return [o for o in scene.objects if o.type == "CAMERA" and not o.name.startswith(VIEW_CAM)]
+
+
+def send(rid, want=""):
+    """Answer request `rid`, seen through camera `want` ("" = what you look through): a new snapshot when
+    something changed, else the last one again."""
     root = live_folder()
     os.makedirs(root, exist_ok=True)
     scene = bpy.context.scene
+    want = (want or "").strip()
+    picked = next((o for o in cameras(scene) if o.name == want), None) if want else None
+    missing = want if want and picked is None else ""
     view = main_view()
-    sig = _signature(scene, view)
+    sig = _signature(scene, None if picked else view) + (picked.name if picked else "",)
     last = _state["file"]
     if not _state["dirty"] and sig == _state["sig"] and last and os.path.isfile(last["file"]):
         _write_json(os.path.join(root, "live_blender.json"),
-                    dict(last, file=os.path.basename(last["file"]), id=rid, time=time.time()))
+                    dict(last, file=os.path.basename(last["file"]), missing=missing, id=rid, time=time.time()))
         _state["status"] = f"sent (unchanged) {time.strftime('%H:%M:%S')}"
         return
     t0 = time.time()
     snap = os.path.join(root, f"blender_snap_{time.strftime('%Y%m%d_%H%M%S')}_{int(t0 * 1000) % 1000:03d}.blend")
     looking_through = view is not None and view[3].view_perspective == "CAMERA" and scene.camera is not None
     ob = data = None
-    if looking_through:
+    if picked is not None:
+        camera, how = picked.name, "camera"
+    elif looking_through:
         camera, how = scene.camera.name, "camera"
     elif view is not None:
         data = bpy.data.cameras.new(VIEW_CAM)
@@ -169,7 +195,8 @@ def send(rid):
             bpy.data.objects.remove(ob, do_unlink=True)
             bpy.data.cameras.remove(data)
     ans = {"app": "blender", "version": bpy.app.version_string, "file": os.path.basename(snap), "camera": camera,
-           "how": how, "source": os.path.basename(bpy.data.filepath) or "unsaved scene", "scene": scene.name,
+           "how": how, "missing": missing, "source": os.path.basename(bpy.data.filepath) or "unsaved scene",
+           "scene": scene.name,
            "save_s": round(time.time() - t0, 2)}
     _write_json(os.path.join(root, "live_blender.json"), dict(ans, id=rid, time=time.time()))
     _state.update(dirty=False, sig=sig, file=dict(ans, file=snap))
@@ -190,13 +217,14 @@ def _tick():
         now = time.time()
         if now - _state["alive_t"] > ALIVE_EVERY:
             os.makedirs(root, exist_ok=True)
-            _write_json(os.path.join(root, "blender.alive"), {"version": bpy.app.version_string, "pid": os.getpid()})
+            _write_json(os.path.join(root, "blender.alive"), {"version": bpy.app.version_string, "pid": os.getpid(),
+                                                                     "cameras": [o.name for o in cameras(bpy.context.scene)]})
             _state["alive_t"] = now
         req = _read_json(os.path.join(root, "request_blender.json"))
         if req and req.get("id") and req["id"] != _state["last_id"]:
             _state["last_id"] = req["id"]
             try:
-                send(req["id"])
+                send(req["id"], str(req.get("camera") or ""))
             except Exception as e:  # noqa: BLE001  (ComfyUI shows it)
                 last = _state["file"]               # the last good snapshot stays usable
                 _write_json(os.path.join(root, "live_blender.json"),

@@ -119,28 +119,53 @@ def _live_scene(file, camera, source, width=0, height=0):
     if app is None:
         return out
     name = live.NAMES[app]
-    ans, note = live.resolve(live_root(), app, kst.number("live_wait", 60))
+    want = camera.strip()                                  # live: the camera asked from the app ("" = what you look through)
+    ans, note = live.resolve(live_root(), app, kst.number("live_wait", 60), camera=want)
     if ans is None:
         out.update(file="", line=f"live: {note}. To link: {live.HOW_TO[app]}, then press refresh. The sample "
                                  "building until then.")
         return out
     size = ans.get("size") or [0, 0]
     out.update(file=ans["file"], width=width or int(size[0]), height=height or int(size[1]))
-    if camera.strip():
-        seen = "camera " + camera.strip()                  # a name typed on the node wins
-    else:
-        out["camera"] = ans.get("camera", "")
-        if ans.get("view") and not out["camera"]:
-            if not (out["width"] and out["height"]):
-                raise ValueError(f"{name} sent a view without a frame size: set width and height on the node")
-            out["live_camera"] = live.blender_camera(ans["view"], out["width"], out["height"])
-        seen = ("your viewport view" if ans.get("how") == "viewport"
-                else "camera " + (ans.get("view", {}).get("name") or out["camera"] or "auto"))
+    out["camera"] = ans.get("camera", "")
+    if ans.get("view") and not out["camera"]:
+        if not (out["width"] and out["height"]):
+            raise ValueError(f"{name} sent a view without a frame size: set width and height on the node")
+        out["live_camera"] = live.blender_camera(ans["view"], out["width"], out["height"])
+    seen = ("your viewport view" if ans.get("how") == "viewport"
+            else "camera " + ((ans.get("view") or {}).get("name") or out["camera"] or "auto"))
+    if want and ans.get("missing"):
+        note = "; ".join(x for x in (note, f"there is no camera '{want}' in the {name} scene, so what you look "
+                                            "through") if x)
+    elif want and "missing" not in ans:
+        note = "; ".join(x for x in (note, f"this {name} link is older and cannot pick a camera: "
+                                            + {"blender": "install tools/blender/kubakub_live.py again",
+                                               "houdini": "restart Houdini"}[app]) if x)
     sent = time.strftime("%H:%M:%S", time.localtime(ans.get("time", 0)))
     out["line"] = (f"live from {name} {ans.get('version', '')}: {ans.get('source', '?')}, {seen}, sent {sent}"
                    + (f", frame {out['width']}x{out['height']}" if ans.get("size") and not (width and height) else "")
                    + (f" ({note})" if note else ""))
     return out
+
+
+def guess_unit_scale(size):
+    """unit_scale = 0 (auto): the largest extent of the model in file units -> the scale into metres. A facade is
+    taken as 2-300 m: up to 300 units = metres (1.0); above, centimetres or millimetres, whichever makes the
+    building closer to a usual 25 m (a 2470 unit model = 24.7 m in cm; 25000 units = 25 m in mm)."""
+    import math
+    if not size or size <= 300.0:
+        return 1.0
+    return min((0.01, 0.001), key=lambda s: abs(math.log10(size * s / 25.0)))
+
+
+def _model_size(folder):
+    """-> the largest extent of the exported model (units of that export), or None when not exported yet."""
+    try:
+        with open(os.path.join(folder, "scene.json"), encoding="utf-8") as f:
+            info = json.load(f)
+        return float(max(np.array(info["bbox_max"]) - np.array(info["bbox_min"])))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def _depth_vis(depth):
@@ -166,6 +191,7 @@ class KUBA_SceneRender(io.ComfyNode):
             display_name="kubakub scene render",
             category="kubakub/3d/scene",
             search_aliases=['blender', 'fbx', '3d', 'clay', 'depth'],
+            is_output_node=True,  # the live refresh button runs only this node (partial run needs an output node)
             description=(
                 "Renders a 3D model of the building from the projector's camera and splits it into regions "
                 "you can paint. Takes a 3D scene file (.blend .fbx .obj .abc .glb .gltf .stl .ply .usd) and gives "
@@ -175,46 +201,67 @@ class KUBA_SceneRender(io.ComfyNode):
                 "kubakub regions from id maps (regions_pass e.g. shelves or parts). Needs Blender 4.x "
                 "(runs headless). .c4d: export FBX or Alembic from Cinema 4D."),
             inputs=[
-                io.String.Input("file", default="", placeholder="paste the path of your .blend / .fbx / .obj  (empty = the sample building)",
+                io.String.Input("file", display_name="scene file", default="", placeholder="paste the path of your .blend / .fbx / .obj  (empty = the sample building)",
                                 tooltip="Your scene file: paste its path (Explorer: right click, Copy as path; the quotes "
                                         "are fine). Empty: the built-in sample building, so the node runs as it is."),
-                io.String.Input("camera", default="", optional=True,
+                io.String.Input("camera", display_name="camera name", default="", optional=True,
                                 tooltip="Camera object name. Empty: the file's active camera, else the first "
                                         "camera, else a front camera framing the model (it finds the facade side by "
-                                        "itself). A connected projector replaces the file's camera."),
-                io.Int.Input("width", default=0, min=0, max=16384, step=8,
-                             tooltip="Render width; 0 = the file's render resolution (the matrix size)."),
-                io.Int.Input("height", default=0, min=0, max=16384, step=8,
-                             tooltip="Render height; 0 = the file's render resolution."),
-                io.Int.Input("frame", default=-1, min=-1, max=100000,
-                             tooltip="Scene frame (animated cameras, Alembic); -1 = the file's current frame."),
-                io.String.Input("passes", default=DEFAULT_PASSES,
-                                tooltip="ID passes to write, separated by spaces: " + " ".join(scene_ids.PASSES)
+                                        "itself). A connected projector replaces the file's camera. Live: the "
+                                        "'live camera' list picks one of the app's cameras; empty = what you look "
+                                        "through in the app."),
+                io.Int.Input("width", display_name="width (0 = the file's)", default=0, min=0, max=16384, step=8,
+                             advanced=True,
+                             tooltip="Picture width in pixels. 0 = the render size set in the scene (usually your "
+                                     "matrix size). Set it for a projector with another resolution."),
+                io.Int.Input("height", display_name="height (0 = the file's)", default=0, min=0, max=16384, step=8,
+                             advanced=True, tooltip="Picture height in pixels. 0 = the render size set in the scene."),
+                io.Int.Input("frame", display_name="frame (-1 = current)", default=-1, min=-1, max=100000,
+                             advanced=True,
+                             tooltip="Which frame of an animated scene (moving camera, Alembic). -1 = the frame the "
+                                     "scene is on."),
+                io.String.Input("passes", display_name="maps to make", default=DEFAULT_PASSES, advanced=True,
+                                tooltip="Which region maps to make (each one cuts the facade in a different way), "
+                                        "separated by spaces: " + " ".join(scene_ids.PASSES)
                                         + " (objects / materials / collections only when the file has more than "
                                           "one). elements = windows, columns, cornices; sections = left / centre / "
                                           "right; floors = the storeys."),
-                io.Combo.Input("preview_pass", options=list(scene_ids.PASSES), default="shelves",
-                               tooltip="Which ID pass to show on ids_preview (it is also written when 'passes' "
-                                       "does not list it)."),
-                io.Float.Input("shelf_min_step_m", advanced=True, default=0.05, min=0.005, max=2.0, step=0.005,
-                               tooltip="shelves: depth steps closer than this (m) are one shelf."),
-                io.Float.Input("plane_angle_deg", default=3.0, min=0.1, max=30.0, step=0.1, advanced=True,
-                               tooltip="planes: neighbour faces within this angle are one plane."),
-                io.Float.Input("plane_offset_m", default=0.02, min=0.0, max=1.0, step=0.005, advanced=True,
-                               tooltip="planes: and within this offset (m)."),
-                io.String.Input("layer_bands_m", default="-0.5 -0.05 0.05 0.5", advanced=True,
-                                tooltip="layers: 4 limits (m, + = towards the camera) relative to the main "
-                                        "facade plane -> deep_recess, recess, facade, relief, projection."),
-                io.String.Input("save_folder", advanced=True, default="", optional=True,
-                                tooltip="Also copy the ID maps, legends, clay and scene.json here (for "
-                                        "Houdini / After Effects). Empty: only the temp cache."),
-                io.String.Input("blender_path", default="", optional=True, advanced=True,
+                io.Combo.Input("preview_pass", display_name="show map", options=list(scene_ids.PASSES),
+                               default="shelves",
+                               tooltip="Which region map the preview shows. elements = windows / columns / cornices, "
+                                       "floors = storeys, sections = left / centre / right, shelves = depth steps, "
+                                       "layers = in front of / behind the wall, facing = which way surfaces look, "
+                                       "planes = flat faces, parts = separate pieces."),
+                io.Float.Input("shelf_min_step_m", display_name="depth step (m)", advanced=True, default=0.05,
+                               min=0.005, max=2.0, step=0.005,
+                               tooltip="For the shelves map: parts of the facade less than this far apart in depth "
+                                       "count as one shelf. Bigger = fewer, coarser shelves (try 0.15 for a scan)."),
+                io.Float.Input("plane_angle_deg", display_name="same plane: angle (°)", default=3.0, min=0.1,
+                               max=30.0, step=0.1, advanced=True,
+                               tooltip="For the planes map: neighbouring faces that bend less than this many "
+                                       "degrees count as one flat plane. Bigger = fewer, larger planes."),
+                io.Float.Input("plane_offset_m", display_name="same plane: gap (m)", default=0.02, min=0.0,
+                               max=1.0, step=0.005, advanced=True,
+                               tooltip="For the planes map: faces also must lie within this distance of each "
+                                       "other to count as one plane."),
+                io.String.Input("layer_bands_m", display_name="layer limits (m)", default="-0.5 -0.05 0.05 0.5",
+                                advanced=True,
+                                tooltip="For the layers map: 4 distances from the main wall (m, + = towards you) "
+                                        "that cut it into deep recess | recess | facade | relief | projection."),
+                io.String.Input("save_folder", display_name="also save maps to", advanced=True, default="",
+                                optional=True,
+                                tooltip="A folder to copy the region maps, their legends, the clay picture and "
+                                        "scene.json into (for Houdini / After Effects). Empty = only ComfyUI's cache."),
+                io.String.Input("blender_path", display_name="blender.exe (empty = found)", default="", optional=True,
+                                advanced=True,
                                 tooltip="blender.exe or its folder. Empty: the blender setting in kubakub.ini or the newest "
                                         "C:\\Program Files\\Blender Foundation install."),
-                io.Float.Input("unit_scale", advanced=True, default=1.0, min=0.0001, max=10000.0, step=0.001, optional=True,
+                io.Float.Input("unit_scale", display_name="units to metres (0 = auto)", advanced=True, default=0.0, min=0.0, max=10000.0, step=0.001, optional=True,
                                tooltip="Multiplies the model (and the camera position) into metres, e.g. 0.01 "
-                                       "for a file in cm. The report warns when the model looks too small or big."),
-                io.Float.Input("min_size_m", advanced=True, default=0.5, min=0.0, max=50.0, step=0.05, optional=True,
+                                       "for a file in cm. 0 = auto: a model over 300 units across is read as cm "
+                                       "(or mm for a very big one), else as metres; the report says what it took. "
+                                       "Any other value is used as it is."),
+                io.Float.Input("min_size_m", display_name="merge pieces under (m)", advanced=True, default=0.5, min=0.0, max=50.0, step=0.05, optional=True,
                                tooltip="Pieces smaller than this across the wall (largest of width / height, m) "
                                        "merge into the neighbour they share the longest border with - the crowd "
                                        "cannot read them anyway. 0 = keep everything."),
@@ -222,7 +269,8 @@ class KUBA_SceneRender(io.ComfyNode):
                                     tooltip="From kubakub projector: where the projector stands (metres from the wall, "
                                             "height, throw). Used instead of the file's camera; set width / height to "
                                             "the projector's resolution."),
-                io.Combo.Input("source", options=list(LIVE_SOURCES), default="file", optional=True,
+                io.Combo.Input("source", display_name="scene from", options=list(LIVE_SOURCES), default="file",
+                               optional=True,
                                tooltip="file: the path in 'file'. live blender / live houdini: the scene open in that "
                                        "app right now (its kubakub live link, tools/blender or tools/houdini): press "
                                        "refresh on this node and the app sends the scene as it is, seen from your "
@@ -262,11 +310,14 @@ class KUBA_SceneRender(io.ComfyNode):
             h.update(f"{p}|{st.st_size}|{st.st_mtime_ns}".encode("utf-8", "replace"))
             # if the cached folder is gone (the size cap, a cleared cache or temp), run again instead of handing
             # downstream nodes a folder that no longer exists
-            folder = bridge.cache_folder(p, cache_root(),
-                                         (kwargs.get("camera") or "").strip(), int(kwargs.get("width") or 0),
-                                         int(kwargs.get("height") or 0), int(kwargs.get("frame", -1)),
-                                         float(kwargs.get("unit_scale") or 1.0), projector=kwargs.get("projector"),
-                                         live_camera=live_camera)
+            where = lambda scale: bridge.cache_folder(p, cache_root(),
+                                                      (kwargs.get("camera") or "").strip(), int(kwargs.get("width") or 0),
+                                                      int(kwargs.get("height") or 0), int(kwargs.get("frame", -1)),
+                                                      scale, projector=kwargs.get("projector"), live_camera=live_camera)
+            scale = float(kwargs.get("unit_scale") or 0.0)
+            if scale <= 0:                             # auto: the scale the first export (at 1) measured
+                scale = guess_unit_scale(_model_size(where(1.0)) or 0.0)
+            folder = where(scale)
             ok = os.path.isfile(os.path.join(folder, "scene.json")) and any(
                 f.startswith("ids_") for f in os.listdir(folder))
             h.update(bridge.folder_token(folder, ok))
@@ -277,7 +328,7 @@ class KUBA_SceneRender(io.ComfyNode):
     @classmethod
     def execute(cls, file, width, height, frame, passes, preview_pass, shelf_min_step_m, plane_angle_deg,
                 plane_offset_m, layer_bands_m, camera="", save_folder="", blender_path="",
-                unit_scale=1.0, min_size_m=0.5, projector=None, source="file") -> io.NodeOutput:
+                unit_scale=0.0, min_size_m=0.5, projector=None, source="file") -> io.NodeOutput:
         t0 = time.perf_counter()
         L = _live_scene(file, camera, source, width, height)
         file, camera, width, height, live_camera, live_line = (L["file"], L["camera"], L["width"], L["height"],
@@ -288,9 +339,23 @@ class KUBA_SceneRender(io.ComfyNode):
         sample = not bridge.clean_path(file)
         if sample:                                     # nothing pasted yet: the sample building
             file = samples.model(folder_paths.get_temp_directory())
-        folder, cached, _ = bridge.export(file, cache_root(), camera=camera.strip(), width=width, height=height,
-                                          frame=frame, blender=blender_path, unit_scale=unit_scale, projector=projector,
-                                          live_camera=live_camera)
+        export = lambda scale: bridge.export(file, cache_root(), camera=camera.strip(), width=width, height=height,
+                                             frame=frame, blender=blender_path, unit_scale=scale, projector=projector,
+                                             live_camera=live_camera)
+        scale_line = ""
+        if not unit_scale or unit_scale <= 0:          # auto: export at 1, measure, again at the guessed scale
+            folder, cached, _ = export(1.0)
+            size1 = _model_size(folder) or 0.0
+            unit_scale = guess_unit_scale(size1)
+            if unit_scale != 1.0:
+                folder, cached, _ = export(unit_scale)
+                scale_line = (f"unit_scale auto: the model is {size1:.4g} units across, read as "
+                              f"{'cm' if unit_scale == 0.01 else 'mm'} -> {size1 * unit_scale:.1f} m (x {unit_scale:g}); "
+                              "type a unit_scale to choose yourself")
+            else:
+                scale_line = f"unit_scale auto: metres ({size1:.1f} m across)"
+        else:
+            folder, cached, _ = export(unit_scale)
         t_export = time.perf_counter() - t0
         wanted = [p for p in passes.replace(",", " ").split() if p]
         bad = [p for p in wanted if p not in scene_ids.PASSES]
@@ -362,12 +427,13 @@ class KUBA_SceneRender(io.ComfyNode):
             f"shelves (m from the main plane): {summary.get('shelves_m', '-')}",
             f"ID passes: {passes_txt}",
             f"export {export_txt}, ID passes {'reused' if reused else 'built'}, total {time.perf_counter() - t0:.1f} s",
-            f"folder: {ids_dir}", *summary["notes"], *info.get("notes", []),
+            f"folder: {ids_dir}", *([scale_line] if scale_line else []), *summary["notes"], *info.get("notes", []),
             *([samples.note("3D file", "file")] if sample and not live_line else [])])
         size = np.array(info["bbox_max"]) - np.array(info["bbox_min"])
         if size.max() < 2.0 or size.max() > 2000.0:
             report += (f"\nWARNING: the model is {size.max():.3g} m at its largest - wrong units? Distances need "
-                       f"metres: set unit_scale (a 30 m building at {size.max():.3g} -> {30.0 / size.max():.4g}).")
+                       f"metres: set unit_scale (a 30 m building at {size.max():.3g} -> {30.0 / size.max():.4g}), "
+                       "or 0 = auto.")
         log.info("[KUBA scene3d] %s", report.replace("\n", "\n    "))
         preview = _img(prev)
         scene_out = {"folder": folder, "ids": ids_dir, "file": info["file"], "blender": blender_path,
@@ -1407,6 +1473,31 @@ def prestart_relight(scene):
         log.info("[KUBA scene3d] Blender pre-start skipped: %s", e)
         return None
 
+
+def _routes():
+    """GET /kubakub/scene3d/live_cameras?source=live houdini -> {"linked": bool, "cameras": [names]}: the cameras
+    the open app lists in its .alive file (names only, from the local live folder), for the live camera list."""
+    import sys
+    srv = sys.modules.get("server")                        # no running ComfyUI (the tests): no route
+    if srv is None or getattr(getattr(srv, "PromptServer", None), "instance", None) is None:
+        return
+    try:
+        from aiohttp import web
+    except ImportError:
+        return
+
+    async def live_cameras(request):
+        app = live.APPS.get(str(request.query.get("source", "")))
+        names = live.cameras(live_root(), app) if app else None
+        return web.json_response({"linked": names is not None, "cameras": names or []})
+
+    try:
+        srv.PromptServer.instance.routes.get("/kubakub/scene3d/live_cameras")(live_cameras)
+    except (AttributeError, RuntimeError) as e:
+        log.warning("[KUBA scene3d] route not registered: %s", e)
+
+
+_routes()
 
 NODE_CLASS_MAPPINGS = {
     "KUBA_SceneRender": KUBA_SceneRender,

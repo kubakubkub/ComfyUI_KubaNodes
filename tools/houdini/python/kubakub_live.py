@@ -14,6 +14,7 @@ kubakub/scene3d/live.py of the ComfyUI_KubaNodes pack.
 import glob
 import json
 import os
+import threading
 import time
 
 import hou
@@ -33,18 +34,33 @@ def live_folder():
 
 
 def _write_json(path, obj):
-    tmp = f"{path}.{os.getpid()}.tmp"
+    # on Windows a rename onto a file the other side is reading right now is refused: try again for a moment
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f)
-    os.replace(tmp, path)
+    for i in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == 19:
+                os.remove(tmp)
+                raise
+            time.sleep(0.01)
 
 
 def _read_json(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+    # a file being replaced right now can be refused or (on some disks) read half: try again for a moment
+    for i in range(5):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            if i < 4:
+                time.sleep(0.01)
+    return None
 
 
 def _status(msg):
@@ -58,6 +74,10 @@ def displayed_objects():
     return [n for n in hou.node("/obj").allSubChildren()
             if isinstance(n, hou.ObjNode) and n.type().name() not in ("cam", "camera") and n.isObjectDisplayed()
             and getattr(n, "displayNode", lambda: None)() is not None]
+
+
+def cameras():
+    return [n for n in hou.node("/obj").allSubChildren() if isinstance(n, hou.ObjNode) and n.type().name() == "cam"]
 
 
 def viewport():
@@ -119,11 +139,12 @@ def viewport_view(vp, objs):
     return view, size
 
 
-def _signature(objs, view, size):
+def _signature(objs):
+    """What the Alembic holds: a changed view or camera needs no new export, only a new answer."""
     geo = tuple((n.path(), n.worldTransform().asTuple(), n.displayNode().path(), n.displayNode().cookCount(),
                  n.displayNode().needsToCook())          # an edit the viewport has not cooked yet is a change too
                 for n in objs)
-    return (hou.hipFile.path(), hou.frame(), geo, json.dumps(view, sort_keys=True), tuple(size))
+    return (hou.hipFile.path(), hou.frame(), geo)
 
 
 def write_alembic(path):
@@ -145,13 +166,16 @@ def write_alembic(path):
         raise RuntimeError("the Alembic export wrote nothing (is anything displayed in /obj?)")
 
 
-def send(rid):
-    """Answer request `rid`: a new Alembic when something changed, else the last one again."""
+def send(rid, want=""):
+    """Answer request `rid`, seen through camera `want` ("" = what you look through): a new Alembic when the
+    scene changed, else the last one again (with the view as it is now)."""
     root = live_folder()
     os.makedirs(root, exist_ok=True)
     objs = displayed_objects()
     vp = viewport()
-    cam = vp.camera() if vp is not None else None
+    want = (want or "").strip()
+    picked = next((c for c in cameras() if want in (c.name(), c.path())), None) if want else None
+    cam = picked or (vp.camera() if vp is not None else None)
     if cam is not None:
         view, size = camera_view(cam)
         how = "camera"
@@ -159,24 +183,25 @@ def send(rid):
         view, size = viewport_view(vp, objs)
         how = "viewport"
     else:                                             # no UI: the first camera, else the node frames the model
-        cams = [n for n in hou.node("/obj").allSubChildren() if isinstance(n, hou.ObjNode) and n.type().name() == "cam"]
+        cams = cameras()
         view, size = camera_view(cams[0]) if cams else (None, [0, 0])
         how = "camera"
-    sig = _signature(objs, view, size)
+    seen = {"how": how, "size": size, "view": view, "missing": want if want and picked is None else ""}
+    sig = _signature(objs)
     last = _state["file"]
     if sig == _state["sig"] and last and os.path.isfile(last["file"]):
+        _state["file"] = dict(last, **seen)
         _write_json(os.path.join(root, f"live_{APP}.json"),
-                    dict(last, file=os.path.basename(last["file"]), id=rid, time=time.time()))
-        _status(f"sent (unchanged) {time.strftime('%H:%M:%S')}")
+                    dict(last, **seen, file=os.path.basename(last["file"]), id=rid, time=time.time()))
+        _status(f"sent (scene unchanged) {time.strftime('%H:%M:%S')} ({how})")
         return
     t0 = time.time()
     snap = os.path.join(root, f"houdini_snap_{time.strftime('%Y%m%d_%H%M%S')}_{int(t0 * 1000) % 1000:03d}.abc")
     write_alembic(snap)
     ans = {"app": APP, "version": hou.applicationVersionString(), "file": os.path.basename(snap), "camera": "",
-           "how": how, "source": hou.hipFile.basename(), "size": size, "view": view,
-           "save_s": round(time.time() - t0, 2)}
+           "source": hou.hipFile.basename(), **seen, "save_s": round(time.time() - t0, 2)}
     _write_json(os.path.join(root, f"live_{APP}.json"), dict(ans, id=rid, time=time.time()))
-    _state.update(sig=_signature(objs, view, size), file=dict(ans, file=snap))   # after the export: it may cook
+    _state.update(sig=_signature(objs), file=dict(ans, file=snap))   # after the export: it may cook
     _status(f"sent {time.strftime('%H:%M:%S')} ({how}, {len(objs)} objects)")
     for old in sorted(glob.glob(os.path.join(root, "houdini_snap_*.abc")))[:-KEEP]:
         try:
@@ -195,13 +220,14 @@ def _tick():
         if now - _state["alive_t"] > ALIVE_EVERY:
             os.makedirs(root, exist_ok=True)
             _write_json(os.path.join(root, f"{APP}.alive"),
-                        {"version": hou.applicationVersionString(), "pid": os.getpid()})
+                        {"version": hou.applicationVersionString(), "pid": os.getpid(),
+                         "cameras": [c.name() for c in cameras()]})
             _state["alive_t"] = now
         req = _read_json(os.path.join(root, f"request_{APP}.json"))
         if req and req.get("id") and req["id"] != _state["last_id"]:
             _state["last_id"] = req["id"]
             try:
-                send(req["id"])
+                send(req["id"], str(req.get("camera") or ""))
             except Exception as e:  # noqa: BLE001  (ComfyUI shows it)
                 last = _state["file"]                 # the last good snapshot stays usable
                 _write_json(os.path.join(root, f"live_{APP}.json"),

@@ -107,7 +107,8 @@ python -m pip install -r ComfyUI_KubaNodes/requirements.txt     # the portable b
 
 The only package this adds is OpenCV, and only if you don't have it yet. Everything else comes with ComfyUI
 (0.37.0 or newer). For the 3D nodes and light layers, install [Blender 4.x](https://www.blender.org/download/lts/4-5/)
-(found by itself).
+(found by itself). To take the scene open in **Blender or Houdini** live into scene render, install their
+add-ons from this pack once: [docs/live-link.md](docs/live-link.md).
 
 **Models:** the example workflows need them, the nodes don't: see [docs/MODELS.md](docs/MODELS.md). Any variant of a
 model works (bf16, fp8, int8, NVFP4, GGUF ...): pick your file in the loader when a workflow names another one.
@@ -241,6 +242,7 @@ One page per menu group, with every input, the rule syntax, speeds and tests:
 | [director](docs/director.md) | kubakub sound; the director window: layers, timeline, sound, LTX and H3 clips, diffuse, light layers, video mapping, behaviours, export |
 | [post](docs/post.md) | colour match (a reference picture or a .cube), deflicker, retime, burn in |
 | [3d scene](docs/scene3d.md) | scene render and its ID passes, architecture passes, scene measure, preview, walkthrough, brightness compensation, moving pieces |
+| [live link](docs/live-link.md) | installing the Blender add-on and the Houdini package (in `tools/`) that send the open scene to scene render; checking, updating, removing, troubleshooting |
 | [from renders](docs/from-renders.md) | regions from ID renders (Houdini, Blender, any ID pass), regions from cryptomatte |
 | [fabricate](docs/fabricate.md) | relief panels in millimetres, safety check, STL / OBJ |
 | [models](docs/MODELS.md) | the models the example workflows use, and where they go |

@@ -31,7 +31,10 @@ def pref_dirs():
     found = glob.glob(env) if env else []
     docs = os.path.join(os.path.expanduser("~"), "Documents")
     found += glob.glob(os.path.join(docs, "houdini[0-9]*.[0-9]*"))
-    return sorted({os.path.abspath(p) for p in found if os.path.isdir(p)})
+    def version(p):  # newest Houdini first
+        digits = os.path.basename(p).lower().replace("houdini", "").split(".")
+        return tuple(int(x) if x.isdigit() else 0 for x in digits)
+    return sorted({os.path.abspath(p) for p in found if os.path.isdir(p)}, key=version, reverse=True)
 
 
 def live_folder_setting():
