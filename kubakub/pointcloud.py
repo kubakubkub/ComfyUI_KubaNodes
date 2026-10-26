@@ -41,17 +41,32 @@ DEFAULT_LOOK = {
     "tint": ["#a187b7", "#f18a58"],   # tint: dark -> bright
     "blend": "glow",            # glow (light adds up, on black) / ink (on white) / solid (the nearest point wins)
     "near": "bright",           # which side of the depth picture is near (depth nodes differ)
-    "speed": 1.0,
+    "speed": 0.6,
     "drift": 0.15, "breathe": 0.0, "wind": 0.0, "scan": 0.0,
+    "curl": 0.0,                # every point runs on small curly loops (neighbours curl together)
     "push": 0.6,                # how far the field pushes points out
     "swarm": 0.5,               # pictures: how far the points fly out while they travel to the next picture
+    "trails": 0.0,              # seconds of each point's own way drawn behind it as a fine line (0 = none)
+    "trail_share": 0.1,         # which share of the points draws a trail
+    "trail_opacity": 0.5,
+    "forces": [],               # arrows drawn on the picture, [x0, y0, x1, y1] in 0..1 (y down): they push the points
+    "force": 1.0,               # how far the arrows push
+    "reach": 0.15,              # how far from an arrow it still pushes (0..1 of the picture's height)
+    "sound": {"burst": 0.5, "swell": 0.3, "size": 0.0, "sparkle": 0.0, "motion": 0.4},
     "camera": {"start": {"yaw": 0.0, "pitch": 0.0, "dolly": 0.0, "x": 0.0, "y": 0.0},
                "end": {"yaw": 18.0, "pitch": -6.0, "dolly": 0.35, "x": 0.0, "y": 0.0},
-               "ease": "smooth"},
+               "ease": "smooth",
+               "shake": 0.0,    # handheld: the camera shakes a little (0 = steady)
+               "path": []},     # a recorded move: [[0..1 of the move, yaw, pitch, dolly, x, y] ...]; it beats start / end
     "tracks": {"marks": True, "lines": "network", "distance": 0.2, "colour": "#f18a58", "opacity": 0.85, "size": 1.0},
 }
 _RANGES = {"density": (128, 2048), "jitter": (0, 1), "depth": (0, 4), "far_cut": (0, 1), "size": (0.1, 8), "opacity": (0.01, 1),
-           "speed": (0, 4), "drift": (0, 2), "breathe": (0, 2), "wind": (0, 2), "scan": (0, 2), "push": (0, 3), "swarm": (0, 2)}
+           "speed": (0, 4), "drift": (0, 2), "breathe": (0, 2), "wind": (0, 2), "scan": (0, 2), "curl": (0, 2), "push": (0, 3),
+           "swarm": (0, 2), "trails": (0, 3), "trail_share": (0.01, 1), "trail_opacity": (0, 1), "force": (0, 3), "reach": (0.02, 1)}
+_SOUND_RANGES = {"burst": (0, 2), "swell": (0, 2), "size": (0, 2), "sparkle": (0, 1), "motion": (0, 2)}
+MAX_FORCES = 8
+MAX_PATH = 600                                      # keys of a recorded camera move
+TRAIL_STEPS = 12                                    # segments of a trail
 _CAM_RANGES = {"yaw": (-180, 180), "pitch": (-89, 89), "dolly": (-3, 0.95), "x": (-3, 3), "y": (-3, 3)}
 
 
@@ -97,6 +112,25 @@ def look(raw) -> dict:
             lk["camera"][key][k] = _num(src.get(k), lk["camera"][key][k], lo, hi)
     if cam.get("ease") in EASES:
         lk["camera"]["ease"] = cam["ease"]
+    lk["camera"]["shake"] = _num(cam.get("shake"), 0.0, 0, 2)
+    path = []
+    for key in cam.get("path") if isinstance(cam.get("path"), list) else []:
+        if isinstance(key, (list, tuple)) and len(key) == 6:
+            v = [_num(key[0], None, 0, 1)] + [_num(x, None, lo, hi) for x, (lo, hi) in zip(key[1:], _CAM_RANGES.values())]
+            if None not in v:
+                path.append(v)
+    path.sort(key=lambda k: k[0])
+    lk["camera"]["path"] = path[:MAX_PATH] if len(path) >= 2 else []
+    forces = []
+    for f in raw.get("forces") if isinstance(raw.get("forces"), list) else []:
+        if isinstance(f, (list, tuple)) and len(f) == 4:
+            v = [_num(x, None, -0.5, 1.5) for x in f]
+            if None not in v and math.hypot(v[2] - v[0], v[3] - v[1]) > 1e-4:
+                forces.append(v)
+    lk["forces"] = forces[:MAX_FORCES]
+    snd = raw.get("sound") if isinstance(raw.get("sound"), dict) else {}
+    for k, (lo, hi) in _SOUND_RANGES.items():
+        lk["sound"][k] = _num(snd.get(k), lk["sound"][k], lo, hi)
     tr = raw.get("tracks") if isinstance(raw.get("tracks"), dict) else {}
     lk["tracks"]["marks"] = bool(tr.get("marks", lk["tracks"]["marks"]))
     if tr.get("lines") in LINES:
@@ -186,17 +220,22 @@ def _colour_mode(c, lk):
     return c
 
 
-def points(lk, t, col_a, dep_a, aspect, col_b=None, dep_b=None, perm=None, s=0.0, field=None, device="cpu"):
+SILENT = {"level": 0.0, "low": 0.0, "mid": 0.0, "high": 0.0, "beat": 0.0}
+
+
+def points(lk, t, col_a, dep_a, aspect, col_b=None, dep_b=None, perm=None, s=0.0, field=None, device="cpu", snd=None,
+           idx=None):
     """Every point at t seconds: (P (N, 3), colour (N, 3), dist (N,), alive (N,) bool). col (3, h, w), dep (1, h, w)
-    0 far .. 1 near; with a next picture, perm and s > 0 the points travel to it; field (1, h, w) pushes them out."""
+    0 far .. 1 near; with a next picture, perm and s > 0 the points travel to it; field (1, h, w) pushes them out;
+    snd = what is heard now (SILENT keys, 0-1); idx = only these points (the trails)."""
     gw, gh = grid_size(lk["density"], col_a.shape[2], col_a.shape[1])
-    i = torch.arange(gw * gh, device=device, dtype=torch.int64)
+    i = torch.arange(gw * gh, device=device, dtype=torch.int64) if idx is None else idx.to(device)
     u, v = grid_uv(i, gw, gh, lk["jitter"])
     c = sample(col_a, u, v)[:, :3]
     d = sample(dep_a, u, v)[:, 0]
     P, dist = place(u, v, d, lk["depth"], aspect)
     if col_b is not None and perm is not None and s > 0:
-        j = perm.to(device)
+        j = perm.to(device) if idx is None else perm.to(device)[i]
         u2, v2 = grid_uv(j, gw, gh, lk["jitter"])
         c2, d2 = sample(col_b, u2, v2)[:, :3], sample(dep_b, u2, v2)[:, 0]
         P2, dist2 = place(u2, v2, d2, lk["depth"], aspect)
@@ -205,25 +244,59 @@ def points(lk, t, col_a, dep_a, aspect, col_b=None, dep_b=None, perm=None, s=0.0
     tt = t * lk["speed"]
     r2, r3, r4 = rnd(i, 2), rnd(i, 3), rnd(i, 4)
     tau = 6.2831853
+    sn, so = snd or SILENT, lk["sound"]
+    m = 1.0 + so["motion"] * sn["level"]           # the sound makes every motion bigger
     if lk["drift"] > 0:
-        P = P + torch.stack([torch.sin(0.8 * tt + tau * r2), torch.sin(0.7 * tt + tau * r3), torch.sin(0.6 * tt + tau * r4)], -1) * (lk["drift"] * 0.02 * dist)[:, None]
+        P = P + torch.stack([torch.sin(0.8 * tt + tau * r2), torch.sin(0.7 * tt + tau * r3), torch.sin(0.6 * tt + tau * r4)], -1) * (lk["drift"] * 0.01 * m * dist)[:, None]
     if lk["breathe"] > 0:
-        P = P * (1 + lk["breathe"] * 0.05 * torch.sin(1.6 * tt - d * 6.0))[:, None]
+        P = P * (1 + lk["breathe"] * 0.025 * m * torch.sin(1.6 * tt - d * 6.0))[:, None]
     if lk["wind"] > 0:
-        wx = lk["wind"] * 0.06 * dist * (torch.sin(1.3 * tt + v * 9.0 + r2 * 3.0) + 0.5 * torch.sin(2.3 * tt + r3 * tau))
-        wy = lk["wind"] * 0.02 * dist * torch.sin(1.7 * tt + u * 7.0 + r4 * tau)
+        wx = lk["wind"] * 0.03 * m * dist * (torch.sin(1.3 * tt + v * 9.0 + r2 * 3.0) + 0.5 * torch.sin(2.3 * tt + r3 * tau))
+        wy = lk["wind"] * 0.01 * m * dist * torch.sin(1.7 * tt + u * 7.0 + r4 * tau)
         P = P + torch.stack([wx, wy, torch.zeros_like(wx)], -1)
+    if lk["curl"] > 0:                              # loops on loops; the phase is smooth over the picture
+        ph = tau * (0.5 + 0.5 * torch.sin(5.3 * u + 3.1 * torch.sin(4.1 * v))) + 1.3 * r3
+        a, w = lk["curl"] * 0.012 * m * dist, 0.9 * tt
+        P = P + torch.stack([torch.cos(w + ph) + 0.45 * torch.cos(2.7 * w + 1.7 * ph),
+                             torch.sin(w + ph) + 0.45 * torch.sin(2.7 * w + 1.7 * ph),
+                             0.5 * torch.sin(0.6 * w + 2.0 * ph)], -1) * a[:, None]
+    if lk["forces"] and lk["force"] > 0:
+        P = P + force_push(lk, u, v, dist, tt, r2, aspect, m)
     if field is not None and lk["push"] > 0:
         f = sample(field, u, v)[:, 0]
         P = P + _dir(i) * (lk["push"] * f * 0.3 * dist * (0.4 + r2))[:, None]
+    if so["swell"] > 0 and sn["low"] > 0:
+        P = P * (1 + so["swell"] * 0.06 * sn["low"])
+    if so["burst"] > 0 and sn["beat"] > 0:
+        P = P + _dir(i) * (so["burst"] * sn["beat"] * 0.08 * dist * (0.4 + r2))[:, None]
     c = _colour_mode(c.clamp(0, 1), lk)
     if lk["scan"] > 0:
         sc = 1.0 - ((tt * 0.25) % 1.0)
         w = (1.0 - (d - sc).abs() / 0.04).clamp(min=0.0) * lk["scan"]
         c = c + (1 - c) * (w * 0.8).clamp(max=1.0)[:, None]
         P = P + _dir(i) * (w * 0.02 * dist)[:, None]
+    if so["sparkle"] > 0 and sn["high"] > 0:        # the highs light up a few points
+        k = ((r2 + r3) % 1.0 - (1.0 - so["sparkle"] * sn["high"] * 0.3)) / 0.02
+        c = c + (1 - c) * k.clamp(0, 1)[:, None]
     alive = d >= lk["far_cut"]
     return P, c, dist, alive
+
+
+def force_push(lk, u, v, dist, tt, r2, aspect, m=1.0):
+    """How far the drawn arrows push each point (N, 3): along the arrow, as far as it is long, fading out at 'reach'
+    from it (in the picture, its height = 1), with a slow sway."""
+    out = torch.zeros((len(u), 3), dtype=u.dtype, device=u.device)
+    px, py = u * aspect, v
+    for x0, y0, x1, y1 in lk["forces"]:
+        ax, ay, bx, by = x0 * aspect, y0, x1 * aspect, y1
+        dx, dy = bx - ax, by - ay
+        k = (((px - ax) * dx + (py - ay) * dy) / max(dx * dx + dy * dy, 1e-9)).clamp(0, 1)
+        e = torch.hypot(px - (ax + k * dx), py - (ay + k * dy))
+        w = (1.0 - e / lk["reach"]).clamp(0, 1)
+        w = w * w * (3 - 2 * w) * dist * (lk["force"] * 0.5 * m) * (1 + 0.3 * torch.sin(1.1 * tt + 6.2831853 * r2))
+        out[:, 0] += w * dx
+        out[:, 1] -= w * dy
+    return out
 
 
 def _dir(i):
@@ -237,11 +310,29 @@ def ease(a, how):
     return 0.0 if how == "still" else a if how == "linear" else a * a * (3 - 2 * a)
 
 
-def camera_at(lk, a):
-    """The camera at 0..1 of the move: start -> end with the ease."""
+def camera_at(lk, a, t=0.0):
+    """The camera at 0..1 of the move (t seconds in): a recorded path, else start -> end with the ease; a handheld
+    shake on top."""
     cam = lk["camera"]
-    k = ease(a, cam["ease"])
-    return {key: cam["start"][key] + (cam["end"][key] - cam["start"][key]) * k for key in _CAM_RANGES}
+    path = cam.get("path") or []
+    if len(path) >= 2:
+        a = min(max(float(a), 0.0), 1.0)
+        j = 0
+        while j < len(path) - 2 and path[j + 1][0] < a:
+            j += 1
+        p, q = path[j], path[j + 1]
+        k = min(max((a - p[0]) / max(q[0] - p[0], 1e-9), 0.0), 1.0)
+        out = {key: p[n + 1] + (q[n + 1] - p[n + 1]) * k for n, key in enumerate(_CAM_RANGES)}
+    else:
+        k = ease(a, cam["ease"])
+        out = {key: cam["start"][key] + (cam["end"][key] - cam["start"][key]) * k for key in _CAM_RANGES}
+    sh = cam.get("shake", 0.0)
+    if sh > 0:
+        out["yaw"] += sh * 1.5 * (math.sin(1.1 * t) + 0.5 * math.sin(2.7 * t + 1.3) + 0.25 * math.sin(6.1 * t + 0.7))
+        out["pitch"] += sh * 1.0 * (math.sin(0.9 * t + 2.1) + 0.5 * math.sin(3.1 * t + 0.4) + 0.25 * math.sin(5.3 * t + 2.9))
+        out["x"] += sh * 0.01 * (math.sin(1.7 * t + 0.3) + 0.5 * math.sin(4.3 * t + 1.9))
+        out["y"] += sh * 0.01 * (math.sin(1.3 * t + 1.1) + 0.5 * math.sin(3.7 * t + 0.8))
+    return out
 
 
 def basis(cam, depth):
@@ -270,12 +361,56 @@ def project(P, cam_basis, W, H):
 
 
 # ------------------------------------------------------------------------------------------ drawing
-def splat(P, c, dist, alive, lk, cam_basis, W, H, gh):
+def trail_index(lk, n):
+    """The points that draw a trail: every k-th (k = 1 / trail_share), the same on the node."""
+    return torch.arange(0, n, max(1, int(round(1.0 / lk["trail_share"]))), dtype=torch.int64)
+
+
+def trail_lines(lk, t, frame, cam_basis, W, H):
+    """The trails as 1 pixel samples (pixel index, colour (M, 3), weight (M,)): each chosen point's way over the last
+    'trails' seconds, TRAIL_STEPS straight pieces fading out to the oldest, rasterised one sample per pixel along the
+    longer axis (like the node's WebGL lines). frame = the keyword arguments of points() for this frame."""
+    gw, gh = grid_size(lk["density"], frame["col_a"].shape[2], frame["col_a"].shape[1])
+    idx = trail_index(lk, gw * gh)
+    S = TRAIL_STEPS
+    xs, ys, oks, col = [], [], [], None
+    for k in range(S + 1):
+        P, c, _dist, alive = points(lk, t - lk["trails"] * k / S, idx=idx, **frame)
+        sx, sy, z = project(P, cam_basis, W, H)
+        xs.append(sx)
+        ys.append(sy)
+        oks.append(alive & (z > NEAR_Z))
+        col = c if col is None else col
+    pix_all, c_all, w_all = [], [], []
+    base = lk["trail_opacity"] * lk["opacity"]
+    for k in range(S):
+        x0, y0, x1, y1 = xs[k], ys[k], xs[k + 1], ys[k + 1]
+        ok = oks[k] & oks[k + 1]
+        if not bool(ok.any()):
+            continue
+        x0, y0, x1, y1, cc = x0[ok], y0[ok], x1[ok], y1[ok], col[ok]
+        n = torch.ceil(torch.maximum((x1 - x0).abs(), (y1 - y0).abs())).clamp(1, 512).long()
+        seg = torch.repeat_interleave(torch.arange(len(n), device=n.device), n)
+        start = torch.cumsum(n, 0) - n
+        f = (torch.arange(len(seg), device=n.device) - start[seg]).float() / n[seg].float()
+        px = torch.floor(x0[seg] + (x1 - x0)[seg] * f)
+        py = torch.floor(y0[seg] + (y1 - y0)[seg] * f)
+        inside = (px >= 0) & (px < W) & (py >= 0) & (py < H)
+        pix_all.append((py[inside] * W + px[inside]).long())
+        c_all.append(cc[seg][inside])
+        w_all.append(torch.full((int(inside.sum()),), base * (1.0 - k / S), device=n.device))
+    if not pix_all:
+        return None
+    return torch.cat(pix_all), torch.cat(c_all), torch.cat(w_all)
+
+
+def splat(P, c, dist, alive, lk, cam_basis, W, H, gh, lines=None, size=None):
     """The points as the node's WebGL draws them -> (image (H, W, 3), alpha (H, W)). glow = screen blend on black
-    (1 - product of 1 - c*a), ink = multiply on white, solid = the nearest point wins."""
+    (1 - product of 1 - c*a), ink = multiply on white, solid = the nearest point wins. lines = trail_lines() (they
+    blend like the points; on solid they lie over them). size = the point size now (the sound can change it)."""
     dev = P.device
     sx, sy, z = project(P, cam_basis, W, H)
-    px = lk["size"] * (H / gh) * dist / z.clamp(min=1e-6)
+    px = (lk["size"] if size is None else size) * (H / gh) * dist / z.clamp(min=1e-6)
     a = lk["opacity"] * (px * px).clamp(max=1.0)
     s = px.clamp(1.0, MAX_POINT)
     keep = alive & (z > NEAR_Z) & (sx + s > 0) & (sx - s < W) & (sy + s > 0) & (sy - s < H)
@@ -323,6 +458,13 @@ def splat(P, c, dist, alive, lk, cam_basis, W, H, gh):
                 taps.append((pix, zz, cc))
             else:
                 cov.index_add_(0, pix, torch.log1p(-w.clamp(max=0.999)))
+    if lines is not None and blend != "solid":
+        pix, cc, w = lines
+        if blend == "glow":
+            acc.index_add_(1, pix, torch.log1p(-(cc * w[:, None]).clamp(max=0.999)).T)
+        else:
+            acc.index_add_(1, pix, torch.log((1 - w[:, None] * (1 - cc)).clamp(min=1e-4)).T)
+        cov.index_add_(0, pix, torch.log1p(-w.clamp(max=0.999)))
     if blend == "glow":
         img = 1 - torch.exp(acc)
         alpha = 1 - torch.exp(cov)
@@ -335,6 +477,14 @@ def splat(P, c, dist, alive, lk, cam_basis, W, H, gh):
             win = zz <= zbuf[pix]
             img[:, pix[win]] = cc[win].T
         alpha = torch.isfinite(zbuf).float()
+        if lines is not None:                       # the trails over the points, alpha over alpha
+            pix, cc, w = lines
+            keep_ = torch.zeros(H * W, device=dev).index_add_(0, pix, torch.log1p(-w.clamp(max=0.999)))
+            sw = torch.zeros(H * W, device=dev).index_add_(0, pix, w)
+            sc = torch.zeros((3, H * W), device=dev).index_add_(1, pix, (cc * w[:, None]).T)
+            la = 1 - torch.exp(keep_)
+            img = img * (1 - la) + sc / sw.clamp(min=1e-6) * la
+            alpha = torch.maximum(alpha, la)
     return img.T.reshape(H, W, 3).clamp(0, 1), alpha.reshape(H, W).clamp(0, 1)
 
 

@@ -22,8 +22,12 @@ import folder_paths
 from comfy_api.latest import io
 
 from ...kubakub import pointcloud as pc
+from ...kubakub import shader_render as sr
+from ...kubakub import sound as so
 from ...kubakub import tracking as tk
-from ...kubakub.io_types import TracksType
+from ...kubakub.director.export import write_wav
+from ...kubakub.io_types import SoundType, TracksType
+from ..shader.nodes_shader import _sound_in, _sound_out
 from ..utils.nodes_compare import frames_of, write_side
 
 log = logging.getLogger("KUBA.regions")
@@ -54,6 +58,18 @@ def _save_json(data, folder) -> dict:
     return {"filename": name, "subfolder": folder, "type": "temp"}
 
 
+def _save_wav(audio, folder="kubakub_pointcloud") -> dict:
+    """The sound (cut to the render) as a WAV in temp, for the node to play along."""
+    w = audio["waveform"][0].float().cpu().numpy()
+    name = hashlib.sha1(w[:, ::97].tobytes() + str(w.shape).encode()).hexdigest()[:20] + ".wav"
+    out = os.path.join(folder_paths.get_temp_directory(), folder)
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, name)
+    if not os.path.isfile(path):
+        write_wav(path, w[:2], int(audio["sample_rate"]))
+    return {"filename": name, "subfolder": folder, "type": "temp"}
+
+
 def ply_path():
     """output/kubakub/pointcloud_00001.ply, the next free number."""
     folder = os.path.join(folder_paths.get_output_directory(), "kubakub")
@@ -71,13 +87,13 @@ def out_size(W, H, long_side):
     return max(2, int(round(W * k / 2)) * 2), max(2, int(round(H * k / 2)) * 2)
 
 
-def timeline(mode, n, K, seconds, fps):
+def timeline(mode, n, K, seconds, fps, sound_secs=0.0):
     """(frames to render, their length in seconds): a video its own length (or `seconds`, looping), pictures
-    3 s each (a single picture 4 s) unless `seconds` says."""
+    as long as the sound, else 3 s each (a single picture 4 s), unless `seconds` says."""
     if mode == "video":
         T = seconds if seconds > 0 else n / fps
     else:
-        T = seconds if seconds > 0 else (4.0 if K == 1 else SECONDS_PER_PICTURE * K)
+        T = seconds if seconds > 0 else (min(sound_secs, 600.0) if sound_secs > 0 else 4.0 if K == 1 else SECONDS_PER_PICTURE * K)
     n_out = max(1, int(round(T * fps)))
     return n_out, n_out / fps
 
@@ -87,17 +103,20 @@ class KUBA_PointCloud(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="KUBA_PointCloud",
-            display_name="kubakub point cloud",
+            display_name="kubakub pointclouder",
             category=CATEGORY,
-            search_aliases=["point cloud", "points", "particles", "depth", "3d photo", "parallax", "gather", "ply", "splat"],
+            search_aliases=["point cloud", "pointcloud", "points", "particles", "depth", "3d photo", "parallax", "gather",
+                            "ply", "splat", "trails", "audio reactive"],
             description=("Lifts a picture or a video into up to two million points by its depth and films them with "
                          "a camera move. Connect the depth of any depth node (Depth Anything 3 / 2, Marigold ...). On "
-                         "the node: drag to look around (Shift-drag moves, the wheel goes nearer), 'start = view' and "
-                         "'end = view' set the camera move, and the look (colours, glow / ink / solid, depth, point "
-                         "size, drift, breathe, wind, a scan through the depth) changes live while it plays. A batch of "
-                         "pictures morphs: every point travels to the point of the next picture with the same "
-                         "brightness. 'field' (a mask, e.g. the tracker's 'near') pushes points out; the tracker's "
-                         "tracks sit in the cloud at their depth, joined by lines. Nothing connected: a sample facade."),
+                         "the node: drag to look around (Shift-drag moves, the wheel goes nearer), set the move from "
+                         "the view, pick a camera (push in, orbit, handheld ...) or record your own; the look (colours, "
+                         "glow / ink / solid, depth, point size, drift, breathe, wind, curl, trails, a scan through the "
+                         "depth, arrows you draw that push the points) changes live while it plays. A batch of pictures "
+                         "morphs: every point travels to the point of the next picture with the same brightness. "
+                         "'field' (a mask, e.g. the tracker's 'near') pushes points out; the tracker's tracks sit in the "
+                         "cloud at their depth; a sound makes the points burst on the beat, swell with the bass and "
+                         "move more when it is loud. Nothing connected: a sample facade."),
             is_output_node=True,                       # runs on its own, to see the cloud on the node
             inputs=[
                 io.MultiType.Input("image", types=[io.Image, io.Video], optional=True,
@@ -114,6 +133,13 @@ class KUBA_PointCloud(io.ComfyNode):
                 TracksType.Input("tracks", optional=True,
                                  tooltip="From kubakub tracker on the same video: each tracked thing gets a ring at its "
                                          "place in the cloud, joined by lines (network, tree, within a distance)."),
+                io.Audio.Input("audio", optional=True,
+                               tooltip="A sound the cloud follows: the points burst out on the beat, swell with the "
+                                       "bass, move more when it is loud (how much: 'sound' on the node). It plays with "
+                                       "the cloud on the node and goes on to 'audio'. Pictures last as long as it."),
+                SoundType.Input("sound", optional=True,
+                                tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release), set "
+                                        "once for every node that listens. Connected, it comes before 'audio'."),
                 io.String.Input("look", default="", tooltip="Set on the node; never typed."),
                 io.Float.Input("seconds", default=0.0, min=0.0, max=600.0, step=0.5,
                                tooltip="How long the render is. 0 = a video's own length, 3 s per picture (one picture: 4 s). "
@@ -135,12 +161,13 @@ class KUBA_PointCloud(io.ComfyNode):
                 io.Float.Output("fps", tooltip="For Create Video."),
                 io.String.Output("ply", tooltip="The saved .ply's path ('save_ply' on), else empty."),
                 io.String.Output("report"),
+                io.Audio.Output("audio", tooltip="The sound, cut to the render (silence without one): for Create Video."),
             ],
         )
 
     @classmethod
-    def execute(cls, image=None, depth=None, field=None, tracks=None, look="", seconds=0.0, fps=24.0, long_side=0,
-                batch="auto", save_ply=False) -> io.NodeOutput:
+    def execute(cls, image=None, depth=None, field=None, tracks=None, audio=None, sound=None, look="", seconds=0.0,
+                fps=24.0, long_side=0, batch="auto", save_ply=False) -> io.NodeOutput:
         t0 = time.perf_counter()
         lk = pc.look(look)
         notes = []
@@ -168,7 +195,16 @@ class KUBA_PointCloud(io.ComfyNode):
             dz = pc.depth_from_light(frames.cpu().numpy())
             notes.append("no depth connected: a soft relief from the brightness (connect a depth node for real depth)")
         K = n if mode == "pictures" else 1
-        n_out, T = timeline(mode, n, K, float(seconds), fps)
+        snd_audio, heard, _cabled = so.take(sound, audio)
+        wave, hz, mono = _sound_in(snd_audio)
+        n_out, T = timeline(mode, n, K, float(seconds), fps, len(mono) / hz if mono is not None else 0.0)
+        per_frame = None
+        if mono is not None:
+            got, lines = sr.sound_values(mono, hz, [f / fps for f in range(n_out)], float(heard["bpm"]), False,
+                                         float(heard["release"]), float(heard["gain"]))
+            per_frame = {k: [round(float(x), 4) for x in got[g]] for k, g in
+                         (("level", "kLevel"), ("low", "kLow"), ("mid", "kMid"), ("high", "kHigh"), ("beat", "kBeat"))}
+            notes.append("sound: " + "; ".join(lines))
         Wo, Ho = out_size(W, H, int(long_side))
         aspect = W / H
         dev = _device()
@@ -225,11 +261,15 @@ class KUBA_PointCloud(io.ComfyNode):
                     ca, da = cache[k]
                     cb, db, perm = (col(k + 1), dep(k + 1), perms[k]) if s > 0 else (None, None, None)
                 ff = fld[min(f, len(fld) - 1)].to(dev)[None] if fld is not None else None
-                P, c, dist, alive = pc.points(lk, t, ca, da, aspect, cb, db, perm, s, ff, device=dev)
+                snd = {k: v[f] for k, v in per_frame.items()} if per_frame else None
+                fr = dict(col_a=ca, dep_a=da, aspect=aspect, col_b=cb, dep_b=db, perm=perm, s=s, field=ff, device=dev, snd=snd)
+                P, c, dist, alive = pc.points(lk, t, **fr)
                 if f == 0 and save_ply:
                     ply = pc.write_ply(ply_path(), P[alive], c[alive])
-                cam = pc.basis(pc.camera_at(lk, a), lk["depth"])
-                im, al = pc.splat(P, c, dist, alive, lk, cam, Wo, Ho, gh)
+                cam = pc.basis(pc.camera_at(lk, a, t), lk["depth"])
+                lines = pc.trail_lines(lk, t, fr, cam, Wo, Ho) if lk["trails"] > 0 else None
+                size = lk["size"] * (1 + lk["sound"]["size"] * snd["level"]) if snd else None
+                im, al = pc.splat(P, c, dist, alive, lk, cam, Wo, Ho, gh, lines, size)
                 if t3 is not None:
                     tf = f % len(t3) if mode == "pictures" else min(f % n, len(t3) - 1)
                     im = pc.draw_tracks(im, t3[tf], lk, cam, aspect, lk["depth"])
@@ -250,13 +290,17 @@ class KUBA_PointCloud(io.ComfyNode):
             meta["field"] = write_side(fld[..., None].expand(-1, -1, -1, 3), "f", PREVIEW_SIDE)
         if t3 is not None:
             meta["tracks"] = _save_json({"frames": t3}, "kubakub_pointcloud")
+        audio_out = _sound_out(wave, hz, n_out / fps)
+        if per_frame:
+            meta["sound"] = per_frame
+            meta["audio"] = _save_wav(audio_out)
         report = "\n".join([f"{gw * gh:,} points ({gw} x {gh}), {mode}: {n} {'frame(s)' if mode == 'video' else 'picture(s)'} "
                             f"{W}x{H}; rendered {n_out} frames {Wo}x{Ho} at {fps:g} fps in {time.perf_counter() - t0:.1f} s",
                             f"look: {lk['colour']} colours, {lk['blend']}, depth {lk['depth']:g}"
                             + (f", {len(t3[0]) if t3 and t3[0] else 0} tracked things in the first frame" if t3 is not None else ""),
                             *notes, *([f"saved {ply}"] if ply else [])])
         log.info("[KUBA point cloud] %s", report.replace("\n", " | "))
-        return io.NodeOutput(out, alpha, fps, ply, report, ui={"kubakub_pointcloud": [meta]})
+        return io.NodeOutput(out, alpha, fps, ply, report, audio_out, ui={"kubakub_pointcloud": [meta]})
 
 
 def _register_routes():

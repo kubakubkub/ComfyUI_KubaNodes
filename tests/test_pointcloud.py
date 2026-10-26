@@ -110,7 +110,7 @@ try:
 
     # --- the node ------------------------------------------------------------------------------------
     out = run()
-    images, alpha, fps, ply, report = out.args if hasattr(out, "args") else out.result
+    images, alpha, fps, ply, report, audio_out = out.args if hasattr(out, "args") else out.result
     meta = out.ui["kubakub_pointcloud"][0]
     check("nothing connected: the sample facade, 4 s at 24 fps", images.shape[0] == 96 and alpha.shape == images.shape[:3]
           and fps == 24.0 and "sample facade" in report and meta["depth_from"] == "sample", report)
@@ -121,7 +121,7 @@ try:
     pics[0, :, :32] = 1.0
     pics[1, 18:] = torch.tensor([0.9, 0.5, 0.2])
     out = run(image=pics, seconds=2.0, fps=10.0, save_ply=True)
-    images, alpha, fps, ply, report = out.args if hasattr(out, "args") else out.result
+    images, alpha, fps, ply, report, audio_out = out.args if hasattr(out, "args") else out.result
     meta = out.ui["kubakub_pointcloud"][0]
     check("two pictures morph: 2 s at 10 fps, the brightness relief noted", images.shape[0] == 20 and meta["mode"] == "pictures"
           and meta["K"] == 2 and "no depth connected" in report, report)
@@ -140,7 +140,7 @@ try:
                          {"id": 3, "kind": "motion", "t0": 4, "box": [[128, 50, 16, 16]] * 4}]}
     lk = {"density": 256, "tracks": {"lines": "network", "colour": "#ff0000", "opacity": 1.0}, "blend": "ink"}
     out = run(image=clip, depth=depth, field=field, tracks=tracks, batch="video", look=json.dumps(lk), fps=25.0)
-    images, alpha, fps, ply, report = out.args if hasattr(out, "args") else out.result
+    images, alpha, fps, ply, report, audio_out = out.args if hasattr(out, "args") else out.result
     meta = out.ui["kubakub_pointcloud"][0]
     check("a video with depth, field and tracks: its own length", images.shape[0] == 12 and meta["mode"] == "video"
           and meta["depth_from"] == "node" and "field" in meta and "tracks" in meta, report)
@@ -154,6 +154,35 @@ try:
     check("the field pushes points out (push 0 = not)", float((out2.args[0] - images).abs().mean()) > 0.002 if hasattr(out2, "args")
           else float((out2.result[0] - images).abs().mean()) > 0.002)
 
+    # --- forces, curl, trails, sound -------------------------------------------------------------------
+    lk = pc.look({"density": 128, "jitter": 0, "drift": 0, "forces": [[0.2, 0.5, 0.8, 0.5]], "reach": 0.1})
+    P0, *_ = pc.points(pc.look({"density": 128, "jitter": 0, "drift": 0}), 0.0, col, flat, W / H)
+    P1, *_ = pc.points(lk, 0.0, col, flat, W / H)
+    dx = (P1 - P0)[:, 0].reshape(72, 128)
+    check("a drawn arrow pushes the points along it, only near it", float(dx[36, 64]) > 0.1 and float(dx[5, 64].abs()) < 1e-6
+          and float((P1 - P0)[:, 1].abs().max()) < 1e-6)
+    Pc, *_ = pc.points(pc.look({"density": 128, "drift": 0, "curl": 1.0}), 1.0, col, flat, W / H)
+    Pc2, *_ = pc.points(pc.look({"density": 128, "drift": 0, "curl": 1.0}), 1.5, col, flat, W / H)
+    check("curl moves the points on loops", 0.001 < float((Pc - Pc2).norm(dim=-1).mean()) < 0.05)
+    lk_t = pc.look({"density": 128, "curl": 1.0, "trails": 1.0, "trail_share": 0.25})
+    fr = dict(col_a=grey, dep_a=flat, aspect=W / H)
+    lines = pc.trail_lines(lk_t, 2.0, fr, cam0, W, H)
+    check("trails: fine lines from a share of the points", lines is not None and len(lines[0]) > 2000
+          and float(lines[2].max()) <= lk_t["trail_opacity"] * lk_t["opacity"] + 1e-6)
+    beat = {"level": 1.0, "low": 1.0, "mid": 0.0, "high": 1.0, "beat": 1.0}
+    lk_s = pc.look({"density": 128, "drift": 0, "sound": {"sparkle": 1.0}})
+    Ps, cs, *_ = pc.points(lk_s, 0.0, grey, flat, W / H, snd=beat)
+    Pq, cq, *_ = pc.points(lk_s, 0.0, grey, flat, W / H)
+    check("sound: the beat bursts, the bass swells, the highs sparkle", float((Ps - Pq).norm(dim=-1).mean()) > 0.01
+          and float(cs.mean()) > float(cq.mean()))
+    clip_s = torch.from_numpy(__import__("kubapack.kubakub.sound", fromlist=["x"]).sample_sound(3.0, 120, 22050))[None, None]
+    out = run(audio={"waveform": clip_s, "sample_rate": 22050}, seconds=0.0)
+    images, alpha, fps, ply, report, audio_out = out.args if hasattr(out, "args") else out.result
+    meta = out.ui["kubakub_pointcloud"][0]
+    check("a sound: a picture lasts as long as it, plays on the node, goes on to 'audio'", images.shape[0] == 72
+          and len(meta["sound"]["beat"]) == 72 and max(meta["sound"]["beat"]) > 0.5 and meta["audio"]["filename"].endswith(".wav")
+          and audio_out["waveform"].shape[-1] == 3 * 22050, report)
+
     # --- the live view computes the same (node) ------------------------------------------------------
     node = shutil.which("node")
     if node is None:
@@ -165,15 +194,19 @@ try:
                  "x": float(rng.uniform(-1, 1)), "y": float(rng.uniform(-1, 1))} for _ in range(20)]
         pts = [[k, float(rng.uniform(0, 1)), float(rng.uniform(0, 1)), float(rng.uniform(0, 1))] for k in range(14)]
         camera = {"start": cams[0], "end": cams[1], "ease": "smooth"}
+        shaky = {"start": cams[0], "end": cams[1], "ease": "linear", "shake": 0.7,
+                 "path": [[0, 0, 0, 0, 0, 0], [0.4, 20, -5, 0.3, 0.1, 0], [1, -30, 10, 0.5, 0, 0.2]]}
         math_js = Path(HERE, "..", "web", "kubakub_pointcloud_math.js").resolve().as_uri()
         src = (f"import * as M from {json.dumps(math_js)};\n"
-               f"const idx = {json.dumps(idx)}, cams = {json.dumps(cams)}, pts = {json.dumps(pts)}, camera = {json.dumps(camera)};\n"
+               f"const idx = {json.dumps(idx)}, cams = {json.dumps(cams)}, pts = {json.dumps(pts)}, camera = {json.dumps(camera)}, shaky = {json.dumps(shaky)};\n"
                "const out = {};\n"
                "out.pcg = idx.map(i => M.pcg(i));\n"
                "out.uv = idx.slice(0, 50).map(i => M.gridUV(i % (1280 * 720), 1280, 720, 0.7));\n"
                "out.grid = [M.gridSize(1280, 1920, 1080), M.gridSize(777, 1080, 1920)];\n"
                "out.morph = [0, 0.7, 1.9, 2.6, 2.99, 3.5, 5.9, 8].map(t => M.morphAt(t, 9, 3));\n"
                "out.cam = [0, 0.25, 0.5, 1].map(a => M.cameraAt(camera, a));\n"
+               "out.shaky = [0, 0.2, 0.4, 0.7, 1].map(a => M.cameraAt(shaky, a, a * 7.3));\n"
+               "out.stride = [1, 0.5, 0.1, 0.03, 0.01].map(M.trailStride);\n"
                "out.proj = cams.map(c => { const B = M.basis(c, 1.3); return pts.map(p => M.project(M.trackWorld(p, 16 / 9, 1.3), B, 1920, 1080)); });\n"
                "out.edges = ['within', 'off'].map(l => M.trackEdges(pts, { lines: l, distance: 0.3 }, 16 / 9, null, null));\n"
                "console.log(JSON.stringify(out));\n")
@@ -194,6 +227,11 @@ try:
             check("morph timeline", np.allclose(np.array(js["morph"]), np.array([pc.morph_at(t, 9, 3) for t in [0, 0.7, 1.9, 2.6, 2.99, 3.5, 5.9, 8]]), atol=1e-9))
             lkc = pc.look({"camera": camera})
             check("camera move", all(abs(js["cam"][n][k] - pc.camera_at(lkc, a)[k]) < 1e-9 for n, a in enumerate([0, 0.25, 0.5, 1]) for k in pc._CAM_RANGES))
+            lks = pc.look({"camera": shaky})
+            check("recorded path + handheld shake", len(lks["camera"]["path"]) == 3 and all(
+                abs(js["shaky"][n][k] - pc.camera_at(lks, a, a * 7.3)[k]) < 1e-9 for n, a in enumerate([0, 0.2, 0.4, 0.7, 1]) for k in pc._CAM_RANGES))
+            check("trail points", js["stride"] == [int(pc.trail_index(pc.look({"trail_share": s}), 1000)[1]) if s < 1 else 1
+                                                     for s in [1, 0.5, 0.1, 0.03, 0.01]])
             ok = True
             for cam, row in zip(cams, js["proj"]):
                 B = pc.basis(cam, 1.3)

@@ -35,11 +35,28 @@ export function ease(a, how) {
   a = Math.min(Math.max(+a, 0), 1);
   return how === "still" ? 0 : how === "linear" ? a : a * a * (3 - 2 * a);
 }
-export function cameraAt(cam, a) {                    // cam = look.camera
-  const k = ease(a, cam.ease), out = {};
-  for (const key of CAM_KEYS) out[key] = cam.start[key] + (cam.end[key] - cam.start[key]) * k;
+export function cameraAt(cam, a, t = 0) {            // cam = look.camera; = pointcloud.camera_at (path, ease, shake)
+  const out = {}, path = cam.path || [];
+  if (path.length >= 2) {
+    a = Math.min(Math.max(+a, 0), 1);
+    let j = 0; while (j < path.length - 2 && path[j + 1][0] < a) j++;
+    const p = path[j], q = path[j + 1], k = Math.min(Math.max((a - p[0]) / Math.max(q[0] - p[0], 1e-9), 0), 1);
+    CAM_KEYS.forEach((key, n) => { out[key] = p[n + 1] + (q[n + 1] - p[n + 1]) * k; });
+  } else {
+    const k = ease(a, cam.ease);
+    for (const key of CAM_KEYS) out[key] = cam.start[key] + (cam.end[key] - cam.start[key]) * k;
+  }
+  const sh = cam.shake || 0, S = Math.sin;
+  if (sh > 0) {
+    out.yaw += sh * 1.5 * (S(1.1 * t) + 0.5 * S(2.7 * t + 1.3) + 0.25 * S(6.1 * t + 0.7));
+    out.pitch += sh * 1.0 * (S(0.9 * t + 2.1) + 0.5 * S(3.1 * t + 0.4) + 0.25 * S(5.3 * t + 2.9));
+    out.x += sh * 0.01 * (S(1.7 * t + 0.3) + 0.5 * S(4.3 * t + 1.9));
+    out.y += sh * 0.01 * (S(1.3 * t + 1.1) + 0.5 * S(3.7 * t + 0.8));
+  }
   return out;
 }
+export const trailStride = share => Math.max(1, Math.round(1 / share));   // = pointcloud.trail_index
+export const TRAIL_STEPS = 12;
 export function basis(cam, depth) {                   // = pointcloud.basis -> [position, right, up, forward]
   const R = 1 + depth, ya = cam.yaw * Math.PI / 180, pa = cam.pitch * Math.PI / 180;
   const rot = (x, y, z) => { const y1 = y * Math.cos(pa) - z * Math.sin(pa), z1 = y * Math.sin(pa) + z * Math.cos(pa);
