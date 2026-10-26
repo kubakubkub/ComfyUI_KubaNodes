@@ -13,7 +13,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 const HERE = new URL(".", import.meta.url).href;
-const ORANGE = "#f18a58", LAV = "#a187b7";
+export const ORANGE = "#f18a58", LAV = "#a187b7";
 export const STATE_WORDS = ["INPUT", "PROCESS", "STABLE", "ARCHIVED"];
 // the director's blend modes (kubakub/director/blend.py) as the browser names them
 export const OPS = { normal: "source-over", multiply: "multiply", screen: "screen", overlay: "overlay", darken: "darken",
@@ -46,7 +46,7 @@ export function visible(data, t, lk, kinds) {
   }
   return out.sort((a, b) => a[0].id - b[0].id);
 }
-const pad = (v, n) => String(v).padStart(n, "0");
+export const pad = (v, n) => String(v).padStart(n, "0");
 const pmod = (v, m) => ((v % m) + m) % m;           // Python's % (never negative), so labels match the render
 export function spanWeight(e, t, data) {          // = trackdraw.span_weight: 0 outside the element's time, 1 in, ramps over its fade
   const sp = e?.span; if (!sp || sp.length !== 2) return 1;
@@ -361,8 +361,10 @@ function style() {
 .kkt{display:flex;flex-direction:column;gap:5px;width:100%;height:100%;font-family:"Hanken Grotesk KKD",system-ui,sans-serif;font-size:11px;color:rgba(255,255,255,.85);text-transform:lowercase;box-sizing:border-box}
 .kkt-stage{flex:1;min-height:120px;position:relative;background:#101010;border-radius:6px;overflow:hidden}
 .kkt-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
-.kkt-row{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
-.kkt-row>.k{color:rgba(255,255,255,.45);min-width:52px}
+.kkt-row{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.kkt-row:has(>.kv){flex-wrap:nowrap;align-items:flex-start}
+.kkt-row>.k{color:rgba(255,255,255,.45);min-width:54px;flex:none;line-height:18px}
+.kkt-row>.kv{display:flex;flex-wrap:wrap;gap:4px;align-items:center;flex:1;min-width:0}
 .kkt-row input[type=range]{flex:1;min-width:60px;max-width:160px;accent-color:${ORANGE}}
 .kkt-row input[type=text]{background:#1d1b20;border:1px solid rgba(255,255,255,.14);color:#fff;border-radius:6px;padding:1px 6px;font:inherit;text-transform:none;min-width:90px;flex:1}
 .kkt-row input[type=color]{width:22px;height:18px;border:none;padding:0;background:none;cursor:pointer}
@@ -387,11 +389,19 @@ function style() {
 .kkt-side h4{margin:6px 0 0;font-size:11px;font-weight:700;color:#fff;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center}`;
   document.head.appendChild(s);
 }
-function hideWidget(w) { if (!w) return; w.hidden = true; w.computeSize = () => [0, -4]; if (w.element) w.element.style.display = "none"; if (w.inputEl) w.inputEl.style.display = "none"; }
-const viewURL = m => api.apiURL(`/view?filename=${encodeURIComponent(m.filename)}&subfolder=${encodeURIComponent(m.subfolder || "")}&type=${encodeURIComponent(m.type || "temp")}`);
-const frameURL = (side, i) => api.apiURL(`/view?filename=${pad(i, 5)}.jpg&subfolder=${encodeURIComponent(side.subfolder)}&type=${encodeURIComponent(side.type || "temp")}`);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const stop = el => { for (const t of ["pointerdown", "pointermove", "pointerup", "wheel", "keydown"]) el.addEventListener(t, e => { if (!e.target.closest?.("canvas")) e.stopPropagation(); }, { passive: true }); };
+export function hideWidget(w) { if (!w) return; w.hidden = true; w.computeSize = () => [0, -4]; if (w.element) w.element.style.display = "none"; if (w.inputEl) w.inputEl.style.display = "none"; }
+export const viewURL = m => api.apiURL(`/view?filename=${encodeURIComponent(m.filename)}&subfolder=${encodeURIComponent(m.subfolder || "")}&type=${encodeURIComponent(m.type || "temp")}`);
+export const frameURL = (side, i) => api.apiURL(`/view?filename=${pad(i, 5)}.jpg&subfolder=${encodeURIComponent(side.subfolder)}&type=${encodeURIComponent(side.type || "temp")}`);
+export const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+// a row with a label: everything after the label goes into its own wrapping box (.kv), so a long row wraps under
+// its pills and not under the label; kept up to date while the rows are rebuilt (also for kubakub_pointcloud.js)
+export function tidyRows(root) {
+  const run = () => { for (const r of root.querySelectorAll(".kkp-row, .kkt-row")) { const k = r.firstElementChild;
+    if (!k?.classList.contains("k") || r.children.length < 2 || r.lastElementChild.classList.contains("kv")) continue;
+    const kv = document.createElement("div"); kv.className = "kv"; while (k.nextSibling) kv.appendChild(k.nextSibling); r.appendChild(kv); } };
+  new MutationObserver(run).observe(root, { childList: true, subtree: true }); run();
+}
+export const stop = el => { for (const t of ["pointerdown", "pointermove", "pointerup", "wheel", "keydown"]) el.addEventListener(t, e => { if (!e.target.closest?.("canvas")) e.stopPropagation(); }, { passive: true }); };
 let SERVER = null;                                  // presets, default look, finder defaults, model lists (from the node file)
 async function server() {
   if (SERVER) return SERVER;
@@ -402,7 +412,16 @@ const KIND_NAMES = { motion: "motion", colour: "colour", lights: "lights", yolo:
 const KIND_COL = { motion: "#ffffff", colour: "#6ae4ff", lights: "#ffe27a", yolo: LAV, words: "#9dff8a", body: "#39ff6a", hands: "#6ae4ff", face: "#ff8ad8", motif: ORANGE };
 const yoloLabel = m => m + (/-pose/i.test(m) ? "  (+ body points)" : /-seg/i.test(m) ? "  (+ outlines)" : "");
 const YOLO_CLASSES = ["person", "car", "bicycle", "motorcycle", "bus", "truck", "bird", "dog", "cat", "horse", "umbrella", "backpack", "handbag", "boat", "any"];
-const PALETTE = ["#ffffff", ORANGE, LAV, "#39ff6a", "#e8b04a", "#ff3b30", "#6ae4ff"];
+export const PALETTE = ["#ffffff", ORANGE, LAV, "#39ff6a", "#e8b04a", "#ff3b30", "#6ae4ff"];
+// a node + the output nodes after it, nothing else (ComfyUI's partial run) -> how many nodes after it
+export function renderWithSavers(node) {
+  const g = node.graph, ids = new Set([String(node.id)]), seen = new Set([node.id]);
+  const link = id => g.getLink?.(id) ?? g.links?.get?.(id) ?? g.links?.[id];
+  const walk = n => { for (const o of n.outputs || []) for (const id of o.links || []) { const l = link(id), t = l && g.getNodeById(l.target_id);
+    if (!t || seen.has(t.id)) continue; seen.add(t.id); if (t.constructor?.nodeData?.output_node) ids.add(String(t.id)); walk(t); } };
+  walk(node); app.queuePrompt(0, 1, [...ids]);
+  return ids.size - 1;
+}
 
 // The player: frames of a tracker run (JPEGs in temp), cached, one shared clock.
 class Player {                                       // the tracker's frames, and its sound when it has one (then the sound is the clock)
@@ -419,10 +438,11 @@ class Player {                                       // the tracker's frames, an
   }
   preload(k = 20) { for (let i = 1; i <= k; i++) this.img(this.t + i); }
   toggle(on = !this.playing, fps = 25) {
+    const run = this.run = (this.run || 0) + 1;      // a new toggle ends the loop before it (no two loops at once)
     this.playing = on && (this.side?.n || 0) > 1; if (!this.playing) { this.audio?.pause(); return; }
     const a = this.audio; if (a) { a.currentTime = this.t / fps; a.play().catch(() => {}); }
     let prev = performance.now(), acc = 0;
-    const step = now => { if (!this.playing) { a?.pause(); return; }
+    const step = now => { if (run !== this.run) return; if (!this.playing) { a?.pause(); return; }
       if (a && !a.paused) { const f = Math.floor(a.currentTime * fps);
         if (f >= this.side.n) { this.t = 0; a.currentTime = 0; this.onFrame(); }
         else if (f !== this.t) { this.t = f; this.preload(); this.onFrame(); } }
@@ -447,7 +467,7 @@ function transport(el, player, fps) {                // play button + scrub bar 
 function trackerUI(node) {
   style();
   const W_ = n => node.widgets?.find(w => w.name === n);
-  const el = document.createElement("div"); el.className = "kkt";
+  const el = document.createElement("div"); el.className = "kkt"; tidyRows(el);
   el.innerHTML = `<div class="kkt-stage" style="min-height:230px"><canvas tabindex="0"></canvas></div><div data-tr></div><div data-set></div><div class="kkt-hint"></div>`;
   const cv = el.querySelector("canvas"), ctx = cv.getContext("2d"), stage = el.querySelector(".kkt-stage"), hint = el.querySelector(".kkt-hint");
   const st = { data: null, dataKey: "", probe: null, pick: "", busy: false };
@@ -579,7 +599,7 @@ const LABEL_TOKENS = ["{id}", "{id_hex}", "{id_long}", "{state}", "{label}", "{k
 function drawUI(node) {
   style();
   const W_ = n => node.widgets?.find(w => w.name === n);
-  const el = document.createElement("div"); el.className = "kkt";
+  const el = document.createElement("div"); el.className = "kkt"; tidyRows(el);
   el.innerHTML = `<div class="kkt-stage"><canvas></canvas></div><div data-tr></div><div class="kkt-row" data-pre></div><div class="kkt-hint"></div>`;
   const cv = el.querySelector("canvas"), ctx = cv.getContext("2d"), stage = el.querySelector(".kkt-stage"), hint = el.querySelector(".kkt-hint");
   const st = { data: null, key: "" };
@@ -627,18 +647,13 @@ function drawUI(node) {
   }
   pre.addEventListener("click", e => { const t = e.target.closest("button"); if (!t) return; e.stopPropagation();
     if (t.dataset.preset) setLook(lookOf(t.dataset.preset, SERVER?.looks, SERVER?.default_look)); else if ("edit" in t.dataset) openEditor(); else if ("render" in t.dataset) renderLook(); });
-  function renderLook() {                            // this node + the output nodes after it, nothing else (ComfyUI's partial run)
-    const g = node.graph, ids = new Set([String(node.id)]), seen = new Set([node.id]);
-    const link = id => g.getLink?.(id) ?? g.links?.get?.(id) ?? g.links?.[id];
-    const walk = n => { for (const o of n.outputs || []) for (const id of o.links || []) { const l = link(id), t = l && g.getNodeById(l.target_id);
-      if (!t || seen.has(t.id)) continue; seen.add(t.id); if (t.constructor?.nodeData?.output_node) ids.add(String(t.id)); walk(t); } };
-    walk(node);
-    hint.textContent = `rendering the look${ids.size > 1 ? ` and ${ids.size - 1} node(s) after it` : ""}…`;
-    app.queuePrompt(0, 1, [...ids]);
+  function renderLook() {
+    const after = renderWithSavers(node);
+    hint.textContent = `rendering the look${after ? ` and ${after} node(s) after it` : ""}…`;
   }
   // ---- the editor window: big live preview + everything of the look
   function openEditor() {
-    const wrap = document.createElement("div"); wrap.className = "kkt-big";
+    const wrap = document.createElement("div"); wrap.className = "kkt-big"; tidyRows(wrap);
     wrap.innerHTML = `<div class="kkt"><div class="kkt-stage"><canvas></canvas></div><div data-tr2></div></div><div class="kkt kkt-side"></div>`;
     const bcv = wrap.querySelector("canvas"), bctx = bcv.getContext("2d"), bstage = wrap.querySelector(".kkt-stage"), side = wrap.querySelector(".kkt-side");
     const tr2 = transport(wrap, player, fps); wrap.querySelector("[data-tr2]").appendChild(tr2);

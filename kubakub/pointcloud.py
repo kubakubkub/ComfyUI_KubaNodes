@@ -221,28 +221,48 @@ def _colour_mode(c, lk):
 
 
 SILENT = {"level": 0.0, "low": 0.0, "mid": 0.0, "high": 0.0, "beat": 0.0}
+_GRIDS: dict = {}
+
+
+def grid(gw, gh, jitter, device, stride=1):
+    """What never changes of every stride-th point (index, grid place, its own random numbers and direction), made
+    once and kept until forget(): points() runs every frame, the trails 13 times a frame."""
+    key = (gw, gh, float(jitter), str(device), int(stride))
+    g = _GRIDS.get(key)
+    if g is None:
+        if len(_GRIDS) >= 4:
+            _GRIDS.clear()
+        i = torch.arange(0, gw * gh, int(stride), device=device, dtype=torch.int64)
+        u, v = grid_uv(i, gw, gh, jitter)
+        g = _GRIDS[key] = {"i": i, "u": u, "v": v, "r2": rnd(i, 2), "r3": rnd(i, 3), "r4": rnd(i, 4), "dir": _dir(i)}
+    return g
+
+
+def forget():
+    """Let go of the kept grids (the node calls it after a render)."""
+    _GRIDS.clear()
 
 
 def points(lk, t, col_a, dep_a, aspect, col_b=None, dep_b=None, perm=None, s=0.0, field=None, device="cpu", snd=None,
-           idx=None):
+           stride=1):
     """Every point at t seconds: (P (N, 3), colour (N, 3), dist (N,), alive (N,) bool). col (3, h, w), dep (1, h, w)
     0 far .. 1 near; with a next picture, perm and s > 0 the points travel to it; field (1, h, w) pushes them out;
-    snd = what is heard now (SILENT keys, 0-1); idx = only these points (the trails)."""
+    snd = what is heard now (SILENT keys, 0-1); stride = only every stride-th point (the trails)."""
     gw, gh = grid_size(lk["density"], col_a.shape[2], col_a.shape[1])
-    i = torch.arange(gw * gh, device=device, dtype=torch.int64) if idx is None else idx.to(device)
-    u, v = grid_uv(i, gw, gh, lk["jitter"])
+    g = grid(gw, gh, lk["jitter"], device, stride)
+    i, u, v, dirs = g["i"], g["u"], g["v"], g["dir"]
     c = sample(col_a, u, v)[:, :3]
     d = sample(dep_a, u, v)[:, 0]
     P, dist = place(u, v, d, lk["depth"], aspect)
     if col_b is not None and perm is not None and s > 0:
-        j = perm.to(device) if idx is None else perm.to(device)[i]
+        j = perm.to(device) if stride == 1 else perm.to(device)[i]
         u2, v2 = grid_uv(j, gw, gh, lk["jitter"])
         c2, d2 = sample(col_b, u2, v2)[:, :3], sample(dep_b, u2, v2)[:, 0]
         P2, dist2 = place(u2, v2, d2, lk["depth"], aspect)
         P, c, d, dist = P + (P2 - P) * s, c + (c2 - c) * s, d + (d2 - d) * s, dist + (dist2 - dist) * s
-        P = P + _dir(i) * (lk["swarm"] * math.sin(math.pi * s) * 0.25 * dist)[:, None]
+        P = P + dirs * (lk["swarm"] * math.sin(math.pi * s) * 0.25 * dist)[:, None]
     tt = t * lk["speed"]
-    r2, r3, r4 = rnd(i, 2), rnd(i, 3), rnd(i, 4)
+    r2, r3, r4 = g["r2"], g["r3"], g["r4"]
     tau = 6.2831853
     sn, so = snd or SILENT, lk["sound"]
     m = 1.0 + so["motion"] * sn["level"]           # the sound makes every motion bigger
@@ -264,17 +284,17 @@ def points(lk, t, col_a, dep_a, aspect, col_b=None, dep_b=None, perm=None, s=0.0
         P = P + force_push(lk, u, v, dist, tt, r2, aspect, m)
     if field is not None and lk["push"] > 0:
         f = sample(field, u, v)[:, 0]
-        P = P + _dir(i) * (lk["push"] * f * 0.3 * dist * (0.4 + r2))[:, None]
+        P = P + dirs * (lk["push"] * f * 0.3 * dist * (0.4 + r2))[:, None]
     if so["swell"] > 0 and sn["low"] > 0:
         P = P * (1 + so["swell"] * 0.06 * sn["low"])
     if so["burst"] > 0 and sn["beat"] > 0:
-        P = P + _dir(i) * (so["burst"] * sn["beat"] * 0.08 * dist * (0.4 + r2))[:, None]
+        P = P + dirs * (so["burst"] * sn["beat"] * 0.08 * dist * (0.4 + r2))[:, None]
     c = _colour_mode(c.clamp(0, 1), lk)
     if lk["scan"] > 0:
         sc = 1.0 - ((tt * 0.25) % 1.0)
         w = (1.0 - (d - sc).abs() / 0.04).clamp(min=0.0) * lk["scan"]
         c = c + (1 - c) * (w * 0.8).clamp(max=1.0)[:, None]
-        P = P + _dir(i) * (w * 0.02 * dist)[:, None]
+        P = P + dirs * (w * 0.02 * dist)[:, None]
     if so["sparkle"] > 0 and sn["high"] > 0:        # the highs light up a few points
         k = ((r2 + r3) % 1.0 - (1.0 - so["sparkle"] * sn["high"] * 0.3)) / 0.02
         c = c + (1 - c) * k.clamp(0, 1)[:, None]
@@ -361,47 +381,43 @@ def project(P, cam_basis, W, H):
 
 
 # ------------------------------------------------------------------------------------------ drawing
+def trail_stride(lk):
+    """Every k-th point draws a trail (k = 1 / trail_share), the same on the node."""
+    return max(1, int(round(1.0 / lk["trail_share"])))
+
+
 def trail_index(lk, n):
-    """The points that draw a trail: every k-th (k = 1 / trail_share), the same on the node."""
-    return torch.arange(0, n, max(1, int(round(1.0 / lk["trail_share"]))), dtype=torch.int64)
+    """The points that draw a trail."""
+    return torch.arange(0, n, trail_stride(lk), dtype=torch.int64)
 
 
 def trail_lines(lk, t, frame, cam_basis, W, H):
     """The trails as 1 pixel samples (pixel index, colour (M, 3), weight (M,)): each chosen point's way over the last
     'trails' seconds, TRAIL_STEPS straight pieces fading out to the oldest, rasterised one sample per pixel along the
     longer axis (like the node's WebGL lines). frame = the keyword arguments of points() for this frame."""
-    gw, gh = grid_size(lk["density"], frame["col_a"].shape[2], frame["col_a"].shape[1])
-    idx = trail_index(lk, gw * gh)
-    S = TRAIL_STEPS
+    S, stride = TRAIL_STEPS, trail_stride(lk)
     xs, ys, oks, col = [], [], [], None
     for k in range(S + 1):
-        P, c, _dist, alive = points(lk, t - lk["trails"] * k / S, idx=idx, **frame)
+        P, c, _dist, alive = points(lk, t - lk["trails"] * k / S, stride=stride, **frame)
         sx, sy, z = project(P, cam_basis, W, H)
         xs.append(sx)
         ys.append(sy)
         oks.append(alive & (z > NEAR_Z))
-        col = c if col is None else col
-    pix_all, c_all, w_all = [], [], []
-    base = lk["trail_opacity"] * lk["opacity"]
-    for k in range(S):
-        x0, y0, x1, y1 = xs[k], ys[k], xs[k + 1], ys[k + 1]
-        ok = oks[k] & oks[k + 1]
-        if not bool(ok.any()):
-            continue
-        x0, y0, x1, y1, cc = x0[ok], y0[ok], x1[ok], y1[ok], col[ok]
-        n = torch.ceil(torch.maximum((x1 - x0).abs(), (y1 - y0).abs())).clamp(1, 512).long()
-        seg = torch.repeat_interleave(torch.arange(len(n), device=n.device), n)
-        start = torch.cumsum(n, 0) - n
-        f = (torch.arange(len(seg), device=n.device) - start[seg]).float() / n[seg].float()
-        px = torch.floor(x0[seg] + (x1 - x0)[seg] * f)
-        py = torch.floor(y0[seg] + (y1 - y0)[seg] * f)
-        inside = (px >= 0) & (px < W) & (py >= 0) & (py < H)
-        pix_all.append((py[inside] * W + px[inside]).long())
-        c_all.append(cc[seg][inside])
-        w_all.append(torch.full((int(inside.sum()),), base * (1.0 - k / S), device=n.device))
-    if not pix_all:
+        if k == 0:
+            col = c
+    X, Y, OK = torch.stack(xs), torch.stack(ys), torch.stack(oks)          # (S + 1, M)
+    x0, y0, dx, dy = X[:-1].flatten(), Y[:-1].flatten(), (X[1:] - X[:-1]).flatten(), (Y[1:] - Y[:-1]).flatten()
+    n = torch.ceil(torch.maximum(dx.abs(), dy.abs())).clamp(1, 512).long() * (OK[:-1] & OK[1:]).flatten()
+    seg = torch.repeat_interleave(torch.arange(len(n), device=n.device), n)
+    if not len(seg):
         return None
-    return torch.cat(pix_all), torch.cat(c_all), torch.cat(w_all)
+    f = (torch.arange(len(seg), device=n.device) - (torch.cumsum(n, 0) - n)[seg]).float() / n[seg].float()
+    px, py = torch.floor(x0[seg] + dx[seg] * f), torch.floor(y0[seg] + dy[seg] * f)
+    inside = (px >= 0) & (px < W) & (py >= 0) & (py < H)
+    M = X.shape[1]
+    w = lk["trail_opacity"] * lk["opacity"] * (1.0 - torch.arange(S, device=n.device).float() / S)    # per piece
+    seg = seg[inside]
+    return (py[inside] * W + px[inside]).long(), col[seg % M], w[seg // M]
 
 
 def splat(P, c, dist, alive, lk, cam_basis, W, H, gh, lines=None, size=None):
@@ -422,12 +438,19 @@ def splat(P, c, dist, alive, lk, cam_basis, W, H, gh, lines=None, size=None):
     order = torch.argsort(span, descending=True)
     sx, sy, z, s, a, c, lox, loy, nx, ny, span = (t[order] for t in (sx, sy, z, s, a, c, lox, loy, nx, ny, span))
     top = int(span.max().item()) if len(span) else 0
-    counts = [int((span > k).sum().item()) for k in range(top)]
+    counts = (len(span) - torch.searchsorted(span.flip(0).contiguous(), torch.arange(top, device=dev, dtype=span.dtype), right=True)).tolist()
     blend = lk["blend"]
     acc = torch.zeros((3, H * W), device=dev)
     cov = torch.zeros(H * W, device=dev)
     zbuf = torch.full((H * W,), float("inf"), device=dev) if blend == "solid" else None
     taps = []
+
+    def add(pix, cc, w):                            # glow: 1 - product of (1 - c a); ink: product of (1 - a (1 - c)) on white
+        if blend == "glow":
+            acc.index_add_(1, pix, torch.log1p(-(cc * w[:, None]).clamp(max=0.999)).T)
+        else:
+            acc.index_add_(1, pix, torch.log((1 - w[:, None] * (1 - cc)).clamp(min=1e-4)).T)
+        cov.index_add_(0, pix, torch.log1p(-w.clamp(max=0.999)))
     for oy in range(top):
         for ox in range(top):
             m = counts[max(ox, oy)]
@@ -448,23 +471,14 @@ def splat(P, c, dist, alive, lk, cam_basis, W, H, gh, lines=None, size=None):
             w = (w * fall)[ok]
             pix = (iy * W + ix).long()[ok]
             cc = c[idx_all][ok]
-            if blend == "glow":
-                acc.index_add_(1, pix, torch.log1p(-(cc * w[:, None]).clamp(max=0.999)).T)
-            elif blend == "ink":
-                acc.index_add_(1, pix, torch.log((1 - w[:, None] * (1 - cc)).clamp(min=1e-4)).T)
             if blend == "solid":
                 zz = z[idx_all][ok]
                 zbuf.scatter_reduce_(0, pix, zz, "amin")
                 taps.append((pix, zz, cc))
             else:
-                cov.index_add_(0, pix, torch.log1p(-w.clamp(max=0.999)))
+                add(pix, cc, w)
     if lines is not None and blend != "solid":
-        pix, cc, w = lines
-        if blend == "glow":
-            acc.index_add_(1, pix, torch.log1p(-(cc * w[:, None]).clamp(max=0.999)).T)
-        else:
-            acc.index_add_(1, pix, torch.log((1 - w[:, None] * (1 - cc)).clamp(min=1e-4)).T)
-        cov.index_add_(0, pix, torch.log1p(-w.clamp(max=0.999)))
+        add(*lines)
     if blend == "glow":
         img = 1 - torch.exp(acc)
         alpha = 1 - torch.exp(cov)
@@ -526,7 +540,7 @@ def track_edges(pts, lk, aspect):
     return []
 
 
-def draw_tracks(img, pts, lk, cam_basis, aspect, depth):
+def draw_tracks(img, pts, lk, cam_basis, aspect):
     """Lines between the tracked things and a ring on each, at their place in the cloud. img = torch (H, W, 3) on any
     device -> the same with the marks over it. cv2 draws only a one-channel mask; the colour is blended on the image's
     own device, inside the marks' box, so a big frame is not copied around."""
@@ -535,7 +549,8 @@ def draw_tracks(img, pts, lk, cam_basis, aspect, depth):
         return img
     H, W = int(img.shape[0]), int(img.shape[1])
     tk_ = lk["tracks"]
-    P = torch.tensor([[(p[1] - 0.5) * aspect * distance(p[3], depth), (0.5 - p[2]) * distance(p[3], depth), -distance(p[3], depth)] for p in pts], dtype=torch.float64)
+    u, v, d = torch.tensor([p[1:4] for p in pts], dtype=torch.float64).T
+    P, _ = place(u, v, d, lk["depth"], aspect)
     sx, sy, z = project(P, cam_basis, W, H)
     xy = [(float(a), float(b)) if zz > NEAR_Z else None for a, b, zz in zip(sx, sy, z)]
     m = np.zeros((H, W), np.uint8)

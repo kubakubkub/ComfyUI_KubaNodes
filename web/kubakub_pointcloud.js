@@ -5,13 +5,13 @@
 // pointcloud.points(), so the render is what plays here. Plain ES module, no build step, no network.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { delaunayEdges, mstEdges } from "./kubakub_track.js";
+import { LAV, ORANGE, PALETTE, delaunayEdges, esc, frameURL, hideWidget, mstEdges, renderWithSavers, stop, tidyRows, viewURL } from "./kubakub_track.js";
 import { CAM_KEYS, basis, cameraAt, gridSize, gridUV, morphAt, project, rankPerm, trackEdges, trackWorld, trailStride, LUMA, TRAIL_STEPS } from "./kubakub_pointcloud_math.js";
 
 const HERE = new URL(".", import.meta.url).href;
-const ORANGE = "#f18a58", LAV = "#a187b7";
-const PALETTE = ["#ffffff", ORANGE, LAV, "#39ff6a", "#e8b04a", "#ff3b30", "#6ae4ff"];
 const MAX_POINT = 64, RING = 14;                 // = pointcloud.MAX_POINT, RING
+const COLOURS = ["true", "mono", "tint", "negative"], BLENDS = ["glow", "ink", "solid"];   // = pointcloud.COLOURS, BLENDS (uniform = index)
+const EASES = ["smooth", "linear", "still"], LINES = ["off", "within", "network", "tree"];
 
 // ------------------------------------------------------------------------------------------ shaders
 // the shared part of both programs: every point at a time, = pointcloud.points() (keep in step)
@@ -118,9 +118,11 @@ function style() {
 .kkp-stage{flex:1;min-height:320px;position:relative;background:#0b0b0c;border-radius:6px;overflow:hidden;cursor:grab}
 .kkp-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
 .kkp-stage .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;color:rgba(255,255,255,.55);pointer-events:none}
-.kkp-row{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
-.kkp-row>.k{color:rgba(255,255,255,.45);min-width:58px}
-.kkp-row input[type=range]{flex:1;min-width:60px;max-width:170px;accent-color:${ORANGE}}
+.kkp-row{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.kkp-row:has(>.kv){flex-wrap:nowrap;align-items:flex-start}
+.kkp-row>.k{color:rgba(255,255,255,.45);min-width:62px;flex:none;line-height:18px}
+.kkp-row>.kv{display:flex;flex-wrap:wrap;gap:4px;align-items:center;flex:1;min-width:0}
+.kkp-row input[type=range], .kkp-row .kv input[type=range]{flex:1;min-width:60px;max-width:170px;accent-color:${ORANGE}}
 .kkp-row input[type=color]{width:22px;height:18px;border:none;padding:0;background:none;cursor:pointer}
 .kkp-row .v{min-width:36px;color:rgba(255,255,255,.6);font-variant-numeric:tabular-nums}
 .kkp-row .time{min-width:70px;color:rgba(255,255,255,.6);font-variant-numeric:tabular-nums;text-align:right}
@@ -136,14 +138,9 @@ function style() {
 .kkp-panel h4:hover{color:${ORANGE}}`;
   document.head.appendChild(s);
 }
-function hideWidget(w) { if (!w) return; w.hidden = true; w.computeSize = () => [0, -4]; if (w.element) w.element.style.display = "none"; if (w.inputEl) w.inputEl.style.display = "none"; }
-const pad = (v, n) => String(v).padStart(n, "0");
-const frameURL = (side, i) => api.apiURL(`/view?filename=${pad(i, 5)}.jpg&subfolder=${encodeURIComponent(side.subfolder)}&type=${encodeURIComponent(side.type || "temp")}`);
-const viewURL = m => api.apiURL(`/view?filename=${encodeURIComponent(m.filename)}&subfolder=${encodeURIComponent(m.subfolder || "")}&type=${encodeURIComponent(m.type || "temp")}`);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const hex01 = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
-const stop = el => { for (const t of ["pointerdown", "pointermove", "pointerup", "wheel", "keydown"]) el.addEventListener(t, e => { if (!e.target.closest?.("canvas")) e.stopPropagation(); }, { passive: true }); };
 const clone = o => JSON.parse(JSON.stringify(o));
+const setIn = (o, path, fn) => { const ks = path.split("."); for (const k of ks.slice(0, -1)) o = o[k] ||= {}; const k = ks[ks.length - 1]; o[k] = fn(o[k]); };
 
 let DEFAULTS = null;                                  // = pointcloud.DEFAULT_LOOK, from the node file
 async function defaults() {
@@ -254,12 +251,19 @@ class Cloud {
 }
 
 // brightness of every point of a picture (for the morph): the picture at grid size, each point's pixel
+let uvGrid = null;                                     // the grid places of every point, for one grid
+function gridPlaces(gw, gh, jitter) {
+  const key = `${gw}|${gh}|${jitter}`; if (uvGrid?.key === key) return uvGrid;
+  const n = gw * gh, u = new Float32Array(n), v = new Float32Array(n);
+  for (let i = 0; i < n; i++) [u[i], v[i]] = gridUV(i, gw, gh, jitter);
+  return (uvGrid = { key, u, v });
+}
 function pointLum(img, gw, gh, jitter) {
   const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
   const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, 0, 0);
-  const px = g.getImageData(0, 0, c.width, c.height).data, out = new Float32Array(gw * gh);
+  const px = g.getImageData(0, 0, c.width, c.height).data, { u, v } = gridPlaces(gw, gh, jitter), out = new Float32Array(gw * gh);
   for (let i = 0; i < out.length; i++) {
-    const [u, v] = gridUV(i, gw, gh, jitter), x = Math.min(c.width - 1, Math.max(0, Math.floor(u * c.width))), y = Math.min(c.height - 1, Math.max(0, Math.floor(v * c.height))), o = (y * c.width + x) * 4;
+    const x = Math.min(c.width - 1, Math.max(0, Math.floor(u[i] * c.width))), y = Math.min(c.height - 1, Math.max(0, Math.floor(v[i] * c.height))), o = (y * c.width + x) * 4;
     out[i] = (px[o] * LUMA[0] + px[o + 1] * LUMA[1] + px[o + 2] * LUMA[2]) / 255;
   }
   return out;
@@ -268,7 +272,7 @@ function pointLum(img, gw, gh, jitter) {
 // ------------------------------------------------------------------------------------------ the node
 function cloudUI(node) {
   style();
-  const el = document.createElement("div"); el.className = "kkp";
+  const el = document.createElement("div"); el.className = "kkp"; tidyRows(el);
   el.innerHTML = `<div class="kkp-stage"><canvas data-gl></canvas><canvas data-ov></canvas><div class="msg">run the node once (queue) - then the cloud plays here: drag to look around, shift-drag to move, wheel to go nearer</div></div>
 <div class="kkp-row"><button data-play>play</button><input type="range" data-scrub min="0" max="0" step="1" value="0" style="max-width:none"><span class="time"></span></div>
 <div class="kkp-row" data-camrow></div>
@@ -282,7 +286,7 @@ function cloudUI(node) {
   const scrub = el.querySelector("[data-scrub]"), timeEl = el.querySelector(".time"), playBtn = el.querySelector("[data-play]"), allBtn = el.querySelector("[data-all]");
   const ov = cvOv.getContext("2d");
   const W_ = n => node.widgets?.find(w => w.name === n);
-  const st = { meta: null, def: null, f: 0, playing: false, free: null, follow: true, tracks: null, perms: new Map(), view: [0, 0, 1, 1],
+  const st = { meta: null, def: null, f: 0, playing: false, free: null, follow: true, tracks: null, perms: new Map(), lums: new Map(), view: [0, 0, 1, 1],
     rec: null, drawing: false, arrow: null, audio: null, hear: true };
   let cloud = null;
   const makeCloud = () => { try { cloud = new Cloud(cvGL); if (cloud.err) { msg.textContent = cloud.err; cloud = null; } }
@@ -292,13 +296,15 @@ function cloudUI(node) {
   // say so, and start again when it comes back
   cvGL.addEventListener("webglcontextlost", e => { e.preventDefault(); cloud = null; st.lost = true; paint(); });
   cvGL.addEventListener("webglcontextrestored", () => { st.lost = false; makeCloud(); paint(); });
-  const frames = new Frames(() => paint());
-  const getLook = () => merged(W_("look")?.value || "", st.def);
+  let asked = false;
+  const frames = new Frames(() => { if (st.playing || asked) return; asked = true; requestAnimationFrame(() => { asked = false; paint(); }); });
+  let lookKey = null, lookVal = null;
+  const getLook = () => { const raw = W_("look")?.value || ""; if (raw !== lookKey || lookVal?.def !== st.def) { lookKey = raw; lookVal = { def: st.def, lk: merged(raw, st.def) }; } return lookVal.lk; };          // read only: changes go through a copy (setLook)
   function setLook(fn) {
-    const lk = getLook(); fn(lk); const w = W_("look"); if (w) { w.value = JSON.stringify(lk); w.callback?.(w.value); }
+    const lk = clone(getLook()); fn(lk); const w = W_("look"); if (w) { w.value = JSON.stringify(lk); w.callback?.(w.value); }
     node.setDirtyCanvas?.(true, true); buildCam(); buildPanel(); paint();
   }
-  const setPath = (path, val) => setLook(lk => { const ks = path.split("."); let o = lk; for (const k of ks.slice(0, -1)) o = o[k] ||= {}; o[ks[ks.length - 1]] = val; });
+  const setPath = (path, val) => setLook(lk => setIn(lk, path, () => val));
 
   // ---- time, sound and camera
   const nOut = () => st.meta?.n_out || 1, fps = () => st.meta?.fps || 24;
@@ -337,7 +343,9 @@ function cloudUI(node) {
       if (cb && db) {
         const key = `${m.colour.subfolder}|${k}|${gw}|${gh}|${lk.jitter}`;
         let perm = st.perms.get(key);
-        if (!perm) { perm = rankPerm(pointLum(ca, gw, gh, lk.jitter), pointLum(cb, gw, gh, lk.jitter)); st.perms.set(key, perm); if (st.perms.size > 6) st.perms.delete(st.perms.keys().next().value); }
+        const lum = j => { const lkey = `${m.colour.subfolder}|${j}|${gw}|${gh}|${lk.jitter}`; let l = st.lums.get(lkey);
+          if (!l) { l = pointLum(frames.img(m.colour, j), gw, gh, lk.jitter); st.lums.set(lkey, l); if (st.lums.size > 8) st.lums.delete(st.lums.keys().next().value); } return l; };
+        if (!perm) { perm = rankPerm(lum(k), lum(k + 1)); st.perms.set(key, perm); if (st.perms.size > 6) st.perms.delete(st.perms.keys().next().value); }
         cloud.put("uColB", cb, m.colour.subfolder + (k + 1)); cloud.put("uDepB", db, m.depth.subfolder + (k + 1)); cloud.perm(perm, gw, gh, key); morphOn = 1;
       }
     }
@@ -349,8 +357,8 @@ function cloudUI(node) {
     const flip = m.depth_from === "node" && lk.near !== m.near ? 1 : 0;
     const sn = heard(), so = lk.sound, forces = (lk.forces || []).slice(0, 8), F = new Float32Array(32);
     forces.forEach((f, n) => F.set(f, n * 4));
-    cloud.draw({ uGW: gw, uGH: gh, uColour: ["true", "mono", "tint", "negative"].indexOf(lk.colour), uHasField: hasField, uMorphOn: morphOn, uFlip: flip,
-      blend: ["glow", "ink", "solid"].indexOf(lk.blend), uJitter: lk.jitter, uDepth: lk.depth, uFarCut: lk.far_cut,
+    cloud.draw({ uGW: gw, uGH: gh, uColour: COLOURS.indexOf(lk.colour), uHasField: hasField, uMorphOn: morphOn, uFlip: flip,
+      blend: BLENDS.indexOf(lk.blend), uJitter: lk.jitter, uDepth: lk.depth, uFarCut: lk.far_cut,
       uSize: lk.size * (sn ? 1 + so.size * sn.level : 1), uOpacity: lk.opacity,
       uT: t * lk.speed, uDrift: lk.drift, uBreathe: lk.breathe, uWind: lk.wind, uCurl: lk.curl, uPush: lk.push, uScan: lk.scan, uS: morphOn ? s : 0, uSwarm: lk.swarm,
       uNForces: forces.length, uForces: F, uForce: forces.length ? lk.force : 0, uReach: lk.reach,
@@ -401,8 +409,9 @@ function cloudUI(node) {
     st.playing = on && nOut() > 1; playBtn.textContent = st.playing ? "pause" : "play"; playBtn.setAttribute("aria-pressed", st.playing);
     if (!st.playing) { st.audio?.pause(); if (st.rec) finishRec(); return; }
     if (soundOn()) { st.audio.currentTime = st.f / fps(); st.audio.play().catch(() => {}); }
+    const run = st.run = (st.run || 0) + 1;            // a new play ends the loop before it (no two loops at once)
     let prev = performance.now(), acc = 0;
-    const step = now => { if (!st.playing || !el.isConnected) { st.audio?.pause(); return; }
+    const step = now => { if (run !== st.run) return; if (!st.playing || !el.isConnected) { st.audio?.pause(); return; }
       let f = st.f;
       if (soundOn() && !st.audio.paused) f = Math.floor(st.audio.currentTime * fps());
       else { acc += (now - prev) / 1000 * fps(); if (acc >= 1) { f = st.f + Math.floor(acc); acc %= 1; } }
@@ -474,7 +483,7 @@ function cloudUI(node) {
     camrow.innerHTML = `<span class="k">camera</span><button data-cam="follow" aria-pressed="${st.follow}" title="The camera goes from start to end over the render">see the move</button>`
       + `<button data-cam="start" title="The move starts from the view you see">start = view</button><button data-cam="end" title="The move ends at the view you see">end = view</button>`
       + `<button data-cam="reset" title="Back to the picture's own view">picture view</button>`
-      + ["smooth", "linear", "still"].map(o => `<button data-ease="${o}" aria-pressed="${!rec && lk.camera.ease === o}">${o}</button>`).join("");
+      + EASES.map(o => `<button data-ease="${o}" aria-pressed="${!rec && lk.camera.ease === o}">${o}</button>`).join("");
     presets.innerHTML = `<span class="k">moves</span>` + Object.entries(PRESETS).map(([k, p]) => `<button data-preset="${k}" title="${p[2]}, from the view you see">${k}</button>`).join("")
       + `<button data-hand aria-pressed="${lk.camera.shake > 0}" title="A little shake, like a camera in the hand (on top of any move)">handheld</button>`
       + (lk.camera.shake > 0 ? `<input type="range" data-shake min="0.05" max="2" step="0.05" value="${lk.camera.shake}" title="How much it shakes" style="max-width:70px">` : "")
@@ -499,7 +508,7 @@ function cloudUI(node) {
     st.follow = true; st.free = null; st.drawing = false;
     setLook(l => { l.camera.start = Object.fromEntries(CAM_KEYS.map(k => [k, round(p[0](v)[k])])); l.camera.end = Object.fromEntries(CAM_KEYS.map(k => [k, round(p[1](v)[k])]));
       l.camera.ease = "smooth"; l.camera.path = []; }); });
-  presets.addEventListener("input", e => { if (e.target.dataset.shake === undefined) return; const lk = getLook(); lk.camera.shake = +e.target.value;
+  presets.addEventListener("input", e => { if (e.target.dataset.shake === undefined) return; const lk = clone(getLook()); lk.camera.shake = +e.target.value;
     const w = W_("look"); if (w) w.value = JSON.stringify(lk); paint(); });
   presets.addEventListener("change", e => { if (e.target.dataset.shake !== undefined) { const w = W_("look"); w?.callback?.(w.value); node.setDirtyCanvas?.(true, true); } });
 
@@ -511,9 +520,9 @@ function cloudUI(node) {
     return `<div class="kkp-sec"><h4 data-fold="${key}">${o ? "▾" : "▸"} ${title}</h4>${o ? body : ""}</div>`; };
   function sections() {
     const lk = getLook(), m = st.meta, out = [];
-    let h = pills("colour", "colour", ["true", "mono", "tint", "negative"], lk.colour);
+    let h = pills("colour", "colour", COLOURS, lk.colour);
     if (lk.colour === "tint") h += `<div class="kkp-row"><span class="k">tint</span><input type="color" data-in="tint.0" value="${lk.tint[0]}"> dark → bright <input type="color" data-in="tint.1" value="${lk.tint[1]}"></div>`;
-    h += pills("blend", "blend", ["glow", "ink", "solid"], lk.blend);
+    h += pills("blend", "blend", BLENDS, lk.blend);
     if (m?.depth_from === "node") h += pills("near", "near is", ["bright", "dark"], lk.near);
     out.push(["look", "look", h]);
     out.push(["points", "points", range("density", "points", 256, 2048, 64, lk.density, "Points across the long side (2048 = up to 2 million)")
@@ -546,7 +555,7 @@ function cloudUI(node) {
     if (st.tracks) {
       const tl = lk.tracks;
       out.push(["tracks", "tracked things", `<div class="kkp-row"><span class="k">rings</span><button data-tog="tracks.marks" aria-pressed="${!!tl.marks}">${tl.marks ? "on" : "off"}</button></div>`
-        + pills("tracks.lines", "lines", ["off", "within", "network", "tree"], tl.lines)
+        + pills("tracks.lines", "lines", LINES, tl.lines)
         + (tl.lines === "within" ? range("tracks.distance", "closer than", 0.02, 1, 0.01, tl.distance) : "")
         + `<div class="kkp-row"><span class="k">colour</span>${PALETTE.map(c => `<button class="sw" data-set="tracks.colour" data-val="${c}" style="background:${c}" aria-pressed="${tl.colour === c}"></button>`).join("")}<input type="color" data-in="tracks.colour" value="${tl.colour}"></div>`
         + range("tracks.opacity", "opacity", 0, 1, 0.01, tl.opacity) + range("tracks.size", "ring size", 0.2, 5, 0.05, tl.size)]);
@@ -565,7 +574,7 @@ function cloudUI(node) {
     const h = e.target.closest("[data-fold]"); if (h) { e.stopPropagation(); const o = opened(); o[h.dataset.fold] = !o[h.dataset.fold]; buildPanel(); return; }
     const b = e.target.closest("button"); if (!b) return; e.stopPropagation();
     if (b.dataset.set) setPath(b.dataset.set, b.dataset.val);
-    else if (b.dataset.tog) setLook(lk => { const ks = b.dataset.tog.split("."); let o = lk; for (const k of ks.slice(0, -1)) o = o[k]; o[ks[ks.length - 1]] = !o[ks[ks.length - 1]]; });
+    else if (b.dataset.tog) setLook(lk => setIn(lk, b.dataset.tog, v => !v));
     else if (b.dataset.draw !== undefined) { st.drawing = !st.drawing; if (st.drawing) { st.rec = null; play(false); } buildPanel(); buildCam(); paint(); }
     else if (b.dataset.clearForces !== undefined) setLook(lk => { lk.forces = []; });
     else if (b.dataset.undoForce !== undefined) setLook(lk => { lk.forces = (lk.forces || []).slice(0, -1); });
@@ -573,17 +582,12 @@ function cloudUI(node) {
   panel.addEventListener("input", e => { const i = e.target; if (!i.dataset.in) return; const path = i.dataset.in;
     if (path.startsWith("tint.")) { setLook(lk => { lk.tint[+path.slice(5)] = i.value; }); return; }
     const v = valOf(path, i.value); const span = i.parentElement.querySelector(".v"); if (span) span.textContent = v;
-    const lk = getLook(); const ks = path.split("."); let o = lk; for (const k of ks.slice(0, -1)) o = o[k]; o[ks[ks.length - 1]] = v;
+    const lk = clone(getLook()); setIn(lk, path, () => v);
     const w = W_("look"); if (w) w.value = JSON.stringify(lk); if (!st.playing) paint(); });
   panel.addEventListener("change", e => { if (e.target.dataset.in) { const w = W_("look"); w?.callback?.(w.value); node.setDirtyCanvas?.(true, true); } });
 
   el.querySelector("[data-render]").addEventListener("click", e => { e.stopPropagation();   // this node + the output nodes after it
-    const g = node.graph, ids = new Set([String(node.id)]), seen = new Set([node.id]);
-    const link = id => g.getLink?.(id) ?? g.links?.get?.(id) ?? g.links?.[id];
-    const walk = n => { for (const o of n.outputs || []) for (const id of o.links || []) { const l = link(id), t = l && g.getNodeById(l.target_id);
-      if (!t || seen.has(t.id)) continue; seen.add(t.id); if (t.constructor?.nodeData?.output_node) ids.add(String(t.id)); walk(t); } };
-    walk(node); hint.textContent = `rendering${ids.size > 1 ? ` and ${ids.size - 1} node(s) after it` : ""}…`;
-    app.queuePrompt(0, 1, [...ids]); });
+    const after = renderWithSavers(node); hint.textContent = `rendering${after ? ` and ${after} node(s) after it` : ""}…`; });
 
   el.kkpLoad = async () => {
     st.def = await defaults();
@@ -591,7 +595,7 @@ function cloudUI(node) {
     const fresh = JSON.stringify(m) !== JSON.stringify(st.meta);
     st.meta = m;
     if (fresh) {
-      st.perms.clear(); st.tracks = null;
+      st.perms.clear(); st.lums.clear(); st.tracks = null;
       if (m?.tracks) try { st.tracks = await (await fetch(viewURL(m.tracks))).json(); } catch { st.tracks = null; }
       st.audio?.pause(); st.audio = m?.audio ? new Audio(viewURL(m.audio)) : null;
       scrub.max = Math.max(0, (m?.n_out || 1) - 1); st.f = Math.min(st.f, +scrub.max); scrub.value = st.f;

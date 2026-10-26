@@ -47,30 +47,13 @@ def _fit(a, w, h):
     return cv2.resize(a, (w, h), interpolation=cv2.INTER_LINEAR)
 
 
-def _sound_in(audio):
-    """A connected sound as (waveform [1, channels, samples], sample rate, mono), or (None, None, None)."""
-    if audio is None:
-        return None, None, None
-    wave, hz = audio["waveform"], int(audio["sample_rate"])
-    wave = wave if wave.dim() == 3 else wave.reshape(1, -1, wave.shape[-1])
-    return wave, hz, so.to_mono(wave)
-
-
 def _built_in_beat(secs, hz=44100):
     """The beat a shader hears when it listens and no sound is connected: (waveform, sample rate, mono)."""
     wave = torch.from_numpy(so.sample_sound(secs, mf.SAMPLE_BPM, hz))[None, None]
     return wave, hz, so.to_mono(wave)
 
 
-def _sound_out(wave, hz, secs):
-    """The sound cut or padded to the clip's length; silence of that length without one."""
-    if wave is None:
-        return {"waveform": torch.zeros((1, 1, max(1, int(round(secs * 44100)))), dtype=torch.float32), "sample_rate": 44100}
-    n = max(1, int(round(secs * hz)))
-    snd = wave[..., :n].float().cpu()
-    if snd.shape[-1] < n:
-        snd = torch.nn.functional.pad(snd, (0, n - snd.shape[-1]))
-    return {"waveform": snd.contiguous(), "sample_rate": hz}
+_sound_in, _sound_out = so.sound_in, so.sound_out                # shared (kubakub/sound.py)
 
 
 def _ram_check(name, frames, w, h, per_pixel):

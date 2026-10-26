@@ -324,6 +324,37 @@ def take(sound, audio=None, **own):
     return audio, {k: own.get(k, d) for k, d in HEARD.items()}, False
 
 
+def sound_in(audio):
+    """A connected AUDIO as (waveform [1, channels, samples], sample rate, mono), or (None, None, None)."""
+    if audio is None:
+        return None, None, None
+    wave, hz = audio["waveform"], int(audio["sample_rate"])
+    wave = wave if wave.dim() == 3 else wave.reshape(1, -1, wave.shape[-1])
+    return wave, hz, to_mono(wave)
+
+
+def sound_out(wave, hz, secs):
+    """The sound cut or padded to the clip's length (a core AUDIO); silence of that length without one."""
+    import torch
+    if wave is None:
+        return {"waveform": torch.zeros((1, 1, max(1, int(round(secs * 44100)))), dtype=torch.float32), "sample_rate": 44100}
+    n = max(1, int(round(secs * hz)))
+    snd = wave[..., :n].float().cpu()
+    if snd.shape[-1] < n:
+        snd = torch.nn.functional.pad(snd, (0, n - snd.shape[-1]))
+    return {"waveform": snd.contiguous(), "sample_rate": hz}
+
+
+def take_wave(sound, audio):
+    """take() + sound_in(): (waveform, sample rate, mono, how it is heard); all None when nothing is connected or
+    the sound is empty or silent (a video without sound hands on such a one)."""
+    snd, heard, _cabled = take(sound, audio)
+    wave, hz, mono = sound_in(snd) if isinstance(snd, dict) and snd.get("waveform") is not None else (None, None, None)
+    if mono is not None and (len(mono) < hz * 0.1 or not float(np.abs(mono).max()) > 0):
+        return None, None, None, heard
+    return wave, hz, mono, heard
+
+
 def picture(mono, sr, beat=None, heard=None, width=640, height=200) -> np.ndarray:
     """The sound as the nodes hear it, float32 [height, width, 3]: its loudness (after gain and release), the beats
     as lines and the hits of the three bands as dots (bright = strong enough to count, dim = under the threshold)."""

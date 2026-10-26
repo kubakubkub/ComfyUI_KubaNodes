@@ -128,6 +128,14 @@ def sound_values(mono, sr, times, bpm=0.0, sample=False, release=0.15, gain=1.0)
     return out, lines
 
 
+def frame_sound(mono, sr, heard, fps, n):
+    """sound_values() for n frames at fps, by plain names: ({level, low, mid, high, beat: [n values 0-1]}, lines)."""
+    got, lines = sound_values(mono, sr, [f / fps for f in range(n)], float(heard["bpm"]), False,
+                              float(heard["release"]), float(heard["gain"]))
+    return ({k: [round(float(x), 4) for x in got[g]] for k, g in
+             (("level", "kLevel"), ("low", "kLow"), ("mid", "kMid"), ("high", "kHigh"), ("beat", "kBeat"))}, lines)
+
+
 # --------------------------------------------------------------------------
 # pictures for the shader
 # --------------------------------------------------------------------------

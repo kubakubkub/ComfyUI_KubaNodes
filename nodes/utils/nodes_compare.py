@@ -7,6 +7,7 @@ sides always show the same frame (play, scrub, step), in swipe, side by side, di
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import weakref
@@ -26,25 +27,26 @@ PREVIEWS = ["1280", "1920", "full"]
 MAX_FRAMES = 3000
 
 
-_last_video = [None, None]                        # [weakref to the VIDEO, (frames, fps)]: the last one decoded
+_decoded = weakref.WeakKeyDictionary()            # VIDEO -> (frames, fps): the frames go when the VIDEO goes
 
 
 def frames_of(x):
     """IMAGE (n, h, w, c) or a VIDEO -> (frames tensor, fps or None, 'image' | 'video'). A VIDEO is decoded once:
     Load Video hands every node after it (and every run while it is cached) the same object, so the tracker, the
-    point cloud and a re-run read the frames decoded the first time. The frames are read only, never changed."""
+    pointclouder and a re-run read the frames decoded the first time. The frames are read only, never changed."""
     if x is None:
         return None, None, None
     if hasattr(x, "get_components"):
-        ref = _last_video[0]
-        if ref is not None and ref() is x:
-            return (*_last_video[1], "video")
+        try:
+            return (*_decoded[x], "video")
+        except (KeyError, TypeError):
+            pass
         c = x.get_components()
         fps = float(c.frame_rate) if getattr(c, "frame_rate", None) else None
         try:
-            _last_video[:] = [weakref.ref(x), (c.images, fps)]
-        except TypeError:
-            _last_video[:] = [None, None]
+            _decoded[x] = (c.images, fps)
+        except TypeError:                           # not weak-referenceable: no cache
+            pass
         return c.images, fps, "video"
     if hasattr(x, "shape") and len(x.shape) == 4:
         return x, None, "image"
@@ -80,6 +82,43 @@ def write_side(frames, tag: str, side: int | None) -> dict:
     with ThreadPoolExecutor(max_workers=max(1, min(8, (os.cpu_count() or 4) - 2))) as pool:
         list(pool.map(one, range(n)))
     return {"subfolder": sub, "type": "temp", "n": n, "w": w, "h": h, "cut": int(frames.shape[0]) > n, "tag": tag}
+
+
+def temp_file(folder, name, write) -> dict:
+    """temp/<folder>/<name>, written by write(path) unless it is there -> the reference the web files /view."""
+    out = os.path.join(folder_paths.get_temp_directory(), folder)
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, name)
+    if not os.path.isfile(path):
+        write(path)
+    return {"filename": name, "subfolder": folder, "type": "temp"}
+
+
+def save_json(data, folder) -> dict:
+    """data as compact JSON in temp, named by its content."""
+    text = json.dumps(data, separators=(",", ":"))
+
+    def write(path):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    return temp_file(folder, hashlib.sha1(text.encode()).hexdigest()[:20] + ".json", write)
+
+
+def save_wav(audio, folder) -> dict:
+    """A core AUDIO as a WAV in temp (for a node to play along), named by its content."""
+    from ...kubakub.director.export import write_wav
+    w = audio["waveform"][0].float().cpu().numpy()
+    name = hashlib.sha1(w[:, ::97].tobytes() + str(w.shape).encode()).hexdigest()[:20] + ".wav"
+    return temp_file(folder, name, lambda path: write_wav(path, w[:2], int(audio["sample_rate"])))
+
+
+def free_vram():
+    """Let ComfyUI hand back the graphics card memory a node used."""
+    try:
+        import comfy.model_management as mm
+        mm.soft_empty_cache()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class KUBA_Compare(io.ComfyNode):

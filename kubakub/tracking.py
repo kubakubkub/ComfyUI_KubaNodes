@@ -701,7 +701,7 @@ def depth_frames(depth, n, H, W, near="bright"):
     d = (depth if hasattr(depth, "cpu") else torch.from_numpy(np.asarray(depth, np.float32))).cpu().float()
     if d.ndim == 4:                                # the mean of the colours (summed: a mean over 3 is slow in torch)
         c = min(3, int(d.shape[-1]))
-        d = sum(d[..., k] for k in range(c)) / c if c > 1 else d[..., 0]
+        d = sum(d[..., k] for k in range(c)) / c
     if d.ndim == 2:
         d = d[None]
     pick = d[np.linspace(0, len(d) - 1, min(len(d), 12)).astype(int)].numpy()

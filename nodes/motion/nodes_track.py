@@ -24,11 +24,11 @@ from comfy_api.latest import io
 
 from ...kubakub import region_cache as rc
 from ...kubakub import trackdraw as td
+from ...kubakub import shader_render as sr
+from ...kubakub import sound as so
 from ...kubakub import tracking as tk
 from ...kubakub.io_types import SoundType, TracksType
-from ..shader.nodes_shader import _sound_out
-from ..utils.nodes_compare import frames_of, write_side
-from .nodes_pointcloud import frame_sound, save_wav, take_sound
+from ..utils.nodes_compare import frames_of, free_vram, save_json, save_wav, write_side
 
 log = logging.getLogger("KUBA.regions")
 
@@ -133,26 +133,6 @@ def chain(before, data):
         else:
             out["curves"].setdefault(k, v)
     return out, rename
-
-
-def _free():
-    try:
-        import comfy.model_management as mm
-        mm.soft_empty_cache()
-    except Exception:  # noqa: BLE001
-        pass
-
-
-def _save_json(data, folder) -> dict:
-    text = json.dumps(data, separators=(",", ":"))
-    name = hashlib.sha1(text.encode()).hexdigest()[:20] + ".json"
-    out = os.path.join(folder_paths.get_temp_directory(), folder)
-    os.makedirs(out, exist_ok=True)
-    path = os.path.join(out, name)
-    if not os.path.isfile(path):
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
-    return {"filename": name, "subfolder": folder, "type": "temp"}
 
 
 def _union_masks(data, n, H, W):
@@ -262,7 +242,7 @@ class KUBA_Tracker(io.ComfyNode):
             try:
                 T = tk.analyse(frames, fps, s, work_dir=work, progress=lambda k, total: pbar.update_absolute(k, total))
             finally:
-                _free()
+                free_vram()
             data = T.to_dict()
             keep_tracks(key, data)
         dz = None
@@ -276,17 +256,17 @@ class KUBA_Tracker(io.ComfyNode):
             data, renamed = chain(tracks, data)
             notes.append(f"chained: {len(data['tracks']) - own} tracks from the tracker before + {own} of this one"
                          + (" (" + ", ".join(f"{a} -> {b}" for a, b in renamed.items()) + ")" if renamed else ""))
-        wave, hz, mono, heard = take_sound(sound, audio)
-        audio_out = _sound_out(wave, hz, n / fps)
+        wave, hz, mono, heard = so.take_wave(sound, audio)
+        audio_out = so.sound_out(wave, hz, n / fps)
         if mono is not None:                       # the tracks carry what is heard, frame by frame (track draw reacts)
-            per_frame, lines = frame_sound(mono, hz, heard, fps, n)
+            per_frame, lines = sr.frame_sound(mono, hz, heard, fps, n)
             data = {**data, "curves": {**(data.get("curves") or {}), **per_frame}}
             notes.append("sound: " + "; ".join(lines))
         uid = str(getattr(cls.hidden, "unique_id", "") or "")
         if uid:
             _LAST[uid] = (frames, fps)
         side = write_side(frames, "v", PREVIEW_SIDE)
-        meta = {"frames": side, "tracks": _save_json(data, "kubakub_track"), "W": W, "H": H, "n": n, "fps": fps}
+        meta = {"frames": side, "tracks": save_json(data, "kubakub_track"), "W": W, "H": H, "n": n, "fps": fps}
         if mono is not None:
             meta["audio"] = save_wav(audio_out, "kubakub_track")
         if dz is not None:
@@ -390,7 +370,7 @@ def _register_routes():
                 try:
                     return tk.analyse(frames, fps, j.get("settings") or "", only=[t]).to_dict()
                 finally:
-                    _free()
+                    free_vram()
             data = await asyncio.get_running_loop().run_in_executor(None, work)
             return web.json_response({"tracks": data})
         except Exception as e:  # noqa: BLE001

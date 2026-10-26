@@ -8,8 +8,6 @@ same points with the same formulas at full size.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import os
 import time
@@ -17,6 +15,7 @@ import time
 import numpy as np
 import torch
 
+import comfy.model_management as mm
 import comfy.utils
 import folder_paths
 from comfy_api.latest import io
@@ -25,10 +24,8 @@ from ...kubakub import pointcloud as pc
 from ...kubakub import shader_render as sr
 from ...kubakub import sound as so
 from ...kubakub import tracking as tk
-from ...kubakub.director.export import write_wav
 from ...kubakub.io_types import SoundType, TracksType
-from ..shader.nodes_shader import _sound_in, _sound_out
-from ..utils.nodes_compare import frames_of, write_side
+from ..utils.nodes_compare import frames_of, free_vram, save_json, save_wav, write_side
 
 log = logging.getLogger("KUBA.regions")
 
@@ -36,56 +33,6 @@ CATEGORY = "kubakub/2d/motion"
 PREVIEW_SIDE = 1280
 PICTURES_UP_TO = 16                                # a batch of up to this many pictures is a set to morph, more is a video
 SECONDS_PER_PICTURE = 3.0
-
-
-def _device():
-    try:
-        import comfy.model_management as mm
-        return mm.get_torch_device()
-    except Exception:  # noqa: BLE001
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def _save_json(data, folder) -> dict:
-    text = json.dumps(data, separators=(",", ":"))
-    name = hashlib.sha1(text.encode()).hexdigest()[:20] + ".json"
-    out = os.path.join(folder_paths.get_temp_directory(), folder)
-    os.makedirs(out, exist_ok=True)
-    path = os.path.join(out, name)
-    if not os.path.isfile(path):
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
-    return {"filename": name, "subfolder": folder, "type": "temp"}
-
-
-def take_sound(sound, audio):
-    """(waveform, sample rate, mono, how it is heard) of a connected sound (kubakub sound first, then 'audio');
-    all None and the default hearing without one."""
-    snd, heard, _cabled = so.take(sound, audio)
-    wave, hz, mono = _sound_in(snd) if isinstance(snd, dict) and snd.get("waveform") is not None else (None, None, None)
-    if mono is not None and (len(mono) < hz * 0.1 or not float(abs(mono).max()) > 0):
-        return None, None, None, heard             # a video without sound hands on an empty or silent one
-    return wave, hz, mono, heard
-
-
-def frame_sound(mono, hz, heard, fps, n):
-    """What is heard at every frame: ({level, low, mid, high, beat: [n values 0-1]}, report lines)."""
-    got, lines = sr.sound_values(mono, hz, [f / fps for f in range(n)], float(heard["bpm"]), False,
-                                 float(heard["release"]), float(heard["gain"]))
-    return ({k: [round(float(x), 4) for x in got[g]] for k, g in
-             (("level", "kLevel"), ("low", "kLow"), ("mid", "kMid"), ("high", "kHigh"), ("beat", "kBeat"))}, lines)
-
-
-def save_wav(audio, folder="kubakub_pointcloud") -> dict:
-    """The sound (cut to the render) as a WAV in temp, for the node to play along."""
-    w = audio["waveform"][0].float().cpu().numpy()
-    name = hashlib.sha1(w[:, ::97].tobytes() + str(w.shape).encode()).hexdigest()[:20] + ".wav"
-    out = os.path.join(folder_paths.get_temp_directory(), folder)
-    os.makedirs(out, exist_ok=True)
-    path = os.path.join(out, name)
-    if not os.path.isfile(path):
-        write_wav(path, w[:2], int(audio["sample_rate"]))
-    return {"filename": name, "subfolder": folder, "type": "temp"}
 
 
 def ply_path():
@@ -213,15 +160,15 @@ class KUBA_PointCloud(io.ComfyNode):
             dz = pc.depth_from_light(frames.cpu().numpy())
             notes.append("no depth connected: a soft relief from the brightness (connect a depth node for real depth)")
         K = n if mode == "pictures" else 1
-        wave, hz, mono, heard = take_sound(sound, audio)
+        wave, hz, mono, heard = so.take_wave(sound, audio)
         n_out, T = timeline(mode, n, K, float(seconds), fps, len(mono) / hz if mono is not None else 0.0)
         per_frame = None
         if mono is not None:
-            per_frame, lines = frame_sound(mono, hz, heard, fps, n_out)
+            per_frame, lines = sr.frame_sound(mono, hz, heard, fps, n_out)
             notes.append("sound: " + "; ".join(lines))
         Wo, Ho = out_size(W, H, int(long_side))
         aspect = W / H
-        dev = _device()
+        dev = mm.get_torch_device()
         gw, gh = pc.grid_size(lk["density"], W, H)
 
         def col(k):
@@ -259,7 +206,15 @@ class KUBA_PointCloud(io.ComfyNode):
         out = torch.empty((n_out, Ho, Wo, 3), dtype=torch.float32)
         alpha = torch.empty((n_out, Ho, Wo), dtype=torch.float32)
         ply = ""
-        cache = {}
+        pics = {}                                  # pictures on the card: the one shown and the next one it morphs into
+
+        def pic(j):
+            if j not in pics:
+                for old in [x for x in pics if x < j - 1]:
+                    del pics[old]
+                pics[j] = (col(j), dep(j))
+            return pics[j]
+        fld_one = fld[0].to(dev)[None] if fld is not None and len(fld) == 1 else None
         try:
             for f in range(n_out):
                 t = f / fps
@@ -269,12 +224,9 @@ class KUBA_PointCloud(io.ComfyNode):
                     ca, da, cb, db, perm, s = col(src), dep(src), None, None, None, 0.0
                 else:
                     k, s = pc.morph_at(t, T, K)
-                    if k not in cache:
-                        cache.clear()
-                        cache[k] = (col(k), dep(k))
-                    ca, da = cache[k]
-                    cb, db, perm = (col(k + 1), dep(k + 1), perms[k]) if s > 0 else (None, None, None)
-                ff = fld[min(f, len(fld) - 1)].to(dev)[None] if fld is not None else None
+                    ca, da = pic(k)
+                    cb, db, perm = (*pic(k + 1), perms[k]) if s > 0 else (None, None, None)
+                ff = fld_one if fld_one is not None else fld[min(f, len(fld) - 1)].to(dev)[None] if fld is not None else None
                 snd = {k: v[f] for k, v in per_frame.items()} if per_frame else None
                 fr = dict(col_a=ca, dep_a=da, aspect=aspect, col_b=cb, dep_b=db, perm=perm, s=s, field=ff, device=dev, snd=snd)
                 P, c, dist, alive = pc.points(lk, t, **fr)
@@ -286,16 +238,13 @@ class KUBA_PointCloud(io.ComfyNode):
                 im, al = pc.splat(P, c, dist, alive, lk, cam, Wo, Ho, gh, lines, size)
                 if t3 is not None:
                     tf = f % len(t3) if mode == "pictures" else min(f % n, len(t3) - 1)
-                    im = pc.draw_tracks(im, t3[tf], lk, cam, aspect, lk["depth"])
+                    im = pc.draw_tracks(im, t3[tf], lk, cam, aspect)
                 out[f].copy_(im)
                 alpha[f].copy_(al)
                 pbar.update(1)
         finally:
-            try:
-                import comfy.model_management as mm
-                mm.soft_empty_cache()
-            except Exception:  # noqa: BLE001
-                pass
+            pc.forget()
+            free_vram()
         meta = {"mode": mode, "n": n, "K": K, "W": W, "H": H, "fps": fps, "n_out": n_out, "T": T,
                 "depth_from": depth_from, "near": lk["near"],
                 "colour": write_side(frames, "c", PREVIEW_SIDE),
@@ -303,11 +252,11 @@ class KUBA_PointCloud(io.ComfyNode):
         if fld is not None:
             meta["field"] = write_side(fld[..., None].expand(-1, -1, -1, 3), "f", PREVIEW_SIDE)
         if t3 is not None:
-            meta["tracks"] = _save_json({"frames": t3}, "kubakub_pointcloud")
-        audio_out = _sound_out(wave, hz, n_out / fps)
+            meta["tracks"] = save_json({"frames": t3}, "kubakub_pointcloud")
+        audio_out = so.sound_out(wave, hz, n_out / fps)
         if per_frame:
             meta["sound"] = per_frame
-            meta["audio"] = save_wav(audio_out)
+            meta["audio"] = save_wav(audio_out, "kubakub_pointcloud")
         report = "\n".join([f"{gw * gh:,} points ({gw} x {gh}), {mode}: {n} {'frame(s)' if mode == 'video' else 'picture(s)'} "
                             f"{W}x{H}; rendered {n_out} frames {Wo}x{Ho} at {fps:g} fps in {time.perf_counter() - t0:.1f} s",
                             f"look: {lk['colour']} colours, {lk['blend']}, depth {lk['depth']:g}"
