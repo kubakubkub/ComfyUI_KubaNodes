@@ -190,7 +190,8 @@ class Cloud {
       for (let k = 0; k < n; k++) { const u = gl.getActiveUniform(p, k); loc[u.name.replace(/\[0\]$/, "")] = gl.getUniformLocation(p, u.name); }
       return { p, loc };
     };
-    this.points = program(VS, FS); this.lines = program(VS_LINES, FS_LINES);
+    this.points = program(VS, FS);
+    try { this.lines = program(VS_LINES, FS_LINES); } catch (e) { this.lines = null; console.error("[kubakub pointclouder] trails:", e); }   // the points still play
     this.vao = gl.createVertexArray();
     this.tex = {}; this.uploaded = {};
     for (const [name, unit] of [["uColA", 0], ["uDepA", 1], ["uColB", 2], ["uDepB", 3], ["uField", 4]]) { this.tex[name] = this.texture(); this.tex[name].unit = unit; this.blank(name); }
@@ -242,7 +243,7 @@ class Cloud {
     else if (u.blend === 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.ZERO, gl.SRC_COLOR); gl.disable(gl.DEPTH_TEST); }
     else { gl.disable(gl.BLEND); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); }
     gl.drawArrays(gl.POINTS, 0, u.uGW * u.uGH);
-    if (u.uTrail > 0 && u.uTrailOp > 0) {             // the trails over the points (on solid: alpha over, like the render)
+    if (this.lines && u.uTrail > 0 && u.uTrailOp > 0) {             // the trails over the points (on solid: alpha over, like the render)
       this.uniforms(this.lines, u);
       if (u.blend === 2) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.disable(gl.DEPTH_TEST); }
       const n = Math.ceil(u.uGW * u.uGH / Math.max(1, u.uStride));
@@ -284,7 +285,13 @@ function cloudUI(node) {
   const st = { meta: null, def: null, f: 0, playing: false, free: null, follow: true, tracks: null, perms: new Map(), view: [0, 0, 1, 1],
     rec: null, drawing: false, arrow: null, audio: null, hear: true };
   let cloud = null;
-  try { cloud = new Cloud(cvGL); if (cloud.err) { msg.textContent = cloud.err; cloud = null; } } catch (e) { msg.textContent = "WebGL2: " + e.message; cloud = null; }
+  const makeCloud = () => { try { cloud = new Cloud(cvGL); if (cloud.err) { msg.textContent = cloud.err; cloud = null; } }
+    catch (e) { console.error("[kubakub pointclouder]", e); msg.textContent = "the live view could not start (WebGL2): " + e.message; cloud = null; } };
+  makeCloud();
+  // the browser drops a WebGL view when the graphics card is too busy (a depth model running, very many points):
+  // say so, and start again when it comes back
+  cvGL.addEventListener("webglcontextlost", e => { e.preventDefault(); cloud = null; st.lost = true; paint(); });
+  cvGL.addEventListener("webglcontextrestored", () => { st.lost = false; makeCloud(); paint(); });
   const frames = new Frames(() => paint());
   const getLook = () => merged(W_("look")?.value || "", st.def);
   function setLook(fn) {
@@ -306,10 +313,15 @@ function cloudUI(node) {
     let vw = w, vh = Math.round(w / asp); if (vh > h) { vh = h; vw = Math.round(h * asp); }
     st.view = [Math.round((w - vw) / 2), Math.round((h - vh) / 2), vw, vh];
   }
-  function paint() {
+  function paint() {                                 // any error shows on the node (and in the console), never a silent black view
+    try { paintNow(); }
+    catch (e) { console.error("[kubakub pointclouder]", e); hint.textContent = "the live view stopped: " + (e?.message || e); }
+  }
+  function paintNow() {
     if (!el.isConnected) return;
     layout(); ov.clearRect(0, 0, cvOv.width, cvOv.height);
     const m = st.meta; msg.style.display = m && cloud ? "none" : "flex";
+    if (st.lost) msg.textContent = "the graphics card dropped the live view (busy, or very many points): it comes back by itself - lower 'points' if it happens again";
     timeEl.textContent = `${(st.f / fps()).toFixed(2)} / ${(nOut() / fps()).toFixed(2)} s`;
     if (!m || !cloud) return;
     const lk = getLook(), t = st.f / fps(), [gw, gh] = gridSize(lk.density, m.W, m.H);
