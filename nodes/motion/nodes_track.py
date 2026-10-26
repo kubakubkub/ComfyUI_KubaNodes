@@ -25,8 +25,10 @@ from comfy_api.latest import io
 from ...kubakub import region_cache as rc
 from ...kubakub import trackdraw as td
 from ...kubakub import tracking as tk
-from ...kubakub.io_types import TracksType
+from ...kubakub.io_types import SoundType, TracksType
+from ..shader.nodes_shader import _sound_out
 from ..utils.nodes_compare import frames_of, write_side
+from .nodes_pointcloud import frame_sound, save_wav, take_sound
 
 log = logging.getLogger("KUBA.regions")
 
@@ -209,6 +211,14 @@ class KUBA_Tracker(io.ComfyNode):
                                          "its finds to them (other finders, another colour, another sensitivity), "
                                          "so track draw gets one set and can join everything with lines. A kind "
                                          "found twice gets a number (colour, colour 2)."),
+                io.Audio.Input("audio", optional=True,
+                               tooltip="The video's sound (or music): the tracks carry how loud it is and the beats, "
+                                       "frame by frame, so track draw's marks pulse and its lines flash on the beat "
+                                       "(how much: 'sound' in track draw's look). It plays with the video on the node "
+                                       "and goes on to 'audio'."),
+                SoundType.Input("sound", optional=True,
+                                tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release), set "
+                                        "once for every node that listens. Connected, it comes before 'audio'."),
             ],
             outputs=[
                 TracksType.Output("tracks", tooltip="Everything found, with ids: for kubakub track draw."),
@@ -221,12 +231,13 @@ class KUBA_Tracker(io.ComfyNode):
                 io.String.Output("report"),
                 io.Image.Output("depth", tooltip="The depth on 'depth', one scale for the whole clip, near = white (for "
                                                  "track draw's depth). Black without one."),
+                io.Audio.Output("audio", tooltip="The sound, cut to the video (silence without one): for Create Video."),
             ],
             hidden=[io.Hidden.unique_id],
         )
 
     @classmethod
-    def execute(cls, video=None, settings="", fps=25.0, depth=None, tracks=None) -> io.NodeOutput:
+    def execute(cls, video=None, settings="", fps=25.0, depth=None, tracks=None, audio=None, sound=None) -> io.NodeOutput:
         t0 = time.perf_counter()
         notes = []
         if video is None:
@@ -265,11 +276,19 @@ class KUBA_Tracker(io.ComfyNode):
             data, renamed = chain(tracks, data)
             notes.append(f"chained: {len(data['tracks']) - own} tracks from the tracker before + {own} of this one"
                          + (" (" + ", ".join(f"{a} -> {b}" for a, b in renamed.items()) + ")" if renamed else ""))
+        wave, hz, mono, heard = take_sound(sound, audio)
+        audio_out = _sound_out(wave, hz, n / fps)
+        if mono is not None:                       # the tracks carry what is heard, frame by frame (track draw reacts)
+            per_frame, lines = frame_sound(mono, hz, heard, fps, n)
+            data = {**data, "curves": {**(data.get("curves") or {}), **per_frame}}
+            notes.append("sound: " + "; ".join(lines))
         uid = str(getattr(cls.hidden, "unique_id", "") or "")
         if uid:
             _LAST[uid] = (frames, fps)
         side = write_side(frames, "v", PREVIEW_SIDE)
         meta = {"frames": side, "tracks": _save_json(data, "kubakub_track"), "W": W, "H": H, "n": n, "fps": fps}
+        if mono is not None:
+            meta["audio"] = save_wav(audio_out, "kubakub_track")
         if dz is not None:
             meta["depth"] = write_side(torch.from_numpy(np.repeat(dz[..., None], 3, -1)), "d", PREVIEW_SIDE)
         on = [k for k in tk.FINDERS if s[k]["on"]] + (["outline"] if s["outline"]["on"] else [])
@@ -283,7 +302,7 @@ class KUBA_Tracker(io.ComfyNode):
         found = torch.from_numpy(_union_masks(data, n, H, W))
         near = torch.from_numpy(np.stack([tk.near_field(data, t, W, H) for t in range(n)]))
         depth_out = torch.from_numpy(np.repeat(dz[..., None], 3, -1)) if dz is not None else torch.zeros((1, H, W, 3))
-        return io.NodeOutput(data, found, near, frames, fps, report, depth_out, ui={"kubakub_track": [meta]})
+        return io.NodeOutput(data, found, near, frames, fps, report, depth_out, audio_out, ui={"kubakub_track": [meta]})
 
 
 class KUBA_TrackDraw(io.ComfyNode):

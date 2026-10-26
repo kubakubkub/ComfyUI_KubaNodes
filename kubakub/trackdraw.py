@@ -56,6 +56,9 @@ DEFAULT_LOOK = {
     "inside": [],
     "stamp": {"on": False, "kinds": [], "every": 14, "size": "blob", "fixed": 40, "patch": "now", "stay": 0, "outline": False},
     "states": {"words": list(STATE_WORDS), "moving": 1.2, "new": 8, "lost": 24},
+    # with a sound on the tracker: marks pulse (loudness + beat), lines flash on the beat, more 'within' lines when
+    # it is loud, thicker lines when it is loud
+    "sound": {"pulse": 0.5, "flash": 0.4, "reach": 0.5, "width": 0.0},
 }
 
 PRESETS = {
@@ -100,7 +103,18 @@ def look(raw) -> dict:
             out[k] = v
     out["states"] = {**DEFAULT_LOOK["states"], **(out.get("states") or {})}
     out["stamp"] = {**DEFAULT_LOOK["stamp"], **(out.get("stamp") or {})}
+    out["sound"] = {**DEFAULT_LOOK["sound"], **(out.get("sound") if isinstance(out.get("sound"), dict) else {})}
     return out
+
+
+def sound_at(data, t):
+    """What the tracker heard at frame t ({level, beat} 0-1), or None when it had no sound (= web soundAt)."""
+    c = data.get("curves") or {}
+    if not c.get("beat"):
+        return None
+    i = min(max(t, 0), len(c["beat"]) - 1)
+    lv = c.get("level") or []
+    return {"level": float(lv[i]) if i < len(lv) else 0.0, "beat": float(c["beat"][i])}
 
 
 # ------------------------------------------------------------------------------------------------
@@ -656,11 +670,14 @@ def render_frame(data, lk, t, frame=None, frame_at=None, depth_at=None):
         cv.lines(polys, _rgb(e.get("colour", "#ffffff")), float(e.get("width", 0.8)) * unit, float(e.get("opacity", 0.7)) * span_weight(e, t, data))
         cv.flush(e.get("blend", "normal"))
 
+    sn, so = sound_at(data, t), lk.get("sound") or {}
     # lines
     for c in lk.get("connect") or []:
+        if sn and c.get("mode", "within") == "within":
+            c = dict(c, distance=float(c.get("distance", 0.18)) * (1 + float(so.get("reach", 0)) * sn["level"]))
         col = _rgb(c.get("colour", "#ffffff"))
-        width = float(c.get("width", 1.0)) * unit
-        op = float(c.get("opacity", 1.0)) * span_weight(c, t, data)
+        width = float(c.get("width", 1.0)) * unit * (1 + float(so.get("width", 0)) * sn["level"] if sn else 1.0)
+        op = float(c.get("opacity", 1.0)) * span_weight(c, t, data) * (1 - float(so.get("flash", 0)) * 0.7 * (1 - sn["beat"]) if sn else 1.0)
         if op <= 0:
             continue
         dash = (6 * unit, 4 * unit) if c.get("dash") else None
@@ -693,6 +710,8 @@ def render_frame(data, lk, t, frame=None, frame_at=None, depth_at=None):
             zz = z_at(tr, t) if ds else None
             if zz is not None:                            # bigger when near, smaller when far
                 sz *= max(0.1, 1.0 + ds * (zz - 0.5) * 2.0)
+            if sn:                                        # the sound: they pulse with the loudness and the beat
+                sz *= 1 + float(so.get("pulse", 0)) * (0.3 * sn["level"] + 0.5 * sn["beat"])
             if typ in ("box", "brackets") and sz != 1.0:
                 cx, cy = centre(b)
                 w, h = w * sz, h * sz

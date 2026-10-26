@@ -56,6 +56,10 @@ export function spanWeight(e, t, data) {          // = trackdraw.span_weight: 0 
   return Math.max(0, Math.min(1, (t - a) / f, (b - t) / f));
 }
 const spanStart = (e, data) => e?.span?.length === 2 ? e.span[0] * Math.max(1, data.n - 1) : -1;
+export function soundAt(data, t) {                 // = trackdraw.sound_at: what the tracker heard at frame t, or null without a sound
+  const c = data.curves; if (!c?.beat?.length) return null; const i = Math.min(Math.max(t, 0), c.beat.length - 1);
+  return { level: c.level?.[i] || 0, beat: c.beat[i] || 0 };
+}
 export function zAt(tr, t) { const z = tr.z; if (!z?.length) return null; return z[Math.min(Math.max(t - tr.t0, 0), z.length - 1)]; }
 export function labelText(text, tr, state, b, t, data, lk) {
   const W = data.W, H = data.H, fps = data.fps || 25, unit = H / 1080;
@@ -300,11 +304,14 @@ export function renderFrame(g, data, lk, t, frameAt, depthAt) {
     g.restore();
   }
   depthLines(g, lk, t, depthAt, W, H, unit, data);
+  const sn = soundAt(data, t), so = lk.sound || {};
   // lines
-  for (const c of lk.connect || []) {
-    const segs = connectEdges(c, items, data, lk, t), maxd = Math.max(1, ...segs.map(s => dist(s[0], s[1]))), op = parseFloat(c.opacity ?? 1) * spanWeight(c, t, data);
+  for (const c0 of lk.connect || []) {
+    const c = sn && c0.mode === "within" ? { ...c0, distance: parseFloat(c0.distance ?? 0.18) * (1 + (so.reach || 0) * sn.level) } : c0;
+    const segs = connectEdges(c, items, data, lk, t), maxd = Math.max(1, ...segs.map(s => dist(s[0], s[1])));
+    const op = parseFloat(c.opacity ?? 1) * spanWeight(c, t, data) * (sn ? 1 - (so.flash || 0) * 0.7 * (1 - sn.beat) : 1);
     if (op <= 0) continue;
-    g.strokeStyle = col(c.colour); g.lineWidth = parseFloat(c.width ?? 1) * unit; g.setLineDash(c.dash ? [6 * unit, 4 * unit] : []); g.globalCompositeOperation = blendOp(c);
+    g.strokeStyle = col(c.colour); g.lineWidth = parseFloat(c.width ?? 1) * unit * (sn ? 1 + (so.width || 0) * sn.level : 1); g.setLineDash(c.dash ? [6 * unit, 4 * unit] : []); g.globalCompositeOperation = blendOp(c);
     for (const s of segs) { let o = op * (s.length > 2 ? s[2] : 1); if (c.fade && s.length === 2) o *= Math.max(0.15, 1 - dist(s[0], s[1]) / (maxd * 1.05));
       g.globalAlpha = o; g.beginPath(); styled(s[0], s[1], c.style || "straight").forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke(); }
     g.setLineDash([]); g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
@@ -316,7 +323,7 @@ export function renderFrame(g, data, lk, t, frameAt, depthAt) {
     if (op <= 0) continue;
     for (const [tr, s, b] of items) {
       if (kinds.length && !kinds.includes(tr.kind)) continue;
-      const zz = ds ? zAt(tr, t) : null, sz = zz != null ? sz0 * Math.max(0.1, 1 + ds * (zz - 0.5) * 2) : sz0;
+      const zz = ds ? zAt(tr, t) : null, sz = (zz != null ? sz0 * Math.max(0.1, 1 + ds * (zz - 0.5) * 2) : sz0) * (sn ? 1 + (so.pulse || 0) * (0.3 * sn.level + 0.5 * sn.beat) : 1);
       const c = col(mk.colour, tr); g.strokeStyle = c; g.fillStyle = c; g.lineWidth = width; g.globalAlpha = op * (s === 3 ? 0.45 : 1);
       let [x, y, w, h] = b;
       if ((typ === "box" || typ === "brackets") && sz !== 1) { const [cx, cy] = centre(b); w *= sz; h *= sz; x = cx - w / 2; y = cy - h / 2; }
@@ -398,9 +405,12 @@ const YOLO_CLASSES = ["person", "car", "bicycle", "motorcycle", "bus", "truck", 
 const PALETTE = ["#ffffff", ORANGE, LAV, "#39ff6a", "#e8b04a", "#ff3b30", "#6ae4ff"];
 
 // The player: frames of a tracker run (JPEGs in temp), cached, one shared clock.
-class Player {
-  constructor(onFrame) { this.onFrame = onFrame; this.cache = new Map(); this.t = 0; this.playing = false; this.side = null; }
-  set(side) { if (this.side?.subfolder !== side?.subfolder) { this.cache.clear(); } this.side = side; this.t = Math.min(this.t, Math.max(0, (side?.n || 1) - 1)); }
+class Player {                                       // the tracker's frames, and its sound when it has one (then the sound is the clock)
+  constructor(onFrame) { this.onFrame = onFrame; this.cache = new Map(); this.t = 0; this.playing = false; this.side = null; this.audio = null; this.audioKey = ""; }
+  set(side, sound) {
+    if (this.side?.subfolder !== side?.subfolder) { this.cache.clear(); } this.side = side; this.t = Math.min(this.t, Math.max(0, (side?.n || 1) - 1));
+    const key = sound?.filename || ""; if (key !== this.audioKey) { this.audio?.pause(); this.audioKey = key; this.audio = sound ? new Audio(viewURL(sound)) : null; }
+  }
   img(i) {
     const s = this.side; if (!s) return null; i = Math.min(Math.max(0, i), s.n - 1);
     let im = this.cache.get(i);
@@ -409,11 +419,17 @@ class Player {
   }
   preload(k = 20) { for (let i = 1; i <= k; i++) this.img(this.t + i); }
   toggle(on = !this.playing, fps = 25) {
-    this.playing = on && (this.side?.n || 0) > 1; if (!this.playing) return;
+    this.playing = on && (this.side?.n || 0) > 1; if (!this.playing) { this.audio?.pause(); return; }
+    const a = this.audio; if (a) { a.currentTime = this.t / fps; a.play().catch(() => {}); }
     let prev = performance.now(), acc = 0;
-    const step = now => { if (!this.playing) return; acc += (now - prev) / 1000 * fps; prev = now;
-      if (acc >= 1 && this.img(this.t)) { this.t = (this.t + Math.floor(acc)) % this.side.n; acc %= 1; this.preload(); this.onFrame(); } else if (acc > 3) acc = 1;
-      requestAnimationFrame(step); };
+    const step = now => { if (!this.playing) { a?.pause(); return; }
+      if (a && !a.paused) { const f = Math.floor(a.currentTime * fps);
+        if (f >= this.side.n) { this.t = 0; a.currentTime = 0; this.onFrame(); }
+        else if (f !== this.t) { this.t = f; this.preload(); this.onFrame(); } }
+      else { acc += (now - prev) / 1000 * fps;
+        if (acc >= 1 && this.img(this.t)) { this.t = (this.t + Math.floor(acc)) % this.side.n; acc %= 1; this.preload(); this.onFrame(); } else if (acc > 3) acc = 1;
+        if (a?.ended) { a.currentTime = this.t / fps; a.play().catch(() => {}); } }
+      prev = now; requestAnimationFrame(step); };
     requestAnimationFrame(step);
   }
 }
@@ -446,7 +462,7 @@ function trackerUI(node) {
   const setS = s => { const w = W_("settings"); if (!w) return; const v = JSON.stringify(s); if (w.value === v) return; w.value = v; w.callback?.(v); node.graph?.setDirtyCanvas(true, true); st.probe = null; render(); draw(); };
   new ResizeObserver(() => { const d = Math.min(devicePixelRatio || 1, 2); cv.width = Math.max(10, stage.clientWidth * d); cv.height = Math.max(10, stage.clientHeight * d); draw(); }).observe(stage);
   async function load() {
-    const m = meta(); if (!m) return; player.set(m.frames);
+    const m = meta(); if (!m) return; player.set(m.frames, m.audio);
     const key = m.tracks?.filename || ""; if (key === st.dataKey) return; st.dataKey = key;
     try { const r = await fetch(viewURL(m.tracks)); st.data = await r.json(); } catch { st.data = null; }
     draw();
@@ -580,7 +596,7 @@ function drawUI(node) {
   const getLook = () => lookOf(W_("look")?.value || "", SERVER?.looks, SERVER?.default_look);
   const setLook = lk => { const w = W_("look"); const v = JSON.stringify(lk); if (w.value !== v) { w.value = v; w.callback?.(v); node.graph?.setDirtyCanvas(true, true); } views.forEach(f => f()); renderPresets(); };
   async function load() {
-    const m = src(); if (!m) { st.data = null; st.key = ""; return; } player.set(m.frames);
+    const m = src(); if (!m) { st.data = null; st.key = ""; return; } player.set(m.frames, m.audio);
     const key = m.tracks?.filename || ""; if (key === st.key) return; st.key = key;
     try { const r = await fetch(viewURL(m.tracks)); st.data = await r.json(); } catch { st.data = null; }
     views.forEach(f => f());
@@ -701,6 +717,11 @@ function drawUI(node) {
       h += `<h4>stamp trail ${toggle("stamp.on", sp.on ? "on" : "off", sp.on)}</h4>`;
       if (sp.on) h += `<div class="kkt-card">${range("stamp.every", "every", 2, 120, 1, sp.every ?? 14)}${pills("stamp.size", "size", ["blob", "fixed"], sp.size || "blob")}${sp.size === "fixed" ? range("stamp.fixed", "px", 4, 300, 1, sp.fixed ?? 40) : ""}
         ${pills("stamp.patch", "pixels", ["now", "first"], sp.patch || "now")}${blendRow("stamp.blend", sp.blend)}${spanRow("stamp.span", sp)}${range("stamp.stay", "stays (s)", 0, 30, 0.5, sp.stay ?? 0)}<div class="kkt-row"><span class="k"></span>${toggle("stamp.outline", "thin frame", sp.outline)}</div>${kinds("stamp.kinds", sp.kinds)}</div>`;
+      const so = lk.sound || {};
+      h += `<h4>sound</h4>`;
+      if (st.data?.curves?.beat?.length) h += `<div class="kkt-card">${range("sound.pulse", "beat → marks pulse", 0, 2, 0.05, so.pulse ?? 0.5)}${range("sound.flash", "beat → lines flash", 0, 1, 0.05, so.flash ?? 0.4)}
+        ${range("sound.reach", "loud → more lines", 0, 2, 0.05, so.reach ?? 0.5)}${range("sound.width", "loud → thicker", 0, 3, 0.05, so.width ?? 0)}</div>`;
+      else h += `<div class="kkt-hint">connect a sound (Load Audio, the video's sound, kubakub sound) to the tracker's 'audio' and run it: the marks pulse and the lines flash on the beat</div>`;
       const ss = lk.states || {}, words = ss.words?.length ? ss.words : STATE_WORDS;
       h += `<h4>state words</h4><div class="kkt-card">${["new", "moving", "still", "lost"].map((n, i) => `<div class="kkt-row"><span class="k">${n}</span><input type="text" data-word="${i}" value="${esc(words[i] ?? "")}"></div>`).join("")}
         ${range("states.moving", "moving above", 0.1, 10, 0.1, ss.moving ?? 1.2)}${range("states.new", "new for", 0, 60, 1, ss.new ?? 8)}${range("states.lost", "lost for", 0, 120, 1, ss.lost ?? 24)}</div>`;

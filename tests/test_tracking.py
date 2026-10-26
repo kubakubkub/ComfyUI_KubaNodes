@@ -108,8 +108,10 @@ try:
 
     # --- the nodes -------------------------------------------------------------------------------
     res = nt.KUBA_Tracker.execute(None, json.dumps({"lights": {"on": True, "level": 0.9}}), 25.0)
-    tracks, found, near, frames, fps_out, report, depth_out = res.result
+    tracks, found, near, frames, fps_out, report, depth_out, audio_out = res.result
     meta = res.ui["kubakub_track"][0]
+    check("tracker node: no sound = silence of the clip's length on 'audio', no sound curves", audio_out["waveform"].shape[-1] == round(72 / 25 * 44100)
+          and "beat" not in (tracks.get("curves") or {}) and "audio" not in meta)
     check("tracker node: nothing connected = the sample clip, said in the report; its fps", "sample clip" in report and frames.shape[0] == 72 and fps_out == 25.0)
     check("tracker node: found mask per frame", tuple(found.shape) == (72, 360, 640) and 0 < float(found.mean()) < 0.2)
     check("tracker node: near = a glow, 1 on the light, softer around it", tuple(near.shape) == (72, 360, 640)
@@ -195,6 +197,22 @@ try:
     dif = td.render_frame(dtracks, td.look(json.dumps(base_lk)), 40, frames[40].numpy(), None)[0]
     check("blend: a mark in difference differs from normal, the rest of the picture does not",
           float(np.abs(nrm - dif).max()) > 0.2 and float(np.abs(nrm[:5, :5] - dif[:5, :5]).max()) < 1e-6)
+    # a sound: the tracks carry it, track draw pulses with it
+    from kubapack.kubakub import sound as so_
+    beat = torch.from_numpy(so_.sample_sound(72 / 25, 120, 22050))[None, None]
+    res = nt.KUBA_Tracker.execute(None, json.dumps({"lights": {"on": True, "level": 0.9}}), 25.0, audio={"waveform": beat, "sample_rate": 22050})
+    s_tracks, s_report, s_audio = res.result[0], res.result[5], res.result[7]
+    cur = s_tracks.get("curves") or {}
+    check("tracker + sound: loudness and beats per frame in the tracks, the sound on the node and on 'audio'",
+          len(cur.get("beat", [])) == 72 and max(cur["beat"]) > 0.5 and "audio" in res.ui["kubakub_track"][0]
+          and s_audio["waveform"].shape[-1] == round(72 / 25 * 22050) and "sound:" in s_report, s_report)
+    on_beat = max(range(72), key=lambda i: cur["beat"][i])
+    off_beat = min(range(72), key=lambda i: cur["beat"][i] + cur["level"][i])
+    lk_p = td.look(json.dumps({"background": "transparent", "connect": [], "marks": [{"type": "circle", "width": 2}], "sound": {"pulse": 2.0}}))
+    lk_0 = td.look(json.dumps({"background": "transparent", "connect": [], "marks": [{"type": "circle", "width": 2}], "sound": {"pulse": 0.0}}))
+    grow = td.render_frame(s_tracks, lk_p, on_beat)[1].sum() - td.render_frame(s_tracks, lk_0, on_beat)[1].sum()
+    check("track draw: the marks pulse on the beat (pulse 0 = not)", grow > 0 and td.sound_at(s_tracks, on_beat)["beat"] > 0.5
+          and td.sound_at(tracks, 3) is None, f"{grow:.0f} {off_beat}")
     try:
         nt.KUBA_TrackDraw.execute({"x": 1}, None, "")
         check("track draw node: tracks not from the tracker are refused", False)

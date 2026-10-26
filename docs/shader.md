@@ -205,7 +205,7 @@ Your picture on image0 gets depth: relief, shadows, a wire mesh, points. A depth
 |---|---|---|---|
 | wireframe | the picture on image0 as a glowing wire mesh, its lines bent by depth (a depth pass on image1, else by brightness). A wave of light runs through | a picture | rows, columns, relief, thin, wave, keep |
 | depth scan | a sheet of light that travels through the depth of the picture on image0 (a depth pass on image1, else its brightness). Loops without a jump | a picture | sheets, width, passes, keep, warm |
-| point cloud | the picture on image0 as a cloud of points that sways in depth (a depth pass on image1, else by brightness), like a 3D scan; to fly a camera through it: [kubakub point cloud](pointcloud.md) | a picture | points, size, sway, depth_size, glow |
+| point cloud | the picture on image0 as a cloud of points that sways in depth (a depth pass on image1, else by brightness), like a 3D scan; to fly a camera through it: [kubakub pointclouder](pointcloud.md) | a picture | points, size, sway, depth_size, glow |
 | hard shadow | a light circles the picture on image0 and everything that stands out throws a hard shadow (a depth pass on image1, else its brightness). A fake shadow, no 3D needed. Loops without a jump | a picture | sun, reach, turns, angle, dark, soft, shade, tint |
 | facade relief | the picture on image0 as a real relief: what stands out (a depth pass on image1, else its brightness) rises out of the wall, the view leans from side to side so near parts hide far ones, and a circling light throws true shadows. Loops without a jump. Gives a depth | a picture | height, sway, nod, sun, turns, angle, dark, soft, shade, steps |
 

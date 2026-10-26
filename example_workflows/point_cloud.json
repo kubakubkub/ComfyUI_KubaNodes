@@ -1,8 +1,8 @@
 {
- "id": "28d14f96-b9ce-4c2a-9921-7e7464c1c1c7",
+ "id": "d085d76b-1192-45ee-b609-245d69bc7da5",
  "revision": 0,
  "last_node_id": 9,
- "last_link_id": 11,
+ "last_link_id": 13,
  "nodes": [
   {
    "id": 1,
@@ -157,7 +157,9 @@
      "type": "AUDIO",
      "pos": null,
      "slot_index": null,
-     "links": null
+     "links": [
+      7
+     ]
     },
     {
      "color_off": null,
@@ -715,6 +717,36 @@
      "color_on": null,
      "dir": null,
      "label": null,
+     "localized_name": "audio",
+     "locked": null,
+     "name": "audio",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "AUDIO",
+     "pos": null,
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "sound",
+     "locked": null,
+     "name": "sound",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "KUBA_SOUND",
+     "pos": null,
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
      "localized_name": "settings",
      "locked": null,
      "name": "settings",
@@ -761,7 +793,7 @@
      "pos": null,
      "slot_index": null,
      "links": [
-      7
+      8
      ]
     },
     {
@@ -795,7 +827,7 @@
      "pos": null,
      "slot_index": null,
      "links": [
-      8
+      9
      ]
     },
     {
@@ -861,12 +893,28 @@
      "pos": null,
      "slot_index": null,
      "links": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "audio",
+     "locked": null,
+     "name": "audio",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "AUDIO",
+     "pos": null,
+     "slot_index": null,
+     "links": null
     }
    ],
    "title": "2 \u00b7 kubakub tracker (optional)",
    "properties": {
     "cnr_id": "comfyui-kubanodes",
-    "ver": "07d4023256733b3d5ca21aad06c0c5762d16200c",
+    "ver": "45c7ce6e7b4901677b563b7d871cd50176a479f5",
     "Node name for S&R": "KUBA_Tracker"
    },
    "widgets_values": [
@@ -886,8 +934,8 @@
     40
    ],
    "size": [
-    620,
-    980
+    640,
+    1040
    ],
    "flags": {},
    "order": 5,
@@ -937,7 +985,7 @@
      "shape": 7,
      "type": "MASK",
      "pos": null,
-     "link": 8
+     "link": 9
     },
     {
      "color_off": null,
@@ -952,7 +1000,37 @@
      "shape": 7,
      "type": "KUBA_TRACKS",
      "pos": null,
+     "link": 8
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "audio",
+     "locked": null,
+     "name": "audio",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "AUDIO",
+     "pos": null,
      "link": 7
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "sound",
+     "locked": null,
+     "name": "sound",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "KUBA_SOUND",
+     "pos": null,
+     "link": null
     },
     {
      "color_off": null,
@@ -1073,7 +1151,7 @@
      "pos": null,
      "slot_index": null,
      "links": [
-      9
+      10
      ]
     },
     {
@@ -1107,7 +1185,7 @@
      "pos": null,
      "slot_index": null,
      "links": [
-      10
+      11
      ]
     },
     {
@@ -1141,12 +1219,30 @@
      "pos": null,
      "slot_index": null,
      "links": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "audio",
+     "locked": null,
+     "name": "audio",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "AUDIO",
+     "pos": null,
+     "slot_index": null,
+     "links": [
+      12
+     ]
     }
    ],
-   "title": "3 \u00b7 kubakub point cloud: drag, set the move, play with the look",
+   "title": "3 \u00b7 kubakub pointclouder: drag, set the move, play with the look",
    "properties": {
     "cnr_id": "comfyui-kubanodes",
-    "ver": "07d4023256733b3d5ca21aad06c0c5762d16200c",
+    "ver": "45c7ce6e7b4901677b563b7d871cd50176a479f5",
     "Node name for S&R": "KUBA_PointCloud"
    },
    "widgets_values": [
@@ -1195,7 +1291,7 @@
      "shape": null,
      "type": "IMAGE",
      "pos": null,
-     "link": 9
+     "link": 10
     },
     {
      "color_off": null,
@@ -1210,7 +1306,7 @@
      "shape": 7,
      "type": "AUDIO",
      "pos": null,
-     "link": null
+     "link": 12
     },
     {
      "color_off": null,
@@ -1227,7 +1323,7 @@
      "widget": {
       "name": "fps"
      },
-     "link": 10
+     "link": 11
     },
     {
      "color_off": null,
@@ -1297,7 +1393,7 @@
      "pos": null,
      "slot_index": null,
      "links": [
-      11
+      13
      ]
     }
    ],
@@ -1349,7 +1445,7 @@
      "shape": null,
      "type": "VIDEO",
      "pos": null,
-     "link": 11
+     "link": 13
     },
     {
      "color_off": null,
@@ -1477,10 +1573,10 @@
    "title": "read me",
    "properties": {},
    "widgets_values": [
-    "## a video as a point cloud: filmed in depth, tracked things in 3D\n\n**You need:** a video or a picture (pick it in *Load Video*; for pictures use *Load Image*, a batch of pictures\nmorphs), the ComfyUI-DepthAnythingV3 nodes and `da3_large` in models/depthanything3 (any depth node works:\nDA3 Streaming, Depth Anything 2, Marigold - for Marigold set *near is: dark* on the point cloud).\n*kubakub point cloud* alone, with nothing connected, shows a sample facade.\n\n**Do:** pick your video, Queue once. The cloud then plays on the node: **drag** to look around, **Shift-drag** to\nmove, the **wheel** to go nearer. Find a view you like and press **end = view** (and **start = view** for where\nthe move begins); **see the move** plays it. Colours (true, mono, tint, negative), blend (glow on black, ink on\nwhite, solid), points (up to 2 million), size, depth, far cut and the motion (drift, breathe, wind, a scan through\nthe depth) change live. **render** renders only the cloud and the video after it.\n\nThe tracker (a colour, lights, people ...) puts a ring on every tracked thing at its depth, joined by lines, and its\n*near* pushes the points apart around them (*push* on the node). Disconnect what you do not need.\n"
+    "## a video as a point cloud: filmed in depth, with its sound, tracked things in 3D\n\n**You need:** a video or a picture (pick it in *Load Video*; for pictures use *Load Image*, a batch of pictures\nmorphs), the ComfyUI-DepthAnythingV3 nodes and `da3_large` in models/depthanything3 (any depth node works:\nDA3 Streaming, Depth Anything 2, Marigold - for Marigold set *near is: dark* on the pointclouder).\n*kubakub pointclouder* alone, with nothing connected, shows a sample facade.\n\n**Do:** pick your video, Queue once. The cloud then plays on the node: **drag** to look around, **Shift-drag** to\nmove, the **wheel** to go nearer. Find a view you like and press **end = view** (and **start = view** for where\nthe move begins); **see the move** plays it - or pick a move (push in, orbit, handheld ...), or **record** one\nby dragging while it plays. Under **settings**: colours (true, mono, tint, negative), blend (glow on black, ink on\nwhite, solid), points (up to 2 million), size, depth, far cut, the motion (drift, breathe, wind, curl, a scan\nthrough the depth), fine trails, arrows you draw that push the points, and what the video's sound does (a burst on\nthe beat, a swell with the bass) change live. **render** renders only the cloud and the video after it.\n\nThe tracker (a colour, lights, people ...) puts a ring on every tracked thing at its depth, joined by lines, and its\n*near* pushes the points apart around them (*push* on the node). Disconnect what you do not need.\n"
    ],
    "widgets_values_named": {
-    "text": "## a video as a point cloud: filmed in depth, tracked things in 3D\n\n**You need:** a video or a picture (pick it in *Load Video*; for pictures use *Load Image*, a batch of pictures\nmorphs), the ComfyUI-DepthAnythingV3 nodes and `da3_large` in models/depthanything3 (any depth node works:\nDA3 Streaming, Depth Anything 2, Marigold - for Marigold set *near is: dark* on the point cloud).\n*kubakub point cloud* alone, with nothing connected, shows a sample facade.\n\n**Do:** pick your video, Queue once. The cloud then plays on the node: **drag** to look around, **Shift-drag** to\nmove, the **wheel** to go nearer. Find a view you like and press **end = view** (and **start = view** for where\nthe move begins); **see the move** plays it. Colours (true, mono, tint, negative), blend (glow on black, ink on\nwhite, solid), points (up to 2 million), size, depth, far cut and the motion (drift, breathe, wind, a scan through\nthe depth) change live. **render** renders only the cloud and the video after it.\n\nThe tracker (a colour, lights, people ...) puts a ring on every tracked thing at its depth, joined by lines, and its\n*near* pushes the points apart around them (*push* on the node). Disconnect what you do not need.\n"
+    "text": "## a video as a point cloud: filmed in depth, with its sound, tracked things in 3D\n\n**You need:** a video or a picture (pick it in *Load Video*; for pictures use *Load Image*, a batch of pictures\nmorphs), the ComfyUI-DepthAnythingV3 nodes and `da3_large` in models/depthanything3 (any depth node works:\nDA3 Streaming, Depth Anything 2, Marigold - for Marigold set *near is: dark* on the pointclouder).\n*kubakub pointclouder* alone, with nothing connected, shows a sample facade.\n\n**Do:** pick your video, Queue once. The cloud then plays on the node: **drag** to look around, **Shift-drag** to\nmove, the **wheel** to go nearer. Find a view you like and press **end = view** (and **start = view** for where\nthe move begins); **see the move** plays it - or pick a move (push in, orbit, handheld ...), or **record** one\nby dragging while it plays. Under **settings**: colours (true, mono, tint, negative), blend (glow on black, ink on\nwhite, solid), points (up to 2 million), size, depth, far cut, the motion (drift, breathe, wind, curl, a scan\nthrough the depth), fine trails, arrows you draw that push the points, and what the video's sound does (a burst on\nthe beat, a swell with the bass) change live. **render** renders only the cloud and the video after it.\n\nThe tracker (a colour, lights, people ...) puts a ring on every tracked thing at its depth, joined by lines, and its\n*near* pushes the points apart around them (*push* on the node). Disconnect what you do not need.\n"
    },
    "color": "#432",
    "bgcolor": "#653"
@@ -1537,6 +1633,14 @@
   ],
   [
    7,
+   2,
+   1,
+   6,
+   4,
+   "AUDIO"
+  ],
+  [
+   8,
    5,
    0,
    6,
@@ -1544,7 +1648,7 @@
    "KUBA_TRACKS"
   ],
   [
-   8,
+   9,
    5,
    2,
    6,
@@ -1552,7 +1656,7 @@
    "MASK"
   ],
   [
-   9,
+   10,
    6,
    0,
    7,
@@ -1560,7 +1664,7 @@
    "IMAGE"
   ],
   [
-   10,
+   11,
    6,
    2,
    7,
@@ -1568,7 +1672,15 @@
    "FLOAT"
   ],
   [
-   11,
+   12,
+   6,
+   5,
+   7,
+   1,
+   "AUDIO"
+  ],
+  [
+   13,
    7,
    0,
    8,

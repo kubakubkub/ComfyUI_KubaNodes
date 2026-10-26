@@ -50,10 +50,15 @@ motif with SAM 2 with their own settings each, and still get one set of tracks: 
 number (colour, colour 2), and track draw can treat them apart and join them with lines. A tracker on another video
 is refused with the reason.
 
+**sound**: connect the video's sound or music to `audio` (Load Audio, a video's audio, or kubakub sound on `sound`).
+The tracks then carry how loud it is and where the beats are, frame by frame, and track draw reacts to them (its
+*sound* part, below). The sound plays with the video on the node (and on track draw's node), and goes on, cut to
+the clip, to `audio` for Create Video.
+
 Outputs: `tracks` (for track draw, the shader and the director), `found` (a mask per frame: white on what was found,
 its outline when there is one), `near` (a soft glow around everything found: the shader's `field`, a mask for mask
 animate, the region sampler's `change`), `frames` and `fps` (the video, for track draw and Create Video), `report`,
-`depth` (near = white).
+`depth` (near = white), `audio` (the sound cut to the clip; silence without one).
 
 Limits: body points need people at least a few hundred pixels tall in real footage (MediaPipe does not read drawn
 figures or tiny walkers; YOLO pose does better there). The tracker tells ultralytics to stay offline (no usage
@@ -77,6 +82,7 @@ then **edit the look** (a big preview, Space plays, `,` / `.` a frame, Esc close
 | time | every mark, every set of lines, every inside and depth part and the stamp trail has its own **time**: a slider with two dots, where it starts and where it ends in the clip (the preview jumps there while you drag; the playhead shows on it), and a fade in and out in seconds. The stamp trail only leaves stamps inside its time |
 | blend | every mark, every set of lines, every inside and depth part and the stamp trail has its own blend mode: normal, multiply, screen, overlay, darken, lighten, color dodge, color burn, hard light, soft light, difference, exclusion, hue, saturation, color, luminosity (the director's modes) |
 | state words | what a thing is called while new / moving / still / lost (default INPUT · PROCESS · STABLE · ARCHIVED), and when it counts as moving, new or lost |
+| sound (with a sound on the tracker) | *beat → marks pulse* (the marks grow with the loudness and jump on the beat) · *beat → lines flash* (the lines are dimmer between beats and light up on them) · *loud → more lines* (lines *within a distance* reach further when it is loud) · *loud → thicker* |
 
 **render the look** (on the node and in the editor) renders it at the video's size together with whatever saves it
 after track draw (Create Video, Save ...), and nothing else of the workflow runs; the tracking comes from the cache.

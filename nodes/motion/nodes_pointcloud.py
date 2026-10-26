@@ -58,7 +58,25 @@ def _save_json(data, folder) -> dict:
     return {"filename": name, "subfolder": folder, "type": "temp"}
 
 
-def _save_wav(audio, folder="kubakub_pointcloud") -> dict:
+def take_sound(sound, audio):
+    """(waveform, sample rate, mono, how it is heard) of a connected sound (kubakub sound first, then 'audio');
+    all None and the default hearing without one."""
+    snd, heard, _cabled = so.take(sound, audio)
+    wave, hz, mono = _sound_in(snd) if isinstance(snd, dict) and snd.get("waveform") is not None else (None, None, None)
+    if mono is not None and (len(mono) < hz * 0.1 or not float(abs(mono).max()) > 0):
+        return None, None, None, heard             # a video without sound hands on an empty or silent one
+    return wave, hz, mono, heard
+
+
+def frame_sound(mono, hz, heard, fps, n):
+    """What is heard at every frame: ({level, low, mid, high, beat: [n values 0-1]}, report lines)."""
+    got, lines = sr.sound_values(mono, hz, [f / fps for f in range(n)], float(heard["bpm"]), False,
+                                 float(heard["release"]), float(heard["gain"]))
+    return ({k: [round(float(x), 4) for x in got[g]] for k, g in
+             (("level", "kLevel"), ("low", "kLow"), ("mid", "kMid"), ("high", "kHigh"), ("beat", "kBeat"))}, lines)
+
+
+def save_wav(audio, folder="kubakub_pointcloud") -> dict:
     """The sound (cut to the render) as a WAV in temp, for the node to play along."""
     w = audio["waveform"][0].float().cpu().numpy()
     name = hashlib.sha1(w[:, ::97].tobytes() + str(w.shape).encode()).hexdigest()[:20] + ".wav"
@@ -195,15 +213,11 @@ class KUBA_PointCloud(io.ComfyNode):
             dz = pc.depth_from_light(frames.cpu().numpy())
             notes.append("no depth connected: a soft relief from the brightness (connect a depth node for real depth)")
         K = n if mode == "pictures" else 1
-        snd_audio, heard, _cabled = so.take(sound, audio)
-        wave, hz, mono = _sound_in(snd_audio)
+        wave, hz, mono, heard = take_sound(sound, audio)
         n_out, T = timeline(mode, n, K, float(seconds), fps, len(mono) / hz if mono is not None else 0.0)
         per_frame = None
         if mono is not None:
-            got, lines = sr.sound_values(mono, hz, [f / fps for f in range(n_out)], float(heard["bpm"]), False,
-                                         float(heard["release"]), float(heard["gain"]))
-            per_frame = {k: [round(float(x), 4) for x in got[g]] for k, g in
-                         (("level", "kLevel"), ("low", "kLow"), ("mid", "kMid"), ("high", "kHigh"), ("beat", "kBeat"))}
+            per_frame, lines = frame_sound(mono, hz, heard, fps, n_out)
             notes.append("sound: " + "; ".join(lines))
         Wo, Ho = out_size(W, H, int(long_side))
         aspect = W / H
@@ -293,7 +307,7 @@ class KUBA_PointCloud(io.ComfyNode):
         audio_out = _sound_out(wave, hz, n_out / fps)
         if per_frame:
             meta["sound"] = per_frame
-            meta["audio"] = _save_wav(audio_out)
+            meta["audio"] = save_wav(audio_out)
         report = "\n".join([f"{gw * gh:,} points ({gw} x {gh}), {mode}: {n} {'frame(s)' if mode == 'video' else 'picture(s)'} "
                             f"{W}x{H}; rendered {n_out} frames {Wo}x{Ho} at {fps:g} fps in {time.perf_counter() - t0:.1f} s",
                             f"look: {lk['colour']} colours, {lk['blend']}, depth {lk['depth']:g}"
