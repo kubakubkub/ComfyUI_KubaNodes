@@ -27,7 +27,7 @@ from ...kubakub import shadermix as mx
 from ...kubakub import shadertoy as st
 from ...kubakub import sound as so
 from ...kubakub.io_types import SoundType
-from .nodes_shader import _built_in_beat, _controls_text, _fit, _luma_masks, _preview, _ram_check, _sound_in, _sound_out
+from .nodes_shader import _built_in_beat, _controls_text, _fit, _luma_masks, _preview, _ram_check
 
 log = logging.getLogger("KUBA.shader")
 NAME = "kubakub shader mix"
@@ -170,7 +170,7 @@ class KUBA_ShaderMix(io.ComfyNode):
             h = int(height) or (pic.shape[1] if pic is not None else 720)
         longest = max([len(p) for p in (pa, pb) if p is not None] + [1])
 
-        wave, hz, mono = _sound_in(audio)
+        wave, hz, mono = so.sound_in(audio)
         sample = False
         if pa is not None and pb is not None and image is not None:
             notes.append("image: not used while 'a' and 'b' are both connected (it is the picture a preset reads)")
@@ -300,7 +300,7 @@ class KUBA_ShaderMix(io.ComfyNode):
         if bad[0]:
             notes.append("a shader wrote values that are no numbers (a division by zero?): they are black")
 
-        masks, sound = _luma_masks(images), _sound_out(wave, hz, secs)
+        masks, sound = _luma_masks(images), so.sound_out(wave, hz, secs)
         lines = [f"{frames} frames, {w}x{h}, {secs:.2f} s at {fps:g} fps",
                  f"A = {what_a}, B = {what_b}, how = {how}",
                  (f"mix: {curve}, {cycle:g} s, from {lo:g} to {hi:g}" if curve != "constant" else f"mix: {hi:g}")

@@ -307,7 +307,7 @@ export function renderFrame(g, data, lk, t, frameAt, depthAt) {
   const sn = soundAt(data, t), so = lk.sound || {};
   // lines
   for (const c0 of lk.connect || []) {
-    const c = sn && c0.mode === "within" ? { ...c0, distance: parseFloat(c0.distance ?? 0.18) * (1 + (so.reach || 0) * sn.level) } : c0;
+    const c = sn && (c0.mode || "within") === "within" ? { ...c0, distance: parseFloat(c0.distance ?? 0.18) * (1 + (so.reach || 0) * sn.level) } : c0;
     const segs = connectEdges(c, items, data, lk, t), maxd = Math.max(1, ...segs.map(s => dist(s[0], s[1])));
     const op = parseFloat(c.opacity ?? 1) * spanWeight(c, t, data) * (sn ? 1 - (so.flash || 0) * 0.7 * (1 - sn.beat) : 1);
     if (op <= 0) continue;

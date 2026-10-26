@@ -55,7 +55,7 @@ export function cameraAt(cam, a, t = 0) {            // cam = look.camera; = poi
   }
   return out;
 }
-export const trailStride = share => Math.max(1, Math.round(1 / share));   // = pointcloud.trail_index
+export const trailStride = share => Math.max(1, Math.floor(1 / share + 0.5));   // = pointcloud.trail_stride (half up)
 export const TRAIL_STEPS = 12;
 export function basis(cam, depth) {                   // = pointcloud.basis -> [position, right, up, forward]
   const R = 1 + depth, ya = cam.yaw * Math.PI / 180, pa = cam.pitch * Math.PI / 180;

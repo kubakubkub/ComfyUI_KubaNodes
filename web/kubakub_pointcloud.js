@@ -80,17 +80,19 @@ void main() {
   float px = uSize * (uH / float(uGH)) * dist / z;
   vA = uOpacity * min(1.0, px * px); vSize = clamp(px, 1.0, uMaxPoint); gl_PointSize = vSize;
 }`;
-// the trails: TRAIL_STEPS straight pieces per chosen point, its way over the last uTrail (time) - pointcloud.trail_lines
+// the trails: TRAIL_STEPS straight pieces per chosen point, its way over the last uTrail (time) - pointcloud.trail_lines.
+// vSize carries 'this end is alive and in front': a piece with one dead end is discarded whole (the value is < 1 all
+// along it), as the render leaves such a piece out
 const VS_LINES = COMMON + `
 void main() {
   int S = ${TRAIL_STEPS}, e = gl_VertexID % (2 * S), seg = e / 2, k = seg + e % 2;
   uint i = uint(gl_VertexID / (2 * S)) * uint(uStride);
-  vec3 P, c, P0, c0; float dist, z, z0;
-  bool alive = cloudPoint(i, uT, P0, c0, dist);
-  cloudPoint(i, uT - uTrail * float(k) / float(S), P, c, dist);
-  vec4 g = clipOf(P, z); vCol = c0; vSize = 1.0;
-  if (!alive || z <= 0.05) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; return; }
-  gl_Position = g; vA = uTrailOp * uOpacity * (1.0 - float(seg) / float(S));
+  vec3 P, c, P0, c0; float dist, z;
+  cloudPoint(i, uT, P0, c0, dist);
+  bool alive = cloudPoint(i, uT - uTrail * float(k) / float(S), P, c, dist);
+  gl_Position = clipOf(P, z); vCol = c0;
+  vSize = alive && z > 0.05 ? 1.0 : 0.0;
+  vA = uTrailOp * uOpacity * (1.0 - float(seg) / float(S));
 }`;
 const FS = `#version 300 es
 precision highp float;
@@ -104,6 +106,7 @@ const FS_LINES = `#version 300 es
 precision highp float;
 in vec3 vCol; in float vA; in float vSize; uniform int uBlend; out vec4 o;
 void main() {
+  if (vSize < 0.999) discard;
   if (uBlend == 0) o = vec4(vCol * vA, 1.0); else if (uBlend == 1) o = vec4(1.0 - vA * (1.0 - vCol), 1.0); else o = vec4(vCol, vA);
 }`;
 
@@ -439,7 +442,7 @@ function cloudUI(node) {
     const keys = st.rec?.keys || []; st.rec = null;
     if (keys.length < 2) { buildCam(); paint(); return; }
     const last = keys[keys.length - 1]; if (last[0] < 1) keys.push([1, ...last.slice(1)]);
-    const step = Math.max(1, Math.ceil(keys.length / 600)), path = keys.filter((_, i) => i % step === 0 || i === keys.length - 1);
+    const path = keys.length <= 600 ? keys : Array.from({ length: 600 }, (_, k) => keys[Math.round(k * (keys.length - 1) / 599)]);   // = pointcloud.look()
     st.follow = true; st.free = null;
     play(false); setPath("camera.path", path);
   }
@@ -459,7 +462,7 @@ function cloudUI(node) {
     else { st.free.yaw = Math.max(-180, Math.min(180, drag.cam.yaw + dx * 0.25)); st.free.pitch = Math.max(-89, Math.min(89, drag.cam.pitch - dy * 0.25)); }
     if (!st.playing) paint(); });
   const end = e => { if (!drag) return;
-    if (drag.arrow) { const a = st.arrow.map(v => round(v)); st.arrow = null;
+    if (drag.arrow) { const a = st.arrow.map(v => round(Math.min(1.5, Math.max(-0.5, v)))); st.arrow = null;   // = pointcloud.look()
       if (Math.hypot(a[2] - a[0], a[3] - a[1]) > 0.01) setLook(lk => { lk.forces = [...(lk.forces || []), a].slice(-8); }); else paint(); }
     drag = null; stage.style.cursor = ""; try { cvOv.releasePointerCapture(e.pointerId); } catch { /* gone */ } };
   cvOv.addEventListener("pointerup", end); cvOv.addEventListener("pointercancel", end);

@@ -53,7 +53,6 @@ def _built_in_beat(secs, hz=44100):
     return wave, hz, so.to_mono(wave)
 
 
-_sound_in, _sound_out = so.sound_in, so.sound_out                # shared (kubakub/sound.py)
 
 
 def _ram_check(name, frames, w, h, per_pixel):
@@ -324,7 +323,7 @@ class KUBA_Shader(io.ComfyNode):
                 notes.append("regions: the shader runs from each region's edge to its middle (connect a field of kubakub "
                              "mask field for another path)")
 
-        wave, sr_hz, mono = _sound_in(audio)
+        wave, sr_hz, mono = so.sound_in(audio)
         sample_sound = False
         # whatever is connected does something: a sound opens a preset's 'sound' / 'beat' control (they rest at 0),
         # and an input the shader has no use for is named in the report
@@ -504,7 +503,7 @@ class KUBA_Shader(io.ComfyNode):
                              + (f", {picture_amount:g} of it" if picture_amount < 1.0 else "") + "); masks"
                              + (" and depth" if t.depth else "") + " are the shader's own. off = the shader alone")
 
-        sound = _sound_out(wave, sr_hz, secs)
+        sound = so.sound_out(wave, sr_hz, secs)
 
         what = ("your " + ("OSL shader" if t.language == "osl" else "Shadertoy" if t.kind == "shadertoy" else "fragment shader")) if own else f"preset '{preset}'"
         if t.buffers:

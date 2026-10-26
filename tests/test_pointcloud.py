@@ -167,8 +167,16 @@ try:
     lk_t = pc.look({"density": 128, "curl": 1.0, "trails": 1.0, "trail_share": 0.25})
     fr = dict(col_a=grey, dep_a=flat, aspect=W / H)
     lines = pc.trail_lines(lk_t, 2.0, fr, cam0, W, H)
-    check("trails: fine lines from a share of the points", lines is not None and len(lines[0]) > 2000
-          and float(lines[2].max()) <= lk_t["trail_opacity"] * lk_t["opacity"] + 1e-6)
+    check("trails: fine lines from a share of the points", lines is not None and sum(len(c[0]) for c in lines) > 2000
+          and max(float(c[2].max()) for c in lines) <= lk_t["trail_opacity"] * lk_t["opacity"] + 1e-6)
+    keep = pc.TRAIL_CHUNK
+    pc.TRAIL_CHUNK = 500                           # in small chunks: the same samples
+    small = pc.trail_lines(lk_t, 2.0, fr, cam0, W, H)
+    pc.TRAIL_CHUNK = keep
+    check("trails in chunks = the same samples", len(small) > 3 and torch.equal(torch.cat([c[0] for c in small]), torch.cat([c[0] for c in lines])))
+    long_path = [[k / 1199, k * 0.1, 0, 0, 0, 0] for k in range(1200)]
+    lp = pc.look({"camera": {"path": long_path}})["camera"]["path"]
+    check("a long recorded move is thinned to 600 keys, its end kept", len(lp) == 600 and lp[-1] == long_path[-1] and lp[0] == long_path[0])
     beat = {"level": 1.0, "low": 1.0, "mid": 0.0, "high": 1.0, "beat": 1.0}
     lk_s = pc.look({"density": 128, "drift": 0, "sound": {"sparkle": 1.0}})
     Ps, cs, *_ = pc.points(lk_s, 0.0, grey, flat, W / H, snd=beat)
@@ -206,7 +214,7 @@ try:
                "out.morph = [0, 0.7, 1.9, 2.6, 2.99, 3.5, 5.9, 8].map(t => M.morphAt(t, 9, 3));\n"
                "out.cam = [0, 0.25, 0.5, 1].map(a => M.cameraAt(camera, a));\n"
                "out.shaky = [0, 0.2, 0.4, 0.7, 1].map(a => M.cameraAt(shaky, a, a * 7.3));\n"
-               "out.stride = [1, 0.5, 0.1, 0.03, 0.01].map(M.trailStride);\n"
+               "out.stride = [1, 0.5, 0.4, 0.1, 0.03, 0.01].map(M.trailStride);\n"
                "out.proj = cams.map(c => { const B = M.basis(c, 1.3); return pts.map(p => M.project(M.trackWorld(p, 16 / 9, 1.3), B, 1920, 1080)); });\n"
                "out.edges = ['within', 'off'].map(l => M.trackEdges(pts, { lines: l, distance: 0.3 }, 16 / 9, null, null));\n"
                "console.log(JSON.stringify(out));\n")
@@ -231,7 +239,7 @@ try:
             check("recorded path + handheld shake", len(lks["camera"]["path"]) == 3 and all(
                 abs(js["shaky"][n][k] - pc.camera_at(lks, a, a * 7.3)[k]) < 1e-9 for n, a in enumerate([0, 0.2, 0.4, 0.7, 1]) for k in pc._CAM_RANGES))
             check("trail points", js["stride"] == [int(pc.trail_index(pc.look({"trail_share": s}), 1000)[1]) if s < 1 else 1
-                                                     for s in [1, 0.5, 0.1, 0.03, 0.01]])
+                                                     for s in [1, 0.5, 0.4, 0.1, 0.03, 0.01]])
             ok = True
             for cam, row in zip(cams, js["proj"]):
                 B = pc.basis(cam, 1.3)

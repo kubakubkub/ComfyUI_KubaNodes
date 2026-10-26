@@ -120,7 +120,9 @@ def look(raw) -> dict:
             if None not in v:
                 path.append(v)
     path.sort(key=lambda k: k[0])
-    lk["camera"]["path"] = path[:MAX_PATH] if len(path) >= 2 else []
+    if len(path) > MAX_PATH:                       # evenly thinned, the first and the last key kept
+        path = [path[round(k * (len(path) - 1) / (MAX_PATH - 1))] for k in range(MAX_PATH)]
+    lk["camera"]["path"] = path if len(path) >= 2 else []
     forces = []
     for f in raw.get("forces") if isinstance(raw.get("forces"), list) else []:
         if isinstance(f, (list, tuple)) and len(f) == 4:
@@ -383,7 +385,7 @@ def project(P, cam_basis, W, H):
 # ------------------------------------------------------------------------------------------ drawing
 def trail_stride(lk):
     """Every k-th point draws a trail (k = 1 / trail_share), the same on the node."""
-    return max(1, int(round(1.0 / lk["trail_share"])))
+    return max(1, int(math.floor(1.0 / lk["trail_share"] + 0.5)))      # half up, like Math.round
 
 
 def trail_index(lk, n):
@@ -391,10 +393,14 @@ def trail_index(lk, n):
     return torch.arange(0, n, trail_stride(lk), dtype=torch.int64)
 
 
+TRAIL_CHUNK = 8_000_000                             # 1 pixel samples rasterised at a time (bounds the memory)
+
+
 def trail_lines(lk, t, frame, cam_basis, W, H):
-    """The trails as 1 pixel samples (pixel index, colour (M, 3), weight (M,)): each chosen point's way over the last
-    'trails' seconds, TRAIL_STEPS straight pieces fading out to the oldest, rasterised one sample per pixel along the
-    longer axis (like the node's WebGL lines). frame = the keyword arguments of points() for this frame."""
+    """The trails as chunks of 1 pixel samples [(pixel index, colour (M, 3), weight (M,)) ...]: each chosen point's way
+    over the last 'trails' seconds, TRAIL_STEPS straight pieces fading out to the oldest, rasterised one sample per
+    pixel along the longer axis (like the node's WebGL lines); a piece shows when both its ends are alive and in front
+    of the camera. frame = the keyword arguments of points() for this frame."""
     S, stride = TRAIL_STEPS, trail_stride(lk)
     xs, ys, oks, col = [], [], [], None
     for k in range(S + 1):
@@ -408,16 +414,23 @@ def trail_lines(lk, t, frame, cam_basis, W, H):
     X, Y, OK = torch.stack(xs), torch.stack(ys), torch.stack(oks)          # (S + 1, M)
     x0, y0, dx, dy = X[:-1].flatten(), Y[:-1].flatten(), (X[1:] - X[:-1]).flatten(), (Y[1:] - Y[:-1]).flatten()
     n = torch.ceil(torch.maximum(dx.abs(), dy.abs())).clamp(1, 512).long() * (OK[:-1] & OK[1:]).flatten()
-    seg = torch.repeat_interleave(torch.arange(len(n), device=n.device), n)
-    if not len(seg):
-        return None
-    f = (torch.arange(len(seg), device=n.device) - (torch.cumsum(n, 0) - n)[seg]).float() / n[seg].float()
-    px, py = torch.floor(x0[seg] + dx[seg] * f), torch.floor(y0[seg] + dy[seg] * f)
-    inside = (px >= 0) & (px < W) & (py >= 0) & (py < H)
     M = X.shape[1]
     w = lk["trail_opacity"] * lk["opacity"] * (1.0 - torch.arange(S, device=n.device).float() / S)    # per piece
-    seg = seg[inside]
-    return (py[inside] * W + px[inside]).long(), col[seg % M], w[seg // M]
+    ends = torch.cumsum(n, 0)
+    total = int(ends[-1]) if len(ends) else 0
+    chunks, a = [], 0
+    while a < len(n) and total:                     # whole pieces, about TRAIL_CHUNK samples each
+        b = max(a + 1, int(torch.searchsorted(ends, int(ends[a - 1] if a else 0) + TRAIL_CHUNK, right=True)))
+        nn = n[a:b]
+        seg = torch.repeat_interleave(torch.arange(a, b, device=n.device), nn)
+        if len(seg):
+            f = (torch.arange(len(seg), device=n.device) - (torch.cumsum(nn, 0) - nn)[seg - a]).float() / n[seg].float()
+            px, py = torch.floor(x0[seg] + dx[seg] * f), torch.floor(y0[seg] + dy[seg] * f)
+            inside = (px >= 0) & (px < W) & (py >= 0) & (py < H)
+            seg = seg[inside]
+            chunks.append(((py[inside] * W + px[inside]).long(), col[seg % M], w[seg // M]))
+        a = b
+    return chunks or None
 
 
 def splat(P, c, dist, alive, lk, cam_basis, W, H, gh, lines=None, size=None):
@@ -478,7 +491,8 @@ def splat(P, c, dist, alive, lk, cam_basis, W, H, gh, lines=None, size=None):
             else:
                 add(pix, cc, w)
     if lines is not None and blend != "solid":
-        add(*lines)
+        for chunk in lines:
+            add(*chunk)
     if blend == "glow":
         img = 1 - torch.exp(acc)
         alpha = 1 - torch.exp(cov)
@@ -492,10 +506,11 @@ def splat(P, c, dist, alive, lk, cam_basis, W, H, gh, lines=None, size=None):
             img[:, pix[win]] = cc[win].T
         alpha = torch.isfinite(zbuf).float()
         if lines is not None:                       # the trails over the points, alpha over alpha
-            pix, cc, w = lines
-            keep_ = torch.zeros(H * W, device=dev).index_add_(0, pix, torch.log1p(-w.clamp(max=0.999)))
-            sw = torch.zeros(H * W, device=dev).index_add_(0, pix, w)
-            sc = torch.zeros((3, H * W), device=dev).index_add_(1, pix, (cc * w[:, None]).T)
+            keep_, sw, sc = torch.zeros(H * W, device=dev), torch.zeros(H * W, device=dev), torch.zeros((3, H * W), device=dev)
+            for pix, cc, w in lines:
+                keep_.index_add_(0, pix, torch.log1p(-w.clamp(max=0.999)))
+                sw.index_add_(0, pix, w)
+                sc.index_add_(1, pix, (cc * w[:, None]).T)
             la = 1 - torch.exp(keep_)
             img = img * (1 - la) + sc / sw.clamp(min=1e-6) * la
             alpha = torch.maximum(alpha, la)

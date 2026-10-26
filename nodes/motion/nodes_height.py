@@ -24,7 +24,7 @@ from ...kubakub import heightanim as ha
 from ...kubakub import maskfields as mf
 from ...kubakub import sound as so
 from ...kubakub.io_types import SoundType
-from ..shader.nodes_shader import _built_in_beat, _preview, _ram_check, _sound_in, _sound_out
+from ..shader.nodes_shader import _built_in_beat, _preview, _ram_check
 
 log = logging.getLogger("KUBA.motion")
 NAME = "kubakub height animate"
@@ -162,7 +162,7 @@ class KUBA_HeightAnimate(io.ComfyNode):
         elif field is not None:
             notes.append(f"the field is not used by grow = {grow} (it is for 'along the field')")
 
-        wave, sr, mono = _sound_in(audio)
+        wave, sr, mono = so.sound_in(audio)
         sample_sound = wave is None and mf.needs_sound(curve)
         secs = float(seconds) if seconds > 0 else (len(mono) / float(sr) if mono is not None else 4.0)
         if sample_sound:
@@ -193,7 +193,7 @@ class KUBA_HeightAnimate(io.ComfyNode):
                             f"grow = {grow} on a {curve} curve, value {min(values):.3g} to {max(values):.3g}; the height "
                             f"reaches {float(masks.max()):.2f} of white"] + lines + notes)
         log.info("[KUBA height animate] %s", report.replace("\n", "\n    "))
-        return io.NodeOutput(grey, lit, masks, fps, _sound_out(wave, sr, secs), frames, report, ui=_preview(lit.numpy(), fps))
+        return io.NodeOutput(grey, lit, masks, fps, so.sound_out(wave, sr, secs), frames, report, ui=_preview(lit.numpy(), fps))
 
 
 NODE_CLASS_MAPPINGS = {"KUBA_HeightAnimate": KUBA_HeightAnimate}

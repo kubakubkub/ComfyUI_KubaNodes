@@ -25,6 +25,7 @@ from ...kubakub import shader_render as sr
 from ...kubakub import sound as so
 from ...kubakub import tracking as tk
 from ...kubakub.io_types import SoundType, TracksType
+from ..shader.nodes_shader import _ram_check
 from ..utils.nodes_compare import frames_of, free_vram, save_json, save_wav, write_side
 
 log = logging.getLogger("KUBA.regions")
@@ -184,8 +185,8 @@ class KUBA_PointCloud(io.ComfyNode):
                 fld = fld[..., 0]
         perms = []
         if mode == "pictures" and K > 1:
-            i = torch.arange(gw * gh, device=dev, dtype=torch.int64)
-            u, v = pc.grid_uv(i, gw, gh, lk["jitter"])
+            g = pc.grid(gw, gh, lk["jitter"], dev)
+            u, v = g["u"], g["v"]
             luma = torch.tensor(pc.LUMA, device=dev)
             lums = [(pc.sample(col(k), u, v)[:, :3] * luma).sum(-1) for k in range(K)]
             perms = [pc.rank_perm(lums[k], lums[k + 1]) for k in range(K - 1)]
@@ -202,6 +203,7 @@ class KUBA_PointCloud(io.ComfyNode):
                 a = dz[min(fr, len(dz) - 1)]
                 return lambda uu, vv: a[min(H - 1, max(0, int(vv * H))), min(W - 1, max(0, int(uu * W)))]
             t3 = [pc.track_points(tracks, f, dep_at(min(f, n - 1) if mode == "video" else 0)) for f in range(tn)]
+        _ram_check("kubakub pointclouder", n_out, Wo, Ho, 16)   # images + alpha, float32
         pbar = comfy.utils.ProgressBar(n_out)
         out = torch.empty((n_out, Ho, Wo, 3), dtype=torch.float32)
         alpha = torch.empty((n_out, Ho, Wo), dtype=torch.float32)

@@ -27,7 +27,8 @@ PREVIEWS = ["1280", "1920", "full"]
 MAX_FRAMES = 3000
 
 
-_decoded = weakref.WeakKeyDictionary()            # VIDEO -> (frames, fps): the frames go when the VIDEO goes
+_decoded = weakref.WeakKeyDictionary()            # VIDEO -> (frames, fps): the last one decoded, gone with its VIDEO
+KEEP_DECODED_GB = 4.0                             # a bigger clip is decoded again rather than kept in RAM
 
 
 def frames_of(x):
@@ -43,10 +44,12 @@ def frames_of(x):
             pass
         c = x.get_components()
         fps = float(c.frame_rate) if getattr(c, "frame_rate", None) else None
-        try:
-            _decoded[x] = (c.images, fps)
-        except TypeError:                           # not weak-referenceable: no cache
-            pass
+        _decoded.clear()
+        if c.images.numel() * c.images.element_size() <= KEEP_DECODED_GB * 2 ** 30:
+            try:
+                _decoded[x] = (c.images, fps)
+            except TypeError:                       # not weak-referenceable: no cache
+                pass
         return c.images, fps, "video"
     if hasattr(x, "shape") and len(x.shape) == 4:
         return x, None, "image"
@@ -108,7 +111,7 @@ def save_wav(audio, folder) -> dict:
     """A core AUDIO as a WAV in temp (for a node to play along), named by its content."""
     from ...kubakub.director.export import write_wav
     w = audio["waveform"][0].float().cpu().numpy()
-    name = hashlib.sha1(w[:, ::97].tobytes() + str(w.shape).encode()).hexdigest()[:20] + ".wav"
+    name = hashlib.sha1(w[:, ::97].tobytes() + f"{w.shape}|{int(audio['sample_rate'])}".encode()).hexdigest()[:20] + ".wav"
     return temp_file(folder, name, lambda path: write_wav(path, w[:2], int(audio["sample_rate"])))
 
 
