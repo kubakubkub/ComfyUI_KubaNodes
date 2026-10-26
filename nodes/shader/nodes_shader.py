@@ -25,7 +25,8 @@ from ...kubakub import plan as rp
 from ...kubakub import shader_render as sr
 from ...kubakub import shadertoy as st
 from ...kubakub import sound as so
-from ...kubakub.io_types import RegionsType, SoundType
+from ...kubakub import tracking as tk
+from ...kubakub.io_types import RegionsType, SoundType, TracksType
 
 log = logging.getLogger("KUBA.shader")
 st.USER_DIR = os.path.join(folder_paths.get_user_directory(), "kubakub", "shaders")      # presets saved from the node
@@ -236,6 +237,12 @@ class KUBA_Shader(io.ComfyNode):
                                 tooltip="From kubakub sound: the sound and how it is heard (tempo, gain, release, band, threshold, gap), set "
                                         "once for every node that listens, so all of them step on the same beat. Connected, it comes before '"
                                         "audio' and before this node's own sound settings."),
+                TracksType.Input("tracks", optional=True,
+                                 tooltip="From kubakub tracker: the shader follows what was tracked. Its arrow is the "
+                                         "biggest thing's way, frame by frame (instead of a drawn one), and when no field "
+                                         "is connected the field is a glow around everything tracked, so field presets "
+                                         "(scan band, rings, contours ...) run from the tracked things. The clip is as "
+                                         "long as the tracks unless 'seconds' or a sound says otherwise."),
             ],
             outputs=[
                 io.Image.Output("images", tooltip="One picture per frame."),
@@ -267,7 +274,7 @@ class KUBA_Shader(io.ComfyNode):
                 image0=None, image1=None, image2=None, image3=None, mask=None, field=None, audio=None,
                 time_offset=0.0, loop_fade=1.0, mask_from="auto", clip=True, bpm=0.0, gain=1.0,
                 release=0.15, unconnected="auto", vector="", on_picture="screen", picture_amount=1.0,
-                regions=None, only="", sound=None) -> io.NodeOutput:
+                regions=None, only="", sound=None, tracks=None) -> io.NodeOutput:
         notes = []
         audio, heard, cabled = so.take(sound, audio, bpm=bpm, gain=gain, release=release)
         bpm, gain, release = heard["bpm"], heard["gain"], heard["release"]
@@ -290,6 +297,21 @@ class KUBA_Shader(io.ComfyNode):
         fs = field.float().cpu().numpy() if field is not None else None
         ms = ms[None] if ms is not None and ms.ndim == 2 else ms
         fs = fs[None] if fs is not None and fs.ndim == 2 else fs
+        track_arrows = None
+        if tracks is not None:
+            if not isinstance(tracks, dict) or tracks.get("format") != tk.TRACKS_FORMAT:
+                raise ValueError(f"{NAME}: 'tracks' must come from kubakub tracker.")
+            tn = int(tracks["n"])
+            track_arrows = [tk.main_arrow(tracks, i) for i in range(tn)]
+            if arrow:
+                notes.append("tracks: the tracked arrow is used instead of the drawn one")
+            arrow = next((a for a in track_arrows if a), None)       # so the shader knows it has an arrow at all
+            if fs is None:
+                fw_ = 480
+                fh_ = max(1, int(round(fw_ * tracks["H"] / tracks["W"])))
+                fs = np.stack([tk.near_field(tracks, i, fw_, fh_) for i in range(tn)])
+                notes.append(f"tracks: the field is a glow around the {len(tracks['tracks'])} tracked things, frame by frame")
+            notes.append(f"tracks: {tn} frames; the arrow follows the biggest tracked thing")
         first = next(iter(pics.values()), None)
         lab = regions.labels[0].cpu().numpy() if regions is not None and regions.labels.numel() else None
         if (only or "").strip() not in ("", "*"):
@@ -411,6 +433,10 @@ class KUBA_Shader(io.ComfyNode):
                                                  float(release), float(gain))
             for i, d in enumerate(per_frame):
                 d.update({k: v[i % frames] for k, v in heard.items()})
+        if track_arrows is not None:                  # the tracked arrow, frame by frame (none on a frame = no arrow there)
+            for i, d in enumerate(per_frame):
+                a = track_arrows[i % len(track_arrows)]
+                d.update(sr.vector_values(a, as_field=False) if a else {"kVector": 0.0, "kVecField": 0.0})
         if lab is not None:
             textures[sr.REGION_UNIT], values["kRegions"] = sr.region_source(lab)
         static = {"iFrameRate": fps, "iSampleRate": float(sr_hz or 44100), "kSeconds": secs, "kDepthOut": 1.0 if t.depth else 0.0,

@@ -89,8 +89,10 @@ except ValueError as e:
 # ---- the nodes that listen
 SOUND = ns.KUBA_Sound.execute(audio=AUDIO, gain=0.25).args[0]
 for cls in (nm.KUBA_MaskAnimate, nh.KUBA_HeightAnimate, ng.KUBA_MotionGuide, nx.KUBA_ShaderMix, nw.KUBA_SoundMaskSwap, nsh.KUBA_Shader):
-    last = cls.define_schema().inputs[-1]
-    check(f"{cls.__name__}: 'sound' is its last input, optional", last.id == "sound" and last.optional and bool(last.tooltip))
+    ins = cls.define_schema().inputs
+    last = ins[-2] if cls is nsh.KUBA_Shader else ins[-1]           # the shader's 'tracks' (kubakub tracker) came after it
+    check(f"{cls.__name__}: 'sound' is its last input, optional" + (" (then tracks)" if cls is nsh.KUBA_Shader else ""),
+          last.id == "sound" and last.optional and bool(last.tooltip) and (cls is not nsh.KUBA_Shader or ins[-1].id == "tracks"))
 
 own = nm.KUBA_MaskAnimate.execute(effect="opacity", curve="sound level", fps=20.0, seconds=1.0, scale=0.25, audio=AUDIO).result
 cab = nm.KUBA_MaskAnimate.execute(effect="opacity", curve="sound level", fps=20.0, seconds=1.0, scale=0.25, sound=SOUND, gain=9.0).result

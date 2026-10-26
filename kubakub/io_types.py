@@ -12,3 +12,4 @@ PiecesType = io.Custom("KUBA_PIECES")            # dict: scene, piece labels fil
 FalloffType = io.Custom("KUBA_FALLOFF")          # dict: a falloff for the pieces operators
 SoundType = io.Custom("KUBA_SOUND")              # dict: a sound and how it is heard (sound.bundle)
 ProjectorType = io.Custom("KUBA_PROJECTOR")      # dict: where a projector stands (scene3d/autocam.py)
+TracksType = io.Custom("KUBA_TRACKS")            # dict: what kubakub tracker found (tracking.Tracks.to_dict())

@@ -181,6 +181,27 @@ reference latent). VAE: flux2_full_encoder_small_decoder when installed (fast de
 Speed on a 12 GB laptop GPU (klein 4b + one LoRA, 1 MP, 4 steps): ~15 s the first time (loading), ~8 s after.
 flux 3 klein: BFL's step distilled file `flux3_image_klein_sd_int8_convrot` with `qwen3vl_4b_int8_convrot`, 8 steps by default (the slider goes to 20; 16 = the model card's), cfg 1. It keeps what is around the shape as it is and follows an edit prompt closely; see [generate](generate.md), *Flux 3 Klein*.
 
+## Crop and compare in the window
+
+**Crop** (the crop tool, or **C**): select an image or video layer. The rest of its picture shows faintly around
+it; drag an edge or a corner to crop (**Shift** keeps the shape, **Alt** from the centre), drag inside to slide the
+window over the picture, drag on the faint part for a new window, double click = all of the picture again. The
+picture stays where it is on the canvas, only the window changes. The bar on top has the same ratio pills as
+*kubakub crop* (*canvas* = the shape of the matrix), ⇄ to turn the window, **reset**, and **done** (or Enter /
+Esc). The crop is saved with the layer, keyframes and behaviours move the cropped layer as before, and the node
+renders the same crop at full size (a video is cropped on every frame).
+
+**Compare** (the compare button, or **\\**): swipe between the composition and
+
+- **without the layer**: the same composition without the selected layer (live: it follows the timeline and every
+  change you make),
+- **base**: the base picture alone,
+- **as opened**: the composition as it was when the window opened, i.e. as last applied (a still).
+
+Modes as in *kubakub compare*: swipe (drag the line), difference (drag sideways = brighter), blink, onion (drag
+sideways = how much). **done**, **\\** or Esc closes it. The graph node for the same job is
+[kubakub compare](utils.md#kubakub-compare).
+
 ## Light layers: relight the scene inside the director
 
 With a scene connected (kubakub scene render → director `scene`), **+ layer → light** (Shift L) adds a light
@@ -280,10 +301,12 @@ each has a time range (from / to), a fade and an on / off switch. The timeline s
 | field | (along = direction or from a point: **arrow → draw**, then drag on the picture, sets where the move starts and ends instead of an angle or a centre in numbers) the clip appears along a grey ramp over its regions, per pixel: a wipe, an iris, outlines closing in, region by region, a dissolve, a running band, rings; on a ramp, saw, sine, square, random, noise, the sound level, or on beats, bars, markers and low / mid / high hits; with a trail (see [masks](masks.md)) | a layer clipped to regions |
 | swap | layers trade their masks in time with the sound (see below) | layers clipped to regions |
 | repeat | copies in a line / grid / ring, rotation / scale / opacity per copy, a delay per copy replays the animation later (echo trails) | image and shape layers |
+| follow | the layer moves (position) or grows and shrinks (scale) with a thing [kubakub tracker](tracking.md) followed in a video: connect the tracker's `tracks` to the director's `tracks` and run once; **with** = the biggest thing or one by its id; from the behaviour's start time the layer goes where the thing goes, scaled to the canvas (amount 1 = with it, -1 = mirrored) | image and shape layers |
 
 Presets: wiggle position / rotation, breathe, orbit, sway, spin, drift, flicker, pulse, pulse on beats, kick on
 markers, flash on bars (glow), sound → scale / opacity, regions on in order, chase, wave across, random flicker,
-repeat in a row / grid / ring, echo trail, swap masks on beats / low hits / high hits, sound → opacity (low).
+repeat in a row / grid / ring, echo trail, swap masks on beats / low hits / high hits, sound → opacity (low),
+follow a tracked thing, grow with a tracked thing.
 
 ### Swap masks: layers trade their masks with the sound
 

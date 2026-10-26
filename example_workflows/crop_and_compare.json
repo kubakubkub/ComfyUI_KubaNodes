@@ -1,0 +1,944 @@
+{
+ "id": "10b5b7eb-ab4c-4b5d-9936-7cdae764ace7",
+ "revision": 0,
+ "last_node_id": 7,
+ "last_link_id": 8,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "KUBA_SampleFacade",
+   "pos": [
+    20,
+    60
+   ],
+   "size": [
+    270,
+    258
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "width",
+     "locked": null,
+     "name": "width",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "INT",
+     "widget": {
+      "name": "width"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "height",
+     "locked": null,
+     "name": "height",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "INT",
+     "widget": {
+      "name": "height"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "floors",
+     "locked": null,
+     "name": "floors",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "INT",
+     "widget": {
+      "name": "floors"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "bays",
+     "locked": null,
+     "name": "bays",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "INT",
+     "widget": {
+      "name": "bays"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "style",
+     "locked": null,
+     "name": "style",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "COMBO",
+     "widget": {
+      "name": "style"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "seed",
+     "locked": null,
+     "name": "seed",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "INT",
+     "widget": {
+      "name": "seed"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "image",
+     "locked": null,
+     "name": "image",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "slot_index": null,
+     "links": [
+      1,
+      3,
+      6
+     ]
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "color_matrix",
+     "locked": null,
+     "name": "color_matrix",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "silhouette",
+     "locked": null,
+     "name": "silhouette",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "MASK",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "mask_folder",
+     "locked": null,
+     "name": "mask_folder",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "STRING",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "sketch_photo",
+     "locked": null,
+     "name": "sketch_photo",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    }
+   ],
+   "title": "your picture (or a Load Image)",
+   "properties": {
+    "cnr_id": "comfyui-kubanodes",
+    "ver": "327759f1829dbc47854fbaef070880c1d177b1fe",
+    "Node name for S&R": "KUBA_SampleFacade"
+   },
+   "widgets_values": [
+    1920,
+    1080,
+    3,
+    7,
+    "sandstone",
+    0
+   ],
+   "widgets_values_named": {
+    "width": 1920,
+    "height": 1080,
+    "floors": 3,
+    "bays": 7,
+    "style": "sandstone",
+    "seed": 0
+   }
+  },
+  {
+   "id": 2,
+   "type": "KUBA_Crop",
+   "pos": [
+    360,
+    60
+   ],
+   "size": [
+    380,
+    470
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "image",
+     "locked": null,
+     "name": "image",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "link": 1
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "ratio_of",
+     "locked": null,
+     "name": "ratio_of",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "IMAGE",
+     "pos": null,
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "box",
+     "locked": null,
+     "name": "box",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "STRING",
+     "widget": {
+      "name": "box"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "ratio",
+     "locked": null,
+     "name": "ratio",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "COMBO",
+     "widget": {
+      "name": "ratio"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "size",
+     "locked": null,
+     "name": "size",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "COMBO",
+     "widget": {
+      "name": "size"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "model_safe",
+     "locked": null,
+     "name": "model_safe",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "model_safe"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "fill",
+     "locked": null,
+     "name": "fill",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "COMBO",
+     "widget": {
+      "name": "fill"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "image",
+     "locked": null,
+     "name": "image",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "slot_index": null,
+     "links": [
+      2
+     ]
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "box_mask",
+     "locked": null,
+     "name": "box_mask",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "MASK",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "new_area",
+     "locked": null,
+     "name": "new_area",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "MASK",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "crop_box",
+     "locked": null,
+     "name": "crop_box",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "KUBA_CROP_BOX",
+     "pos": null,
+     "slot_index": null,
+     "links": [
+      5
+     ]
+    }
+   ],
+   "title": "1 · kubakub crop: draw the box on the picture",
+   "properties": {
+    "cnr_id": "comfyui-kubanodes",
+    "ver": "327759f1829dbc47854fbaef070880c1d177b1fe",
+    "Node name for S&R": "KUBA_Crop"
+   },
+   "widgets_values": [
+    "0.35 0.2 0.3 0.45",
+    "1:1",
+    "1024",
+    true,
+    "edge"
+   ],
+   "widgets_values_named": {
+    "box": "0.35 0.2 0.3 0.45",
+    "ratio": "1:1",
+    "size": "1024",
+    "model_safe": true,
+    "fill": "edge"
+   }
+  },
+  {
+   "id": 3,
+   "type": "ImageInvert",
+   "pos": [
+    840,
+    60
+   ],
+   "size": [
+    169.1265625,
+    26
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "image",
+     "locked": null,
+     "name": "image",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "link": 2
+    }
+   ],
+   "outputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "IMAGE",
+     "locked": null,
+     "name": "IMAGE",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "slot_index": null,
+     "links": [
+      4
+     ]
+    }
+   ],
+   "title": "2 · your edit here (sampler, upscaler ...)",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.41.3",
+    "Node name for S&R": "ImageInvert"
+   }
+  },
+  {
+   "id": 4,
+   "type": "KUBA_Uncrop",
+   "pos": [
+    840,
+    200
+   ],
+   "size": [
+    270,
+    118
+   ],
+   "flags": {},
+   "order": 4,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "original",
+     "locked": null,
+     "name": "original",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "link": 3
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "crop",
+     "locked": null,
+     "name": "crop",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "link": 4
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "crop_box",
+     "locked": null,
+     "name": "crop_box",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "KUBA_CROP_BOX",
+     "pos": null,
+     "link": 5
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "mask",
+     "locked": null,
+     "name": "mask",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "MASK",
+     "pos": null,
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "soft_edge",
+     "locked": null,
+     "name": "soft_edge",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "INT",
+     "widget": {
+      "name": "soft_edge"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "image",
+     "locked": null,
+     "name": "image",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "slot_index": null,
+     "links": [
+      7,
+      8
+     ]
+    }
+   ],
+   "title": "3 · kubakub uncrop: back into the picture",
+   "properties": {
+    "cnr_id": "comfyui-kubanodes",
+    "ver": "327759f1829dbc47854fbaef070880c1d177b1fe",
+    "Node name for S&R": "KUBA_Uncrop"
+   },
+   "widgets_values": [
+    16
+   ],
+   "widgets_values_named": {
+    "soft_edge": 16
+   }
+  },
+  {
+   "id": 5,
+   "type": "KUBA_Compare",
+   "pos": [
+    1180,
+    60
+   ],
+   "size": [
+    420,
+    402
+   ],
+   "flags": {},
+   "order": 5,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "a",
+     "locked": null,
+     "name": "a",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "IMAGE,VIDEO",
+     "pos": null,
+     "link": 6
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "b",
+     "locked": null,
+     "name": "b",
+     "nameLocked": null,
+     "removable": null,
+     "shape": 7,
+     "type": "IMAGE,VIDEO",
+     "pos": null,
+     "link": 7
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "mode",
+     "locked": null,
+     "name": "mode",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "COMBO",
+     "widget": {
+      "name": "mode"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "preview",
+     "locked": null,
+     "name": "preview",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "COMBO",
+     "widget": {
+      "name": "preview"
+     },
+     "link": null
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "fps",
+     "locked": null,
+     "name": "fps",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "FLOAT",
+     "widget": {
+      "name": "fps"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [],
+   "title": "4 · kubakub compare: before / after",
+   "properties": {
+    "cnr_id": "comfyui-kubanodes",
+    "ver": "327759f1829dbc47854fbaef070880c1d177b1fe",
+    "Node name for S&R": "KUBA_Compare"
+   },
+   "widgets_values": [
+    "swipe",
+    "1280",
+    25
+   ],
+   "widgets_values_named": {
+    "mode": "swipe",
+    "preview": "1280",
+    "fps": 25
+   }
+  },
+  {
+   "id": 6,
+   "type": "SaveImage",
+   "pos": [
+    1180,
+    560
+   ],
+   "size": [
+    270,
+    270
+   ],
+   "flags": {},
+   "order": 6,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "images",
+     "locked": null,
+     "name": "images",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "link": 8
+    },
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "filename_prefix",
+     "locked": null,
+     "name": "filename_prefix",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "STRING",
+     "widget": {
+      "name": "filename_prefix"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "color_off": null,
+     "color_on": null,
+     "dir": null,
+     "label": null,
+     "localized_name": "images",
+     "locked": null,
+     "name": "images",
+     "nameLocked": null,
+     "removable": null,
+     "shape": null,
+     "type": "IMAGE",
+     "pos": null,
+     "slot_index": null,
+     "links": null
+    }
+   ],
+   "title": "the result",
+   "properties": {
+    "cnr_id": "comfy-core",
+    "ver": "0.41.3",
+    "Node name for S&R": "SaveImage"
+   },
+   "widgets_values": [
+    "kubakub_starter/crop_and_compare"
+   ],
+   "widgets_values_named": {
+    "filename_prefix": "kubakub_starter/crop_and_compare"
+   }
+  },
+  {
+   "id": 7,
+   "type": "MarkdownNote",
+   "pos": [
+    20,
+    420
+   ],
+   "size": [
+    320,
+    520
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "showAdvanced": null,
+   "inputs": [],
+   "outputs": [],
+   "title": "read me",
+   "properties": {},
+   "widgets_values": [
+    "## crop, edit, put back, compare\n\n**You need:** nothing (the sample facade stands in; or put a Load Image in its place). No models.\n\n**Do:** Queue once, so the crop node shows the picture. Then on *kubakub crop*: drag a box on the picture, drag\ninside it to move it, drag the handles to size it (Shift keeps the shape, Alt from the centre), double click = all\nof it. Pick a shape on the ratio pills (*original*, 1:1, 16:9 ...) and the size that comes out. Drag past the\npicture's edge to add canvas: the *new area* pills say how it is filled, and the `new_area` output is the mask for\nan outpaint. Queue again.\n\n**The edit in the middle** is a stand-in (it inverts the colours): put your sampler, upscaler or any edit there.\n*kubakub uncrop* puts the edited crop back where it came from, with a soft edge.\n\n**Compare:** swipe, side by side, difference, blink, onion; the corner button opens a big window with zoom.\nIt takes pictures and videos (a Load Video on `a` or `b`) and keeps both on the same frame.\n"
+   ],
+   "widgets_values_named": {
+    "text": "## crop, edit, put back, compare\n\n**You need:** nothing (the sample facade stands in; or put a Load Image in its place). No models.\n\n**Do:** Queue once, so the crop node shows the picture. Then on *kubakub crop*: drag a box on the picture, drag\ninside it to move it, drag the handles to size it (Shift keeps the shape, Alt from the centre), double click = all\nof it. Pick a shape on the ratio pills (*original*, 1:1, 16:9 ...) and the size that comes out. Drag past the\npicture's edge to add canvas: the *new area* pills say how it is filled, and the `new_area` output is the mask for\nan outpaint. Queue again.\n\n**The edit in the middle** is a stand-in (it inverts the colours): put your sampler, upscaler or any edit there.\n*kubakub uncrop* puts the edited crop back where it came from, with a soft edge.\n\n**Compare:** swipe, side by side, difference, blink, onion; the corner button opens a big window with zoom.\nIt takes pictures and videos (a Load Video on `a` or `b`) and keeps both on the same frame.\n"
+   },
+   "color": "#432",
+   "bgcolor": "#653"
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   0,
+   "IMAGE"
+  ],
+  [
+   2,
+   2,
+   0,
+   3,
+   0,
+   "IMAGE"
+  ],
+  [
+   3,
+   1,
+   0,
+   4,
+   0,
+   "IMAGE"
+  ],
+  [
+   4,
+   3,
+   0,
+   4,
+   1,
+   "IMAGE"
+  ],
+  [
+   5,
+   2,
+   3,
+   4,
+   2,
+   "KUBA_CROP_BOX"
+  ],
+  [
+   6,
+   1,
+   0,
+   5,
+   0,
+   "IMAGE"
+  ],
+  [
+   7,
+   4,
+   0,
+   5,
+   1,
+   "IMAGE"
+  ],
+  [
+   8,
+   4,
+   0,
+   6,
+   0,
+   "IMAGE"
+  ]
+ ],
+ "floatingLinks": null,
+ "groups": [],
+ "definitions": null,
+ "config": {},
+ "extra": {
+  "kuba_regions": "kubakub starter workflow"
+ },
+ "version": 0.4
+}

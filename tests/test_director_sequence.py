@@ -163,8 +163,8 @@ blocked = [i for i, v in enumerate(held.result) if isinstance(v, ExecutionBlocke
 check("flow 'hold until apply' + nothing applied: every output held except the report", blocked == [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11]
       and "waiting for apply" in held.result[6], str(blocked))
 check("held: the window still gets its preview / manifest", "kuba_director" in (held.ui or {}))
-check("flow is the last widget (older workflows keep their widget order); only the audio socket comes after it",
-      [i.id for i in nd.KUBA_Director.define_schema().inputs][-2:] == ["flow", "audio"])
+check("flow is the last widget (older workflows keep their widget order); only the audio and tracks sockets come after it",
+      [i.id for i in nd.KUBA_Director.define_schema().inputs][-3:] == ["flow", "audio", "tracks"])
 applied = nd.KUBA_Director.execute(image=base, document=D)
 check("hold: an applied composition passes on", not any(isinstance(v, ExecutionBlocker) for v in applied.result))
 empty = nd.KUBA_Director.execute(image=base, document="", flow="always")
@@ -213,8 +213,8 @@ try:
     check("director: export_alpha with a format without alpha is refused", False)
 except ValueError as e:
     check("director: export_alpha with a format without alpha is refused", "export_alpha" in str(e))
-check("director schema: audio is the last input and optional",
-      nd.KUBA_Director.define_schema().inputs[-1].id == "audio" and nd.KUBA_Director.define_schema().inputs[-1].optional)
+check("director schema: audio, then tracks (kubakub tracker), are the last inputs, both optional",
+      [i.id for i in nd.KUBA_Director.define_schema().inputs][-2:] == ["audio", "tracks"] and all(i.optional for i in nd.KUBA_Director.define_schema().inputs[-2:]))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

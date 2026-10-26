@@ -34,6 +34,7 @@ _MODULES = [                        # nodes/<menu group>/<module>
     "nodes.motion.nodes_sound",
     "nodes.motion.nodes_guide",
     "nodes.motion.nodes_height",
+    "nodes.motion.nodes_track",
     "nodes.motion.ltxv_trim_exact_Kub",
     "nodes.post.nodes_post",
     "nodes.scene3d.nodes_scene3d",
@@ -51,6 +52,8 @@ _MODULES = [                        # nodes/<menu group>/<module>
     "nodes.lab.onnx_style_transfer_Kub",
     "nodes.utils.batch_image_loader_Kub",
     "nodes.utils.timecode_filename_Kub",
+    "nodes.utils.nodes_crop",
+    "nodes.utils.nodes_compare",
 ]
 
 _loaded, _failed = [], []

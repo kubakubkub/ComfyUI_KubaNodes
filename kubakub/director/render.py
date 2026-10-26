@@ -11,6 +11,7 @@ Document (version 1):
         "source": "input:0" | "file:<name in input/>" | "",      image / paint pixels (base = the node's image)
         "visible": true, "opacity": 1.0, "blend": "normal",
         "x": 0, "y": 0, "w": 100, "h": 100, "rotation": 0, "flip_h": false, "flip_v": false,   image placement
+        "crop": [x, y, w, h],        image only: the part of the picture shown, 0-1 of it (none = all; kubakub/crop.py)
         "clip": "",                  region selector (plan syntax): the layer only shows inside those regions
         "clip_feather": 0,           soft edge of the clip, canvas px
         "mask": {"by": "", "mode": "shape" | "brightness", "invert": false},   by = layer id or "below"
@@ -116,6 +117,25 @@ def _height(h) -> dict | None:
     return {"mode": h.get("mode") if h.get("mode") in ha.GROWS[:3] else ha.GROWS[0], "value": max(0.0, _num(h, "value", 1.0)),
             "wall": min(max(_num(h, "wall", 0.0), 0.0), 0.99), "look": h.get("look") if h.get("look") in ha.LOOKS else ha.LOOKS[1],
             "angle": _num(h, "angle", 35.0), "relief": max(0.0, _num(h, "relief", 1.0))}
+
+
+def _crop(c) -> list | None:
+    """'crop': [x, y, w, h] 0-1 of an image layer's picture, inside it; None = all of it."""
+    if not isinstance(c, (list, tuple)) or len(c) != 4 or not all(_is_num(v) for v in c):
+        return None
+    x0, y0 = min(max(float(c[0]), 0.0), 1.0), min(max(float(c[1]), 0.0), 1.0)
+    x1, y1 = min(max(float(c[0]) + float(c[2]), 0.0), 1.0), min(max(float(c[1]) + float(c[3]), 0.0), 1.0)
+    if x1 - x0 <= 1e-6 or y1 - y0 <= 1e-6 or (x0 <= 1e-6 and y0 <= 1e-6 and x1 >= 1 - 1e-6 and y1 >= 1 - 1e-6):
+        return None
+    return [x0, y0, x1 - x0, y1 - y0]
+
+
+def crop_px(c, w: int, h: int):
+    """The crop in pixels of a w x h picture (= drawContent in web/kubakub_director.js): (x0, y0, x1, y1)."""
+    x0, y0 = int(np.floor(c[0] * w + 0.5)), int(np.floor(c[1] * h + 0.5))
+    x1, y1 = int(np.floor((c[0] + c[2]) * w + 0.5)), int(np.floor((c[1] + c[3]) * h + 0.5))
+    x0, y0 = min(max(x0, 0), w - 1), min(max(y0, 0), h - 1)
+    return x0, y0, max(x0 + 1, min(x1, w)), max(y0 + 1, min(y1, h))
 
 
 def _react(r) -> dict | None:
@@ -426,6 +446,7 @@ def parse(doc) -> dict:
             "fx": fxm.parse(raw.get("fx")),
             "light_react": _react(raw.get("light_react")),
             "height": _height(raw.get("height")) if kind == "image" else None,
+            "crop": _crop(raw.get("crop")) if kind == "image" else None,
             "shape": _shape(raw.get("shape")) if kind == "shape" else None,
             "stagger": [b for b in raw.get("motion") or [] if isinstance(b, dict) and b.get("type") == "stagger" and b.get("on") is not False]
                        if raw.get("clip") else [],
@@ -493,7 +514,13 @@ def place(rgba: np.ndarray, layer: dict, W: int, H: int, pre=None):
     Warp a source (h, w, 4) by the layer's box, rotation (deg, clockwise) and flips.
     Returns (box, rgb, alpha) cut to the layer's bounding box on the W x H canvas, or None if outside.
     pre: premultiply(rgba) when the caller keeps it (a source placed many times).
+    An image layer's "crop" shows only that part of the source, stretched over the box.
     """
+    if layer.get("crop"):
+        x0, y0, x1, y1 = crop_px(layer["crop"], rgba.shape[1], rgba.shape[0])
+        rgba = rgba[y0:y1, x0:x1]
+        if pre is not None:
+            pre = pre[y0:y1, x0:x1]
     h, w = rgba.shape[:2]
     bw = layer["w"] or w
     bh = layer["h"] or h

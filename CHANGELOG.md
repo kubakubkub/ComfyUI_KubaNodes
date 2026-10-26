@@ -4,6 +4,43 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## next (not released yet)
+
+Crop by drawing, compare anything with anything, and track what moves in a video to draw it as a diagram.
+
+- **kubakub crop** (utils): crop on the picture as in Photoshop, nothing to type. Drag a box, move it, size it
+  by its handles (Shift keeps the shape, Alt from the centre); ratio pills (original, the shape of a connected
+  picture such as the matrix, 1:1, 4:5, 3:2, 16:9, 9:16, 21:9, turn), the size that comes out (as cut, 1024 to
+  3840, in 16 px steps for the models). Drag past the edge to add canvas, filled with edge, mirror, black, white or
+  grey, and get the added area as a mask for an outpaint. Works on every frame of a video, and keeps the same part
+  of the picture at any size.
+- **kubakub uncrop** (utils): the edited crop back into the picture it came from, with a soft edge; an original at
+  another size works too.
+- **kubakub compare** (utils): two pictures or two videos (or one of each) on the node, always on the same frame:
+  swipe, side by side, difference, blink, onion; play, scrub, step; a big window with zoom and pan.
+- **kubakub tracker** (2d / motion): finds what moves in a video and follows it with ids: motion, a colour picked
+  on the video, lights, people and things (YOLO, with body points or outlines from a pose / seg file), anything you
+  name in words (Grounding DINO), body, hands and face points (MediaPipe), a motif you click (SAM 2) and exact
+  outlines (SAM 2), several at once, all from files already on your disk. The node shows what it found; *try this
+  frame* checks a change of settings on one frame in a second. With a depth node (Depth Anything 3, DA3 Streaming,
+  Marigold ...) on `depth`, every tracked thing gets its depth.
+- **kubakub track draw** (2d / motion): the tracks as a diagram, played live on the node before anything is queued:
+  presets diagnostic, constellation and stamp trail, then marks (box, brackets, outline, circle, cross, dot, labels
+  with live values or your own state words, skeleton), lines in nine ways (nearest, within a distance, network,
+  tree, hull, hub, chain, trail, to the corners), reveal / pixels / freeze / invert inside, a stamp trail that
+  leaves each thing's pixels along its path, and with depth: depth layers, depth contour lines, far = earlier frames,
+  fog and a depth slice. Every part has its own blend mode (multiply, screen, overlay, difference ...) and its own
+  time: a slider with two dots for where in the clip it starts and ends, with a fade.
+- **Track once, play with the look:** the tracker keeps its tracks on disk, so a long video is tracked once (also
+  after a restart); trackers chain (one adds its finds to another's, each with its own settings: two colours, two
+  sensitivities, YOLO + a SAM 2 motif); *render the look* on track draw renders only the drawing and what saves it.
+- **Tracks steer other nodes:** kubakub shader takes `tracks` (its arrow follows the biggest thing, its field glows
+  around everything tracked), and the director's new behaviours *follow a tracked thing* / *grow with a tracked
+  thing* move a layer with it.
+- **The director crops and compares too.** The crop tool (C) crops an image or video layer on the canvas with the
+  same pills; compare (\\) swipes the composition against itself without the selected layer, the base picture, or
+  as it was when the window opened.
+
 ## 0.5.0 (2026-10-18)
 
 Flux 3 Klein, and your 3D app live: paint the whole facade in one pass that knows where each material goes, and

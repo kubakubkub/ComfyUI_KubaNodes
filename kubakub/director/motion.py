@@ -25,7 +25,7 @@ import bisect
 import json
 import math
 
-TYPES = ("wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio")
+TYPES = ("wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio", "follow")
 LEVEL_RATE = 100                                  # loudness curve samples per second
 BANDS = ("low", "mid", "high")                    # the sound in three bands (kubakub/sound.py)
 _M32 = 0xFFFFFFFF
@@ -119,8 +119,10 @@ def context(doc, level=None, sound=None):
     dur = min(max(_num(tl, "duration", 10), 0.5), 3600.0)
     au = tl.get("audio") if isinstance(tl.get("audio"), dict) else {}
     ms = sorted(float(m["t"]) for m in tl.get("markers") or [] if isinstance(m, dict) and isinstance(m.get("t"), (int, float)))
+    canvas = (doc or {}).get("canvas")
     return {"beats": beat_times(tl.get("beat"), _num(au, "offset", 0), dur), "markers": ms,
-            "level": level, "offset": _num(au, "offset", 0),
+            "level": level, "offset": _num(au, "offset", 0), "tracks": (doc or {}).get("tracks"),
+            "canvas": list(canvas) if isinstance(canvas, (list, tuple)) and len(canvas) == 2 else None,
             "bands": (sound or {}).get("curves") or {}, "hits": (sound or {}).get("hits") or {}}
 
 
@@ -207,6 +209,8 @@ def _one(b, t, duration, ctx=None):
             return []
         v = _num(b, "rate", 0) * (min(t, e) - s)
         return list(zip(("x", "y"), _vec(b, v))) if path == "position" else [(path, v)]
+    if typ == "follow":
+        return _follow(b, t, s, e, ctx)
     env = envelope(b, t, duration)
     if env <= 0:
         return []
@@ -235,6 +239,58 @@ def _one(b, t, duration, ctx=None):
             return [("x", amt * math.cos(2 * math.pi * u)), ("y", amt * math.sin(2 * math.pi * u))]
         return list(zip(("x", "y"), _vec(b, amt * wave(kind, u))))
     return [(path, amt * wave(kind, u))]
+
+
+# ---- follow: a layer moves (or grows) with a thing kubakub tracker followed in a video (= web followOne)
+def compact_tracks(data):
+    """What the director keeps of kubakub tracker's tracks: ids, kinds and boxes (no outlines or points)."""
+    if not isinstance(data, dict) or not data.get("tracks"):
+        return None
+    return {"W": data["W"], "H": data["H"], "n": data["n"], "fps": data.get("fps") or 25.0,
+            "tracks": [{"id": tr["id"], "kind": tr["kind"], "label": tr.get("label", ""), "t0": tr["t0"],
+                        "box": [[round(v, 1) for v in b] for b in tr["box"]]} for tr in data["tracks"]]}
+
+
+def follow_pick(b, tracks):
+    """The track a follow behaviour means: its id, or the biggest on average ('biggest', the default)."""
+    ts = (tracks or {}).get("tracks") or []
+    if not ts:
+        return None
+    want = str(b.get("track", "biggest"))
+    if want.isdigit():
+        return next((tr for tr in ts if tr["id"] == int(want)), None)
+    return max(ts, key=lambda tr: (sum(x[2] * x[3] for x in tr["box"]) / len(tr["box"]), -tr["id"]))
+
+
+def _box_at(tr, f):
+    """(cx, cy, size) of a track at frame f (float; held at its first / last frame)."""
+    n = len(tr["box"])
+    k = min(max(f - tr["t0"], 0.0), n - 1.0)
+    i = int(math.floor(k))
+    j = min(n - 1, i + 1)
+    u = k - i
+    a, c = tr["box"][i], tr["box"][j]
+    x, y, w, h = (a[q] + (c[q] - a[q]) * u for q in range(4))
+    return x + w / 2, y + h / 2, math.sqrt(max(1e-6, w * h))
+
+
+def _follow(b, t, s, e, ctx):
+    if t < s or not ctx:
+        return []
+    tracks = ctx.get("tracks")
+    tr = follow_pick(b, tracks)
+    if tr is None:
+        return []
+    fps = float(tracks.get("fps") or 25.0)
+    W, H = ctx.get("canvas") or (tracks["W"], tracks["H"])
+    a, c = _box_at(tr, s * fps), _box_at(tr, min(t, e) * fps)
+    amt = _num(b, "amount", 1.0)
+    path = str(b.get("path") or "")
+    if path == "position":
+        return [("x", (c[0] - a[0]) * W / tracks["W"] * amt), ("y", (c[1] - a[1]) * H / tracks["H"] * amt)]
+    if path == "scale":
+        return [("scale", (c[2] / a[2] - 1.0) * 100.0 * amt)]
+    return []
 
 
 def offsets(motion, t, duration, ctx=None):

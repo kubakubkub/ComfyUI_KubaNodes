@@ -38,7 +38,7 @@ from ...kubakub.director import motion as mo
 from ...kubakub import keyframes as kf
 from ...kubakub import sound as snd
 from ...kubakub.director.blend import MODES
-from ...kubakub.io_types import DirectorType, RegionsType, SceneType
+from ...kubakub.io_types import DirectorType, RegionsType, SceneType, TracksType
 from ...kubakub.types import Regions
 from ...kubakub import imio
 
@@ -597,6 +597,9 @@ def motion_needs(doc):
                 elif b.get("curve") == "level":
                     level = True
     return level, bands
+
+
+_TRACKS: dict = {}                                 # director key -> the tracks on its 'tracks' input (for the previews)
 
 
 def motion_context(doc):
@@ -1185,6 +1188,8 @@ def _preview_light(uid, last, doc, layer_id, px, samples, projector=None):
     pw, ph = max(16, round(W * k)), max(16, round(H * k))
     sources = _doc_sources(doc, last["sources"])
     doc = json.loads(json.dumps(doc))
+    if _TRACKS.get(uid) and not doc.get("tracks"):
+        doc["tracks"] = _TRACKS[uid]
     if any(isinstance(L, dict) and L.get("motion") for L in doc.get("layers", [])):
         doc = rd.animate(doc, rd.timeline(doc)["time"], motion_context(doc))   # behaviours at the playhead, as the node renders
     media_notes = []                                    # video layers at the playhead (glow / projector 'layer:<video>')
@@ -1429,6 +1434,10 @@ class KUBA_Director(io.ComfyNode):
                                tooltip="A sound from the graph (e.g. Load Audio) as the timeline's sound: its waveform, "
                                        "tempo and beats show in the window after a run, the sound behaviours follow "
                                        "it and it goes out on 'audio'. It replaces a sound picked in the window."),
+                TracksType.Input("tracks", optional=True,
+                                 tooltip="From kubakub tracker: the behaviour 'follow' moves a layer with a tracked thing "
+                                         "(or makes it grow and shrink with it), the biggest one or the one you pick, "
+                                         "at the timeline's time."),
             ],
             outputs=[
                 io.Image.Output("image", tooltip="The composition at full size."),
@@ -1478,7 +1487,7 @@ class KUBA_Director(io.ComfyNode):
     def execute(cls, image, layers=None, layer_masks=None, invert_masks=False, regions=None, scene=None,
                 layer_names="", seam_px=24, document="", flow="hold until apply", render_sequence=False, sequence_scale=0.5,
                 skip_h3_frames=False, export="none", export_scale=1.0, export_alpha=False, export_name="director",
-                audio=None) -> io.NodeOutput:
+                audio=None, tracks=None) -> io.NodeOutput:
         t0 = time.perf_counter()
         check_export_alpha(export, export_alpha)
         if scene is not None and '"kind": "light"' in (document or "").replace('"kind":"light"', '"kind": "light"'):
@@ -1526,6 +1535,10 @@ class KUBA_Director(io.ComfyNode):
             except ValueError as e:
                 raise ValueError(f"kubakub director: the saved composition is not valid JSON ({e}). Undo the edit "
                                  "or clear the node's document to start fresh.") from e
+        follow = mo.compact_tracks(tracks)               # in the document while it renders, never in the saved one
+        _TRACKS[uid] = follow
+        if follow and isinstance(doc_obj, dict) and doc_obj:
+            doc_obj["tracks"] = follow
         audio_in, audio_doc = "", None
         if audio is not None and isinstance(doc_obj, dict):     # the sound on the cable is the timeline's sound
             if doc_obj:
@@ -1659,7 +1672,8 @@ class KUBA_Director(io.ComfyNode):
         manifest = {"canvas": [W, H], "proxy_scale": k, "views": views, "inputs": inputs, "regions": region_list,
                     "groups": sorted({g["group"] for g in region_list if g["group"]}), "blend_modes": list(MODES),
                     "upload_subfolder": UPLOAD_SUB, "node": uid, "result": ref(fn), "scene": scene_info,
-                    "lights": views.pop("_lights", {}), "diffusion": diffusion_manifest(), "audio_in": audio_in}
+                    "lights": views.pop("_lights", {}), "diffusion": diffusion_manifest(), "audio_in": audio_in,
+                    "tracks": follow}
         placed = ", ".join(e[1] for e in r["layer_masks"]) or "none"
         report = "\n".join([f"{W}x{H}, {r['layer_count']} layers, placed: {placed}",
                             f"{len(r['table']['regions'])} regions out, changed {float(r['changed'].mean()) * 100:.1f} % of the image",

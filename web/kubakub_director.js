@@ -5,6 +5,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { pickShader, shaderPresets } from "./kubakub_shader.js";
+import { RATIOS as CROP_RATIOS, ratioValue, fitRatio, dragBox, ratioName } from "./kubakub_crop.js";
 
 const HERE = new URL(".", import.meta.url).href;
 const OPS = { normal: "source-over", multiply: "multiply", screen: "screen", overlay: "overlay", darken: "darken",
@@ -63,7 +64,27 @@ function keyValue(keys, t) {                          // keys sorted by t: [{t, 
   return typeof a.v === "number" ? a.v + (b.v - a.v) * u : mixHex(a.v, b.v, u);
 }
 // ---- behaviours (= kubakub/director/motion.py, checked by tests/test_motion.py): procedural motion on top of the keyframes
-const M_TYPES = ["wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio", "stagger", "field", "swap", "repeat"];
+const M_TYPES = ["wiggle", "oscillate", "drift", "random", "loop", "pulse", "audio", "follow", "stagger", "field", "swap", "repeat"];
+// ---- follow: the layer moves (or grows) with a thing kubakub tracker followed (= director/motion.py _follow)
+function followPick(b, tracks) {
+  const ts = tracks?.tracks || []; if (!ts.length) return null;
+  const want = String(b.track ?? "biggest");
+  if (/^\d+$/.test(want)) return ts.find(tr => tr.id === +want) || null;
+  const area = tr => tr.box.reduce((a, x) => a + x[2] * x[3], 0) / tr.box.length;
+  return ts.reduce((m, tr) => (area(tr) > area(m) || (area(tr) === area(m) && tr.id < m.id) ? tr : m));
+}
+function followBox(tr, f) {
+  const n = tr.box.length, k = Math.min(Math.max(f - tr.t0, 0), n - 1), i = Math.floor(k), j = Math.min(n - 1, i + 1), u = k - i;
+  const [x, y, w, h] = [0, 1, 2, 3].map(q => tr.box[i][q] + (tr.box[j][q] - tr.box[i][q]) * u);
+  return [x + w / 2, y + h / 2, Math.sqrt(Math.max(1e-6, w * h))];
+}
+function followOne(b, t, s, e, ctx) {
+  const tracks = ctx?.tracks, tr = t < s ? null : followPick(b, tracks); if (!tr) return [];
+  const fps = +tracks.fps || 25, [W, H] = ctx.canvas || [tracks.W, tracks.H], a = followBox(tr, s * fps), c = followBox(tr, Math.min(t, e) * fps), amt = mNum(b, "amount", 1);
+  if (b.path === "position") return [["x", (c[0] - a[0]) * W / tracks.W * amt], ["y", (c[1] - a[1]) * H / tracks.H * amt]];
+  if (b.path === "scale") return [["scale", (c[2] / a[2] - 1) * 100 * amt]];
+  return [];
+}
 const M_BANDS = ["low", "mid", "high"];               // the sound in three bands (kubakub/sound.py)
 const LEVEL_RATE = 100;                               // loudness curve samples per second
 function levelCurve(mono, sr) {                       // RMS per 1/100 s, / its 98th percentile (= motion.level_curve)
@@ -130,6 +151,7 @@ function mOne(b, t, dur, ctx) {                            // one behaviour at t
   const typ = b.type, path = String(b.path || "");
   if (!path || !M_TYPES.includes(typ) || typ === "loop" || b.on === false) return [];
   const [s, e] = mSpan(b, dur);
+  if (typ === "follow") return followOne(b, t, s, e, ctx);
   if (typ === "drift") {
     if (t < s) return [];
     const v = mNum(b, "rate", 0) * (Math.min(t, e) - s);
@@ -535,9 +557,11 @@ const M_PRESETS = [                                   // [label, needs a box, be
   ["swap masks: on beats", false, { type: "swap", path: "masks", with: [], order: "loop", trigger: "beats", nth: 1 }],
   ["swap masks: on low hits (kick, bass)", false, { type: "swap", path: "masks", with: [], order: "loop", trigger: "low", nth: 1, threshold: 0.3, gap: 0.1 }],
   ["swap masks: on high hits (hats, clicks)", false, { type: "swap", path: "masks", with: [], order: "random", trigger: "high", nth: 1, threshold: 0.3, gap: 0.1, seed: 1 }],
-  ["sound → opacity (low)", false, { type: "audio", path: "opacity", amount: 1, smooth: 0.1, band: "low" }]];
+  ["sound → opacity (low)", false, { type: "audio", path: "opacity", amount: 1, smooth: 0.1, band: "low" }],
+  ["follow a tracked thing", true, { type: "follow", path: "position", track: "biggest", amount: 1 }],
+  ["grow with a tracked thing", true, { type: "follow", path: "scale", track: "biggest", amount: 1 }]];
 const M_PARAMS = { wiggle: [["amount", "amount"], ["freq", "per second"], ["seed", "seed"]], oscillate: [["amount", "amount"], ["period", "period s"], ["phase", "phase 0-1"]],
-  drift: [["rate", "per second"]], random: [["amount", "amount"], ["every", "every s"], ["seed", "seed"]], loop: [],
+  drift: [["rate", "per second"]], follow: [["amount", "amount"]], random: [["amount", "amount"], ["every", "every s"], ["seed", "seed"]], loop: [],
   pulse: [["amount", "amount"], ["attack", "attack s"], ["decay", "decay s"]], audio: [["amount", "amount"], ["smooth", "release s"]],
   stagger: [["step", "step s"], ["fade", "fade s"]], field: [], swap: [],
   repeat: [["count", "copies"], ["rotate", "rotate °/copy"], ["scale", "scale %/copy"], ["opacity", "opacity/copy"], ["delay", "delay s/copy"]] };
@@ -687,6 +711,11 @@ const CSS = `
 .kkd-sep{width:22px;height:1px;background:var(--line);margin:4px 0}
 .kkd-stage{grid-column:2;grid-row:2;position:relative;background:var(--stage);border:1px solid var(--stage-edge);overflow:hidden;min-height:0}
 .kkd-stage canvas{width:100%;height:100%;display:block;touch-action:none}
+.kkd-float{position:absolute;left:50%;top:10px;transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:4px;align-items:center;justify-content:center;max-width:calc(100% - 20px);background:rgba(20,18,24,.88);border:1px solid rgba(161,135,183,.6);border-radius:14px;padding:5px 8px;font-size:12px;color:#e8e6e3;z-index:3}
+.kkd-float[data-id=cmpbar]{top:auto;bottom:44px}
+.kkd-float .kkd-pill{padding:2px 9px}
+.kkd-float b{font-weight:600;color:#fff;margin:0 4px 0 2px}
+.kkd-float span{color:rgba(232,230,227,.6);margin:0 4px;font-variant-numeric:tabular-nums}
 .kkd-hud{position:absolute;left:10px;bottom:10px;font-size:12px;color:#e8e6e3;background:rgba(0,0,0,.45);border:1px solid rgba(161,135,183,.6);padding:3px 9px;border-radius:10em;font-variant-numeric:tabular-nums;pointer-events:none}
 .kkd-brush{position:absolute;border:1px solid rgba(255,255,255,.9);box-shadow:0 0 0 1px rgba(0,0,0,.5);border-radius:50%;pointer-events:none;transform:translate(-50%,-50%)}
 .kkd-busy{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;color:#eee;font-size:18px;font-weight:200;background:rgba(0,0,0,.35);text-transform:lowercase}
@@ -934,6 +963,8 @@ const ICON = {
   erase: '<path d="M8 20h12M5 15l8-8 6 6-5 5H9z"/>',
   hand: '<path d="M8 12V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v7c0 4-2.5 7-6 7s-5-2-7-5l-1-2a1.5 1.5 0 012.6-1.4L8 14"/>',
   snap: '<path d="M6 3v7a6 6 0 0012 0V3"/><path d="M6 3h4v7a2 2 0 004 0V3h4"/><path d="M6 7h4M14 7h4"/>',
+  crop: '<path d="M6 2v16h16"/><path d="M2 6h16v16"/>',
+  compare: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M12 3v18"/><path d="M15 9l2 3-2 3"/>',
   pin: '<path d="M5 6l14-2 1 15-16 1z"/><circle cx="5" cy="6" r="1.4"/><circle cx="19" cy="4" r="1.4"/><circle cx="20" cy="19" r="1.4"/><circle cx="4" cy="20" r="1.4"/>',
 };
 const EXPORT_FORMATS = [["png8", "PNG sequence 8 bit"], ["png16", "PNG sequence 16 bit"], ["prores4444", "ProRes 4444 (.mov, alpha)"],
@@ -944,7 +975,7 @@ const KEYS = [["V", "move / scale / rotate"], ["S", "snapping on / off (hold Ctr
   ["Ctrl scroll", "zoom"], ["0", "fit view"], ["1 – 4", "switch view"], ["Arrows", "nudge (Shift = 10×)"], ["Ctrl ] / Ctrl [", "forward / back"],
   ["Ctrl Shift ] / [", "to front / to back"], ["Ctrl O", "import image or video (or drop / paste)"], ["Shift N", "new paint layer"], ["Shift A", "new colour grade"],
   ["Shift L", "new light layer (relight the scene)"], ["D", "diffuse the selected layer (Klein + your LoRAs)"], ["double click", "light layer: add a point light there"],
-  ["Ctrl Alt G", "clip to layer below"], ["Alt I", "invert mask (cut out)"], ["Ctrl J", "duplicate"], ["Alt drag", "drag a copy"], ["Ctrl K", "cut the video at the playhead"], ["Del", "delete layer"], ["Alt H", "show / hide layer"],
+  ["C", "crop the image / video layer (Enter = done)"], ["\\", "compare: without the layer, the base, as opened"], ["Ctrl Alt G", "clip to layer below"], ["Alt I", "invert mask (cut out)"], ["Ctrl J", "duplicate"], ["Alt drag", "drag a copy"], ["Ctrl K", "cut the video at the playhead"], ["Del", "delete layer"], ["Alt H", "show / hide layer"],
   ["P", "play / pause (with the sound)"], [", / .", "previous / next frame"], ["< / >", "previous / next keyframe or marker"], ["K", "keyframe the selection now"],
   ["Shift K", "record: changes become keyframes"], ["M", "marker at the playhead (double click it to rename)"], ["Ctrl + drag", "on the timeline: no snapping"], ["Home", "back to the start"], ["Ctrl Z / Ctrl Shift Z", "undo / redo"], ["Ctrl Enter", "apply"], ["Ctrl S", "save the composition under a name"], ["Esc", "close (without apply)"], ["?", "this sheet"]];
 
@@ -1044,6 +1075,7 @@ class Director {
   motionCtx() {                                     // beats / markers / loudness for pulse and audio behaviours (cached)
     const off = this.tl.audio?.offset || 0, key = [this.tl.beat?.bpm, this.tl.beat?.phase, off, this.tl.duration, (this.tl.markers || []).map(m => m.t).join(",")].join("|");
     if (this._mctx?.key !== key) this._mctx = { key, beats: beatTimes(this.tl.beat, off, this.tl.duration), markers: (this.tl.markers || []).map(m => m.t).filter(Number.isFinite).sort((a, b) => a - b), offset: off };
+    this._mctx.tracks = this.m.tracks || null; this._mctx.canvas = [this.W, this.H];
     const file = this.tl.audio?.file || "";
     const wantLevel = file && this.layers?.some(L => this.shaderListens(L) || L.motion?.some(b => b.on !== false && (b.type === "audio" || b.type === "field" && b.curve === "level")));
     if (wantLevel && this._levelFile !== file) {       // the node's own curve (motion.level_curve), so preview = render
@@ -1159,6 +1191,7 @@ class Director {
             + (M_BANDS.includes(b.trigger) ? num(b, i, "threshold", "hit strength 0-1") + num(b, i, "gap", "min gap s") : "")
             + (b.order === "random" ? num(b, i, "seed", "seed") : "")
             + (mNum(b, "fade", 0) > 0 ? `<label class="kkd-mf" data-tip="With a fade: crossfade = the new picture fades in over the old one. out, then in = the layer fades out of its old mask first, then into the new one. Fade 0 = it just appears"><span>fade style</span><select data-mi="${i}" data-mk="transition">${[["cross", "crossfade"], ["dip", "out, then in"]].map(([v, l]) => opt(v, b.transition || "cross", l)).join("")}</select></label>` : "") : ""}
+          ${b.type === "follow" ? `<label class="kkd-mf" data-tip="Which tracked thing the layer moves with: the biggest one, or one by its id (as kubakub tracker shows it)"><span>with</span><select data-mi="${i}" data-mk="track">${opt("biggest", String(b.track ?? "biggest"), "the biggest")}${(this.m.tracks?.tracks || []).slice(0, 200).map(tr => opt(String(tr.id), String(b.track ?? ""), `${tr.id} · ${tr.label || tr.kind} (${tr.box.length} fr)`)).join("")}</select></label>` : ""}
           ${b.type === "audio" ? `<label class="kkd-mf" data-tip="The whole sound, or only its low (kick, bass), mid or high (hats, clicks) frequencies"><span>listen to</span><select data-mi="${i}" data-mk="band">${[["all", "everything"], ["low", "low"], ["mid", "mid"], ["high", "high"]].map(([v, l]) => opt(v, b.band || "all", l)).join("")}</select></label>` : ""}
           ${b.type === "pulse" ? `<label class="kkd-mf"><span>on</span><select data-mi="${i}" data-mk="trigger">${[["beats", "beats"], ["bars", "bars"], ["markers", "markers"], ["every", "every … s"]].map(([v, l]) => opt(v, b.trigger || "beats", l)).join("")}</select></label>`
             + (b.trigger === "every" ? num(b, i, "every", "every s") : b.trigger === "markers" ? "" : num(b, i, "nth", "every nth")) : ""}
@@ -1175,6 +1208,7 @@ class Director {
             return `<div class="kkd-lstatus">${msg || (k ? `${k} steps · ${n + 1} layers` : "no step in this range: lower the hit strength or pick another 'step on'")}</div>`; })() : ""}
         ${b.type === "loop" && !b.path ? `<div class="kkd-lstatus">key a value at two times or more first, then loop it</div>` : ""}
         ${b.type === "audio" && !this.tl.audio?.file ? `<div class="kkd-lstatus">load a sound first (♪ audio in the timeline)</div>` : ""}
+        ${b.type === "follow" ? `<div class="kkd-lstatus">${!this.m.tracks ? "connect kubakub tracker to the director's 'tracks' and run once" : b.path !== "position" && b.path !== "scale" ? "follow moves the position or the scale" : `from ${mNum(b, "t_start", 0)} s the layer ${b.path === "scale" ? "grows and shrinks" : "moves"} with it · tracks: ${this.m.tracks.tracks.length} things, ${(this.m.tracks.n / (this.m.tracks.fps || 25)).toFixed(1)} s`}</div>` : ""}
         ${b.type === "pulse" && (b.trigger || "beats") !== "every" && (b.trigger === "markers" ? !this.tl.markers?.length : !this.tl.beat?.bpm) ? `<div class="kkd-lstatus">${b.trigger === "markers" ? "no markers yet (M in the timeline)" : "no beats yet: load a sound (♪ audio) or set the tempo"}</div>` : ""}</div>`).join("");
   }
   layerAt(L, t) {                                    // a copy of the layer with its keys and behaviours at time t (for delayed repeats)
@@ -1761,7 +1795,7 @@ class Director {
   }
   serialize() {
     const keys = ["id", "name", "kind", "source", "visible", "opacity", "blend", "x", "y", "w", "h", "rotation", "flip_h", "flip_v",
-      "clip", "clip_feather", "holes", "mask", "adjust", "action", "prompt", "denoise", "color", "size", "remove_bg", "light", "anim", "video", "media", "shape", "fx", "light_react", "height", "motion"];
+      "clip", "clip_feather", "holes", "mask", "adjust", "action", "prompt", "denoise", "color", "size", "remove_bg", "light", "anim", "video", "media", "shape", "crop", "fx", "light_react", "height", "motion"];
     const doc = { version: 1, canvas: [this.W, this.H],
       layers: this.layers.map(L => { const o = Object.fromEntries(keys.filter(k => L[k] !== undefined).map(k => [k, L[k]]));
         for (const p of Object.keys(L._rest || {})) {                       // saved without the behaviours (the node adds them per frame)
@@ -2137,7 +2171,10 @@ class Director {
     else if (L.kind === "image" && L.img && !L.vhidden) {
       g.save(); g.translate((L.x + L.w / 2) * k, (L.y + L.h / 2) * k); g.rotate(L.rotation * Math.PI / 180);
       g.scale(L.flip_h ? -1 : 1, L.flip_v ? -1 : 1);
-      g.drawImage(L.img, -L.w / 2 * k, -L.h / 2 * k, L.w * k, L.h * k); g.restore();
+      const c = L.crop && this.cropPx(L);             // = render.place: only that part of the picture, over the box
+      if (c) g.drawImage(L.img, c[0], c[1], c[2] - c[0], c[3] - c[1], -L.w / 2 * k, -L.h / 2 * k, L.w * k, L.h * k);
+      else g.drawImage(L.img, -L.w / 2 * k, -L.h / 2 * k, L.w * k, L.h * k);
+      g.restore();
     } else if (L.kind === "shape" && L.shape) {       // = render.shape_source: the path in the box, blurred by the feather
       const w = L.w * k, h = L.h * k, sh = L.shape, f = (+sh.feather || 0) * k;
       const fill = isShader(L) ? this.shaderFill(L) : null;      // = render.shader_source: the shader seen through the shape
@@ -2463,6 +2500,8 @@ class Director {
     this.composite();
     const ctx = this.ctx; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, this.cv.width, this.cv.height);
     ctx.imageSmoothingQuality = "high"; ctx.drawImage(this.comp, this.OX(), this.OY(), this.W * this.S(), this.H * this.S());
+    if (!this.cmpShot && this.ready) { this.cmpShot = mkCanvas(this.PW, this.PH); this.cmpShot.getContext("2d").drawImage(this.comp, 0, 0); }   // as opened (= as last applied)
+    if (this.cmp?.on) this.drawCompare();
     ctx.strokeStyle = "rgba(161,135,183,.8)"; ctx.lineWidth = 1; ctx.strokeRect(this.OX() + .5, this.OY() + .5, this.W * this.S(), this.H * this.S());
     this.drawNames();
     if (this.tool === "pick" && this.hoverRegion) {
@@ -2602,6 +2641,7 @@ class Director {
   drawSelection() {
     this.drawArrows();
     const L = this.layers[this.sel]; if (!L || !L.visible || !this.transformable(L)) return;
+    if (this.tool === "crop" && this.croppable(L)) { this.drawCrop(L); return; }
     const ctx = this.ctx, h = this.handles(L), sx = p => this.OX() + p[0] * this.S(), sy = p => this.OY() + p[1] * this.S();
     ctx.strokeStyle = LAV; ctx.lineWidth = 2; ctx.beginPath(); h.corners.forEach((p, i) => i ? ctx.lineTo(sx(p), sy(p)) : ctx.moveTo(sx(p), sy(p))); ctx.closePath(); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(sx(h.top), sy(h.top)); ctx.lineTo(sx(h.rot), sy(h.rot)); ctx.stroke();
@@ -2609,6 +2649,123 @@ class Director {
     ctx.fillStyle = "#fff"; ctx.strokeStyle = LAV; ctx.lineWidth = 1.5;
     h.edges.forEach(p => { ctx.fillRect(sx(p) - 3, sy(p) - 3, 6, 6); ctx.strokeRect(sx(p) - 3, sy(p) - 3, 6, 6); });
     ctx.beginPath(); ctx.arc(sx(h.rot), sy(h.rot), 5, 0, 7); ctx.fillStyle = ORANGE; ctx.fill();
+  }
+
+  // ---- crop (C): an image / video layer shows a part of its picture (L.crop = 0-1 of it, = render.crop_px).
+  // The picture stays where it is on the canvas; the crop is a window over it, so dragging an edge moves only
+  // that edge, and the box (x, y, w, h) follows the window.
+  croppable(L) { return L?.kind === "image" && !!L.img; }
+  cropPx(L) {                                        // the crop in pixels of the picture shown (= render.crop_px)
+    const c = L.crop, w = iw(L.img), h = ih(L.img); if (!c || !w || !h) return null;
+    const r = v => Math.floor(v + 0.5), x0 = Math.min(Math.max(r(c[0] * w), 0), w - 1), y0 = Math.min(Math.max(r(c[1] * h), 0), h - 1);
+    return [x0, y0, Math.max(x0 + 1, Math.min(r((c[0] + c[2]) * w), w)), Math.max(y0 + 1, Math.min(r((c[1] + c[3]) * h), h))];
+  }
+  cropFrame(L) {                                     // the whole picture on the canvas: local axes along the layer's turn
+    const c = L.crop || [0, 0, 1, 1], FW = L.w / c[2], FH = L.h / c[3], a = L.rotation * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+    const lx = (L.flip_h ? 1 - c[0] - c[2] : c[0]) * FW, ly = (L.flip_v ? 1 - c[1] - c[3] : c[1]) * FH;
+    const lcx = lx + L.w / 2, lcy = ly + L.h / 2, C = [L.x + L.w / 2, L.y + L.h / 2], O = [C[0] - (lcx * cos - lcy * sin), C[1] - (lcx * sin + lcy * cos)];
+    return { O, FW, FH, cos, sin, box: [lx, ly, L.w, L.h],
+      toL: (x, y) => { const dx = x - O[0], dy = y - O[1]; return [dx * cos + dy * sin, -dx * sin + dy * cos]; },
+      toC: (u, v) => [O[0] + u * cos - v * sin, O[1] + u * sin + v * cos] };
+  }
+  setCrop(L, F, b) {                                 // b = [x, y, w, h] in the frame (canvas px along the layer): kept inside the picture
+    let [x, y, w, h] = b; w = Math.min(Math.max(w, 4), F.FW); h = Math.min(Math.max(h, 4), F.FH);
+    x = Math.min(Math.max(x, 0), F.FW - w); y = Math.min(Math.max(y, 0), F.FH - h);
+    const r5 = v => Math.round(v * 1e5) / 1e5;
+    const c = [r5((L.flip_h ? F.FW - x - w : x) / F.FW), r5((L.flip_v ? F.FH - y - h : y) / F.FH), r5(w / F.FW), r5(h / F.FH)];
+    if (c[0] <= 1e-4 && c[1] <= 1e-4 && c[2] >= 1 - 1e-4 && c[3] >= 1 - 1e-4) delete L.crop; else L.crop = c;
+    const [cx, cy] = F.toC(x + w / 2, y + h / 2); L.w = w; L.h = h; L.x = cx - w / 2; L.y = cy - h / 2;
+  }
+  cropRatio(L, F) { return ratioValue(this.cropR === "canvas" ? "picture" : this.cropR || "free", F.FW, F.FH, [this.W, this.H]); }
+  cropReshape(name) {                                // a ratio pill: the window takes that shape, same centre and area, inside the picture
+    const L = this.cur(); if (!this.croppable(L)) return;
+    this.cropR = name; const F = this.cropFrame(L), r = this.cropRatio(L, F);
+    if (r) { this.snap(); const [x, y, w, h] = F.box, a = w * h; let nw = Math.sqrt(a * r), nh = nw / r; const k = Math.min(1, F.FW / nw, F.FH / nh); nw *= k; nh *= k;
+      this.setCrop(L, F, [x + w / 2 - nw / 2, y + h / 2 - nh / 2, nw, nh]); }
+    this.renderCropBar(); this.draw();
+  }
+  cropHandle(L, F, x, y) {                           // which edge / corner / inside of the crop under a canvas point
+    const [u, v] = F.toL(x, y), [bx, by, bw, bh] = F.box, t = 10 / this.S();
+    const nx = Math.abs(u - bx) < t ? "w" : Math.abs(u - bx - bw) < t ? "e" : "", ny = Math.abs(v - by) < t ? "n" : Math.abs(v - by - bh) < t ? "s" : "";
+    const inU = u > bx - t && u < bx + bw + t, inV = v > by - t && v < by + bh + t;
+    if (nx && ny) return ny + nx; if (nx && inV) return nx; if (ny && inU) return ny;
+    if (u > bx && u < bx + bw && v > by && v < by + bh) return "move";
+    return u >= 0 && v >= 0 && u <= F.FW && v <= F.FH ? "new" : "";
+  }
+  drawCrop(L) {
+    const ctx = this.ctx, S = this.S(), F = this.cropFrame(L), [bx, by, bw, bh] = F.box;
+    ctx.save(); ctx.translate(this.OX() + F.O[0] * S, this.OY() + F.O[1] * S); ctx.rotate(L.rotation * Math.PI / 180); ctx.scale(S, S);
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, F.FW, F.FH); ctx.rect(bx, by, bw, bh); ctx.clip("evenodd");   // the rest of the picture, faint
+    ctx.globalAlpha = 0.35; ctx.translate(L.flip_h ? F.FW : 0, L.flip_v ? F.FH : 0); ctx.scale(L.flip_h ? -1 : 1, L.flip_v ? -1 : 1);
+    ctx.drawImage(L.img, 0, 0, F.FW, F.FH); ctx.restore();
+    ctx.lineWidth = 1 / S; ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.setLineDash([4 / S, 4 / S]); ctx.strokeRect(0, 0, F.FW, F.FH); ctx.setLineDash([]);
+    ctx.strokeStyle = "rgba(255,255,255,.3)";
+    for (const f of [1 / 3, 2 / 3]) { ctx.beginPath(); ctx.moveTo(bx + bw * f, by); ctx.lineTo(bx + bw * f, by + bh); ctx.moveTo(bx, by + bh * f); ctx.lineTo(bx + bw, by + bh * f); ctx.stroke(); }
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5 / S; ctx.strokeRect(bx, by, bw, bh);
+    const hs = 8 / S;
+    for (const [hx, hy, k] of [[bx, by, "nw"], [bx + bw, by, "ne"], [bx, by + bh, "sw"], [bx + bw, by + bh, "se"], [bx + bw / 2, by, "n"], [bx + bw / 2, by + bh, "s"], [bx, by + bh / 2, "w"], [bx + bw, by + bh / 2, "e"]]) {
+      ctx.fillStyle = this.cropHover === k ? ORANGE : "#fff"; ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs); }
+    ctx.restore();
+  }
+  renderCropBar() {
+    const bar = this.$("cropbar"); if (!bar) return; this.guardHTML(bar);
+    const L = this.cur(), on = this.tool === "crop";
+    bar.hidden = !on; if (!on) return;
+    if (!this.croppable(L)) { bar.kkdHTML = `<span>select an image or video layer to crop</span><button class="kkd-pill" data-crop-done>done</button>`; return; }
+    const F = this.cropFrame(L), c = this.cropPx(L), sw = c ? c[2] - c[0] : iw(L.img), sh = c ? c[3] - c[1] : ih(L.img), name = this.cropR || "free";
+    bar.kkdHTML = `<b>crop</b>` + CROP_RATIOS.map(n => n === "picture" ? "canvas" : n).map(n => `<button class="kkd-pill" data-crop-r="${n}" aria-pressed="${n === name}" data-tip="${n === "canvas" ? "The shape of the canvas (the matrix)" : n === "original" ? "The shape of the layer's picture" : n === "free" ? "Any shape" : "Window " + n}">${n}</button>`).join("")
+      + `<button class="kkd-pill" data-crop-swap data-tip="Turn the window: wide ↔ tall">⇄</button><span>${sw} × ${sh} px of the picture · ${ratioName(Math.max(1, F.box[2]), Math.max(1, F.box[3]))}</span>`
+      + `<button class="kkd-pill" data-crop-reset data-tip="Show all of the picture again">reset</button><button class="kkd-pill accent" data-crop-done data-tip="Back to move|Enter">done</button>`;
+  }
+  cropSwap() {                                       // wide <-> tall: the window turned about its centre (inside the picture)
+    const L = this.cur(); if (!this.croppable(L)) return;
+    const flip = { "4:5": "5:4", "5:4": "4:5", "3:2": "2:3", "2:3": "3:2", "16:9": "9:16", "9:16": "16:9" }[this.cropR];
+    if (flip) { this.cropReshape(flip); return; }
+    if (this.cropR && this.cropR !== "free" && this.cropR !== "1:1") this.cropR = "free";
+    this.snap(); const F = this.cropFrame(L), [x, y, w, h] = F.box; let nw = h, nh = w; const k = Math.min(1, F.FW / nw, F.FH / nh); nw *= k; nh *= k;
+    this.setCrop(L, F, [x + w / 2 - nw / 2, y + h / 2 - nh / 2, nw, nh]); this.renderCropBar(); this.draw();
+  }
+  cropReset() { const L = this.cur(); if (!this.croppable(L) || !L.crop) return; this.snap(); const F = this.cropFrame(L); this.setCrop(L, F, [0, 0, F.FW, F.FH]); this.renderCropBar(); this.draw(); }
+  // ---- compare (\): the composition against B, on the stage: swipe / difference / blink / onion (= kubakub compare)
+  compareB() {                                       // B at preview size, or null
+    const c = this.cmp; if (!c) return null;
+    if (c.b === "base") { const t = this._cmpB ||= mkCanvas(this.PW, this.PH), g = t.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, this.PW, this.PH); g.drawImage(this.baseImage(), 0, 0, this.PW, this.PH); return t; }
+    if (c.b === "opened") return this.cmpShot || null;
+    const only = this.layers.map((L, i) => i).filter(i => this.layers[i].visible && i !== this.sel);
+    const t = this._cmpB ||= mkCanvas(this.PW, this.PH); this.composite(t, only); return t;
+  }
+  drawCompare() {
+    const B = this.compareB(); if (!B) return;
+    const ctx = this.ctx, c = this.cmp, X0 = this.OX(), Y0 = this.OY(), Wd = this.W * this.S(), Hd = this.H * this.S(), D = Math.min(devicePixelRatio || 1, 2);
+    ctx.save();
+    if (c.mode === "difference") {
+      const t = this._cmpD ||= mkCanvas(this.PW, this.PH), g = t.getContext("2d");
+      g.globalCompositeOperation = "source-over"; g.drawImage(this.comp, 0, 0); g.globalCompositeOperation = "difference"; g.drawImage(B, 0, 0); g.globalCompositeOperation = "source-over";
+      ctx.filter = c.gain > 1.01 ? `brightness(${c.gain})` : "none"; ctx.drawImage(t, X0, Y0, Wd, Hd); ctx.filter = "none";
+    } else if (c.mode === "blink") {
+      if (Math.floor(performance.now() / 500) % 2) ctx.drawImage(B, X0, Y0, Wd, Hd);
+      if (!this._cmpTick) this._cmpTick = setInterval(() => { if (!this.root?.isConnected || !this.cmp?.on || this.cmp.mode !== "blink") { clearInterval(this._cmpTick); this._cmpTick = null; return; } this.draw(); }, 250);
+    } else if (c.mode === "onion") { ctx.globalAlpha = c.onion; ctx.drawImage(B, X0, Y0, Wd, Hd); }
+    else {                                           // swipe: the composition left of the line, B right of it
+      const X = X0 + Wd * c.split;
+      ctx.beginPath(); ctx.rect(X, Y0, X0 + Wd - X, Hd); ctx.clip(); ctx.drawImage(B, X0, Y0, Wd, Hd); ctx.restore(); ctx.save();
+      ctx.fillStyle = "#fff"; ctx.fillRect(X - D, Y0, 2 * D, Hd); ctx.fillStyle = ORANGE; ctx.beginPath(); ctx.arc(X, Y0 + Hd / 2, 7 * D, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+  }
+  renderCmpBar() {
+    const bar = this.$("cmpbar"), c = this.cmp; if (!bar) return; this.guardHTML(bar);
+    this.$("t-compare")?.setAttribute("aria-pressed", String(!!c?.on));
+    bar.hidden = !c?.on; if (!c?.on) return;
+    const Bs = [["without", "without the layer", "The composition without the selected layer (live, follows the timeline)"], ["base", "base", "The base picture alone, no layers"], ["opened", "as opened", "The composition as it was when the window opened (= as last applied), a still"]];
+    const modes = ["swipe", "difference", "blink", "onion"];
+    bar.kkdHTML = `<b>compare with</b>` + Bs.map(([k, t, tip]) => `<button class="kkd-pill" data-cmp-b="${k}" aria-pressed="${k === c.b}" data-tip="${tip}">${t}</button>`).join("")
+      + `<span>·</span>` + modes.map(m => `<button class="kkd-pill" data-cmp-m="${m}" aria-pressed="${m === c.mode}" data-tip="${{ swipe: "Drag the line", difference: "What changed lights up · drag sideways = brighter", blink: "A and B in turn", onion: "B over the composition · drag sideways = how much" }[m]}">${m}</button>`).join("")
+      + `<span>${c.mode === "difference" ? "×" + Math.round(c.gain * 10) / 10 : c.mode === "onion" ? Math.round(c.onion * 100) + " %" : ""}</span><button class="kkd-pill accent" data-cmp-off data-tip="Close the compare|\\">done</button>`;
+  }
+  toggleCompare(on = !this.cmp?.on) {
+    this.cmp = Object.assign(this.cmp || { b: "without", mode: "swipe", split: 0.5, gain: 4, onion: 0.5 }, { on });
+    this.renderCmpBar(); this.draw();
   }
 
   // ---- DOM
@@ -2640,12 +2797,15 @@ class Director {
         ${tool("brush", "Brush on a paint layer (made for you if needed) · [ and ] size|B")}
         ${tool("erase", "Eraser on the paint layer|E")}
         ${tool("hand", "Pan · hold Space in any tool · Ctrl+scroll zooms · 0 fits|H")}
+        ${tool("crop", "Crop the selected image or video layer: drag its edges or corners (Shift keeps the shape, Alt from the centre), drag inside to slide the window over the picture, pick a ratio · double click = all of it|C / Enter")}
+        <button class="kkd-tool" data-id="t-compare" aria-pressed="false" data-tip="Compare: swipe between the composition and the same without the selected layer, the base picture, or as it was when the window opened · difference, blink, onion|\\"><svg viewBox="0 0 24 24">${ICON.compare}</svg></button>
         <span class="kkd-sep"></span>
         <button class="kkd-tool" data-id="snap" aria-pressed="true" data-tip="Snapping to the canvas, other layers and region borders (windows, cornices) · hold Ctrl to drag without|S"><svg viewBox="0 0 24 24">${ICON.snap}</svg></button>
-        ${tool("pin", "Corner pin for perspective (coming in step W3)|C", true)}
+        ${tool("pin", "Corner pin for perspective (coming in step W3)", true)}
       </div>
       <div class="kkd-stage" data-id="stage"><canvas data-id="cv"></canvas><div class="kkd-brush" data-id="brush" hidden></div>
-        <div class="kkd-hud" data-id="hud">x 0 · y 0</div><div class="kkd-busy" data-id="busy" hidden></div></div>
+        <div class="kkd-hud" data-id="hud">x 0 · y 0</div><div class="kkd-float" data-id="cropbar" hidden></div><div class="kkd-float" data-id="cmpbar" hidden></div>
+        <div class="kkd-busy" data-id="busy" hidden></div></div>
       <div class="kkd-tl" data-id="tl">
         <div class="kkd-split h" data-split="th" data-tip="Drag to make the timeline taller or shorter · double click resets"></div>
         <div class="kkd-tlbar">
@@ -2773,8 +2933,9 @@ class Director {
   }
   setView(v) { if (!this.views[v]) return; this.view = v; this.renderViews(); this.draw(); this.renderLayers(); }
   setTool(t) {
-    this.tool = t; for (const k of ["move", "pick", "brush", "erase", "hand"]) this.$("t-" + k).setAttribute("aria-pressed", String(k === t));
-    this.cv.style.cursor = t === "hand" ? "grab" : t === "pick" || t === "poly" ? "crosshair" : (t === "brush" || t === "erase") ? "none" : "default";
+    this.tool = t; for (const k of ["move", "pick", "brush", "erase", "hand", "crop"]) this.$("t-" + k).setAttribute("aria-pressed", String(k === t));
+    this.cv.style.cursor = t === "hand" ? "grab" : t === "pick" || t === "poly" || t === "crop" ? "crosshair" : (t === "brush" || t === "erase") ? "none" : "default";
+    this.renderCropBar();
     if (t !== "poly") this.polyDraft = null;
     this.$("brush").hidden = !(t === "brush" || t === "erase"); this.draw();
   }
@@ -2805,6 +2966,7 @@ class Director {
     return i < b ? "" : `<span class="kkd-tag behind" data-tip="Under the base: shows only through its holes">behind</span>`;
   }
   renderLayers() {
+    if (this.tool === "crop") this.renderCropBar();
     this.$("layers").kkdHTML = this.layers.map((L, i) => `
       <div class="kkd-layer" role="option" tabindex="0" aria-selected="${i === this.sel}" data-i="${i}">
         <span class="kkd-grip" data-tip="Drag to change what is in front|Ctrl ] / Ctrl [">⋮⋮</span>
@@ -3490,6 +3652,13 @@ class Director {
     this.root.addEventListener("click", e => {
       const v = e.target.closest("[data-view]"); if (v) return this.setView(v.dataset.view);
       if (e.target.closest("[data-id=snap]")) return this.toggleSnap();
+      if (e.target.closest("[data-id=t-compare]")) return this.toggleCompare();
+      const cb = e.target.closest("[data-crop-r],[data-crop-swap],[data-crop-reset],[data-crop-done]");
+      if (cb) { if (cb.dataset.cropR) this.cropReshape(cb.dataset.cropR); else if ("cropSwap" in cb.dataset) this.cropSwap();
+        else if ("cropReset" in cb.dataset) this.cropReset(); else this.setTool("move"); return; }
+      const qb = e.target.closest("[data-cmp-b],[data-cmp-m],[data-cmp-off]");
+      if (qb) { if (qb.dataset.cmpB) this.cmp.b = qb.dataset.cmpB; else if (qb.dataset.cmpM) this.cmp.mode = qb.dataset.cmpM; else this.cmp.on = false;
+        this.renderCmpBar(); this.draw(); return; }
       const t = e.target.closest(".kkd-tool"); if (t && !t.disabled) return this.setTool(t.dataset.id.slice(2));
     });
     $("undo").onclick = () => this.doUndo(); $("redo").onclick = () => this.doRedo();
@@ -4006,6 +4175,18 @@ class Director {
       const [x, y] = toM(e); cv.setPointerCapture(e.pointerId); this.tlFocus = false;
       if (this.tool === "hand" || this.space || e.button === 1) { drag = { mode: "pan", sx: e.clientX, sy: e.clientY, px: this.panX, py: this.panY }; cv.style.cursor = "grabbing"; return; }
       if (this.tool === "poly") { (this.polyDraft ||= []).push([x, y]); this.draw(); return; }
+      if (this.cmp?.on && e.button === 0) {          // compare: the swipe line, or the difference / onion amount
+        const X = this.OX() + this.W * this.S() * this.cmp.split, [sx] = screen(e);
+        if (this.cmp.mode === "swipe" && Math.abs(sx - X) < 14 * Math.min(devicePixelRatio || 1, 2)) { drag = { mode: "cmpline" }; return; }
+        if (this.cmp.mode === "difference" || this.cmp.mode === "onion") { drag = { mode: "cmpval", sx, gain: this.cmp.gain, onion: this.cmp.onion }; return; }
+      }
+      if (this.tool === "crop") {
+        const q = this.cur(); if (!this.croppable(q)) { note("select an image or video layer to crop"); return; }
+        const F = this.cropFrame(q), h = this.cropHandle(q, F, x, y); if (!h) return;
+        const [u, v] = F.toL(x, y);
+        drag = { mode: "crop", q, F, handle: h === "new" ? "se" : h, fresh: h === "new", start: [u, v], b0: h === "new" ? [u, v, 0, 0] : [...F.box], pending: this.state(), sx: e.clientX, sy: e.clientY };
+        return;
+      }
       if (this.armed()) {                            // an arrow for a field behaviour or a shader fill of the selected layer
         const q = this.cur(), at = this.vecDraw;
         drag = { mode: "vec", q, at, x0: x, y0: y, old: at.sh ? q.shape.vec : at.b.vec, drawn: false }; this.vecDrag = [x, y, x, y];
@@ -4048,6 +4229,10 @@ class Director {
       if (this.tool === "pick" && reg?.id !== this.hoverRegion?.id) { this.hoverRegion = reg; this.draw(); }
       if (this.tool === "brush" || this.tool === "erase") { const q = this.cur(), sz = (q && q.kind === "paint" ? q.size : 60) * this.S() / (cv.width / r.width);
         Object.assign(this.$("brush").style, { left: (e.clientX - r.left) + "px", top: (e.clientY - r.top) + "px", width: sz + "px", height: sz + "px" }); }
+      if (!drag && this.tool === "crop" && this.croppable(this.cur())) {
+        const h = this.cropHandle(this.cur(), this.cropFrame(this.cur()), x, y);
+        if (h !== this.cropHover) { this.cropHover = h; this.cv.style.cursor = { n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize", ne: "nesw-resize", sw: "nesw-resize", nw: "nwse-resize", se: "nwse-resize", move: "move" }[h] || "crosshair"; this.draw(); }
+      }
       if (!drag) return;
       if (drag.mode === "pan") { const d = cv.width / r.width; this.panX = drag.px + (e.clientX - drag.sx) * d; this.panY = drag.py + (e.clientY - drag.sy) * d; this.draw(); return; }
       if (drag.mode === "paint") { paint(drag.q, drag.last[0], drag.last[1], x, y); drag.last = [x, y]; return; }
@@ -4060,6 +4245,22 @@ class Director {
         if (!drag.drawn && Math.hypot(x - drag.x0, y - drag.y0) >= 2 / this.S()) { this.snap(); drag.drawn = true; }      // one undo step, and only for a real arrow
         if (drag.drawn) this.setArrow(drag.q, drag.at, this.vecDrag);
         this.draw(); return; }
+      if (drag.mode === "cmpline") { const R = this.W * this.S(), [sx] = screen(e); this.cmp.split = Math.max(0, Math.min(1, (sx - this.OX()) / (R || 1))); this.draw(); return; }
+      if (drag.mode === "cmpval") { const [sx] = screen(e), u = (sx - drag.sx) / Math.max(80, cv.width * 0.5);
+        if (this.cmp.mode === "difference") this.cmp.gain = Math.max(1, Math.min(16, drag.gain * Math.pow(16, u))); else this.cmp.onion = Math.max(0, Math.min(1, drag.onion + u));
+        this.renderCmpBar(); this.draw(); return; }
+      if (drag.mode === "crop") {
+        const q = drag.q, F = drag.F, [u, v] = F.toL(x, y);
+        if (drag.handle === "move") { const b = drag.b0; this.setCrop(q, F, [b[0] + u - drag.start[0], b[1] + v - drag.start[1], b[2], b[3]]); }
+        else {
+          const r = this.cropRatio(q, F) || (e.shiftKey ? (drag.b0[2] && drag.b0[3] ? drag.b0[2] / drag.b0[3] : F.FW / F.FH) : null);
+          let b = dragBox(drag.b0, drag.handle, Math.min(Math.max(u, 0), F.FW), Math.min(Math.max(v, 0), F.FH), r, e.altKey && !drag.fresh, 4);
+          const x0 = Math.max(0, b[0]), y0 = Math.max(0, b[1]), x1 = Math.min(F.FW, b[0] + b[2]), y1 = Math.min(F.FH, b[1] + b[3]);
+          b = r ? fitRatio(x0, y0, x1 - x0, y1 - y0, r) : [x0, y0, x1 - x0, y1 - y0];      // inside the picture, the shape kept
+          this.setCrop(q, F, b);
+        }
+        this.renderCropBar(); this.draw(); return;
+      }
       if (drag.mode === "lamp") {
         const [ax, ah] = this.toFacade(drag.x, drag.y), [bx, bh] = this.toFacade(x, y);
         drag.q.x = +(drag.lx + bx - ax).toFixed(2); drag.q.height = +(drag.lh + bh - ah).toFixed(2);
@@ -4117,6 +4318,7 @@ class Director {
     cv.addEventListener("lostpointercapture", () => { if (drag) endDrag(); });
     cv.addEventListener("dblclick", e => {             // light layer selected: a point light where you click
       if (this.tool === "poly") { this.finishPoly(); return; }
+      if (this.tool === "crop") { this.cropReset(); return; }
       const L = this.cur(); if (!L || L.kind !== "light" || !this.frame() || this.tool !== "move" || lampAt(e)) return;
       const [x, y] = toM(e); if (x < 0 || y < 0 || x > this.W || y > this.H) return;
       const [fx, fh] = this.toFacade(x, y);
@@ -4154,7 +4356,7 @@ class Director {
         if (k === "Enter") this.finishPoly(); else { this.polyDraft = null; this.setTool("move"); } return; }
       if (typing && k === "Escape") { e.stopPropagation(); e.preventDefault(); this.fillTl?.(); e.target.blur(); this.root.focus?.(); return; }   // leave the field, keep the window
       if (k === "Escape" && this.vecDraw) { e.stopPropagation(); e.preventDefault(); this.vecAbort?.(); this.vecDraw = null; this.renderInspector(); this.draw(); return; }
-      if (k === "Escape") { e.stopPropagation(); const open = [this.menu, this.filemenu, this.keypop, this.outpop, this.diffpop, this.exportpop, this.clipPop].filter(Boolean).find(p => !p.hidden); if (open) open.hidden = true; else this.close(); return; }
+      if (k === "Escape") { e.stopPropagation(); const open = [this.menu, this.filemenu, this.keypop, this.outpop, this.diffpop, this.exportpop, this.clipPop].filter(Boolean).find(p => !p.hidden); if (open) open.hidden = true; else if (this.tool === "crop") this.setTool("move"); else if (this.cmp?.on) this.toggleCompare(false); else this.close(); return; }
       if (typing) { e.stopPropagation(); if (ctrl && k === "Enter") { e.preventDefault(); this.apply(); }
         else if (ctrl && ["s", "o", "j"].includes(k.toLowerCase())) e.preventDefault();      // not the browser's save / open / downloads
         return; }
@@ -4180,6 +4382,9 @@ class Director {
       if (e.altKey && k.toLowerCase() === "i") { const q = this.cur(); if (q?.mask.by) { this.snap(); q.mask.invert = !q.mask.invert; this.refresh(); } return; }
       if (e.altKey && k.toLowerCase() === "h") { const q = this.cur(); if (q) { this.snap(); q.visible = !q.visible; this.refresh(); } return; }
       if (k.toLowerCase() === "s" && !e.altKey && !e.shiftKey) { this.toggleSnap(); return; }
+      if (k.toLowerCase() === "c" && !e.altKey && !e.shiftKey) { this.setTool(this.tool === "crop" ? "move" : "crop"); return; }
+      if (k === "Enter" && this.tool === "crop") { this.setTool("move"); return; }
+      if (k === "\\") { this.toggleCompare(); return; }
       const t = { v: "move", r: "pick", b: "brush", e: "erase", h: "hand" }[k.toLowerCase()]; if (t && !e.altKey) { this.setTool(t); return; }
       if (/^[1-9]$/.test(k)) { const v = Object.keys(this.views).filter(n => !n.startsWith("_"))[+k - 1]; if (v) this.setView(v); return; }
       if (k === "0") { this.zoom = 1; this.panX = this.panY = 0; this.draw(); return; }
