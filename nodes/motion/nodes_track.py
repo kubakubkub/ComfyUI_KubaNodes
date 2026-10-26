@@ -33,7 +33,19 @@ log = logging.getLogger("KUBA.regions")
 CATEGORY = "kubakub/2d/motion"
 PREVIEW_SIDE = 960
 _LAST: dict[str, tuple] = {}                       # node id -> (frames, fps): the frames 'try this frame' looks at
-CACHE_VERSION = 1                                  # raise when the analysis itself changes (old cached tracks are then not used)
+CACHE_VERSION = 2                                  # raise when the analysis itself changes (old cached tracks are then not used)
+
+
+def _code_print():
+    """A fingerprint of the tracking code: tracks made by older code are never taken from the cache."""
+    try:
+        with open(tk.__file__, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:12]
+    except OSError:
+        return "?"
+
+
+CODE = _code_print()
 
 
 def cache_dir():
@@ -53,7 +65,7 @@ def video_key(frames, s, fps):
     fps and the finders' settings (the depth is not in it: it is added after, it is cheap)."""
     n, H, W = int(frames.shape[0]), int(frames.shape[1]), int(frames.shape[2])
     sy, sx = max(1, H // 18), max(1, W // 32)
-    h = hashlib.sha256(f"v{CACHE_VERSION}|{n}|{W}|{H}|{float(fps):.4f}|{json.dumps(s, sort_keys=True)}".encode())
+    h = hashlib.sha256(f"v{CACHE_VERSION}|{CODE}|{n}|{W}|{H}|{float(fps):.4f}|{json.dumps(s, sort_keys=True)}".encode())
     for i in range(0, n, 64):
         part = frames[i:i + 64, ::sy, ::sx, :3]
         part = part.cpu() if hasattr(part, "cpu") else part

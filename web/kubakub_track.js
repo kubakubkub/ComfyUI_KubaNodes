@@ -392,7 +392,7 @@ async function server() {
   return SERVER;
 }
 const KIND_NAMES = { motion: "motion", colour: "colour", lights: "lights", yolo: "people & things", words: "words", body: "body", hands: "hands", face: "face", motif: "motif" };
-const KIND_COL = { motion: "#ffffff", colour: ORANGE, lights: "#ffe27a", yolo: LAV, words: "#9dff8a", body: "#39ff6a", hands: "#6ae4ff", face: "#ff8ad8", motif: ORANGE };
+const KIND_COL = { motion: "#ffffff", colour: "#6ae4ff", lights: "#ffe27a", yolo: LAV, words: "#9dff8a", body: "#39ff6a", hands: "#6ae4ff", face: "#ff8ad8", motif: ORANGE };
 const yoloLabel = m => m + (/-pose/i.test(m) ? "  (+ body points)" : /-seg/i.test(m) ? "  (+ outlines)" : "");
 const YOLO_CLASSES = ["person", "car", "bicycle", "motorcycle", "bus", "truck", "bird", "dog", "cat", "horse", "umbrella", "backpack", "handbag", "boat", "any"];
 const PALETTE = ["#ffffff", ORANGE, LAV, "#39ff6a", "#e8b04a", "#ff3b30", "#6ae4ff"];

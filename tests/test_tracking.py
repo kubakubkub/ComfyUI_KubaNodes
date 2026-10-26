@@ -128,6 +128,11 @@ try:
     check("cache: the same video and settings come from the cache (survives a restart: on disk)",
           "from the cache" in res_again.result[5] and len(res_again.result[0]["tracks"]) == len(tracks["tracks"])
           and os.path.isdir(nt.cache_dir()) and len(os.listdir(nt.cache_dir())) >= 1, res_again.result[5])
+    keep_code = nt.CODE
+    nt.CODE = "changed"                                      # newer tracking code: the old tracks are not used
+    res_new_code = nt.KUBA_Tracker.execute(None, json.dumps({"lights": {"on": True, "level": 0.9}}), 25.0)
+    nt.CODE = keep_code
+    check("cache: tracks of older tracking code are not used", "from the cache" not in res_new_code.result[5])
     res_other = nt.KUBA_Tracker.execute(None, json.dumps({"lights": {"on": True, "level": 0.8}}), 25.0)
     check("cache: another setting tracks again", "from the cache" not in res_other.result[5])
     # chained trackers: one set of tracks, ids go on, a kind found twice gets a number

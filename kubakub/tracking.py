@@ -169,7 +169,9 @@ class ColourFinder:
     def __call__(self, rgb8, t):
         lab = cv2.cvtColor(rgb8, cv2.COLOR_RGB2LAB).astype(np.float32)
         d = np.sqrt(((lab - self.ref) ** 2).sum(-1))
-        m = cv2.morphologyEx((d < self.tol).astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        m = cv2.morphologyEx((d < self.tol).astype(np.uint8), cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+        k = max(5, int(round(0.009 * rgb8.shape[1])) | 1)    # a textured patch of the colour (glowing glass, a printed
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))   # pattern) as one blob
         return _components(m, "colour", self.min_area, self.label)
 
 
