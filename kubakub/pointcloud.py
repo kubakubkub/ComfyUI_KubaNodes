@@ -377,30 +377,37 @@ def track_edges(pts, lk, aspect):
 
 
 def draw_tracks(img, pts, lk, cam_basis, aspect, depth):
-    """Lines between the tracked things and a ring on each, at their place in the cloud (numpy (H, W, 3), in place)."""
+    """Lines between the tracked things and a ring on each, at their place in the cloud. img = torch (H, W, 3) on any
+    device -> the same with the marks over it. cv2 draws only a one-channel mask; the colour is blended on the image's
+    own device, inside the marks' box, so a big frame is not copied around."""
     import cv2
     if not pts:
         return img
-    H, W = img.shape[:2]
+    H, W = int(img.shape[0]), int(img.shape[1])
     tk_ = lk["tracks"]
     P = torch.tensor([[(p[1] - 0.5) * aspect * distance(p[3], depth), (0.5 - p[2]) * distance(p[3], depth), -distance(p[3], depth)] for p in pts], dtype=torch.float64)
     sx, sy, z = project(P, cam_basis, W, H)
     xy = [(float(a), float(b)) if zz > NEAR_Z else None for a, b, zz in zip(sx, sy, z)]
-    col = hex01(tk_["colour"])
-    over = img.copy()
+    m = np.zeros((H, W), np.uint8)
     unit = H / 1080.0
     lw = max(1, int(round(1.2 * unit)))
     sh = 4                                         # sub-pixel positions (cv2 shift)
     for a, b in track_edges(pts, lk, aspect):
         if xy[a] and xy[b]:
-            cv2.line(over, tuple(int(round(q * 16)) for q in xy[a]), tuple(int(round(q * 16)) for q in xy[b]), col, lw, cv2.LINE_AA, sh)
+            cv2.line(m, tuple(int(round(q * 16)) for q in xy[a]), tuple(int(round(q * 16)) for q in xy[b]), 255, lw, cv2.LINE_AA, sh)
     if tk_["marks"]:
         rad = int(round(RING * tk_["size"] * unit * 16))
         for q in xy:
             if q:
-                cv2.circle(over, tuple(int(round(v * 16)) for v in q), rad, col, lw, cv2.LINE_AA, sh)
-    op = tk_["opacity"]
-    img[:] = img * (1 - op) + over * op
+                cv2.circle(m, tuple(int(round(v * 16)) for v in q), rad, 255, lw, cv2.LINE_AA, sh)
+    ys, xs = np.nonzero(m.any(1))[0], np.nonzero(m.any(0))[0]
+    if not len(ys):
+        return img
+    y0, y1, x0, x1 = int(ys[0]), int(ys[-1]) + 1, int(xs[0]), int(xs[-1]) + 1
+    w = torch.from_numpy(m[y0:y1, x0:x1]).to(img.device).to(img.dtype)[..., None] * (tk_["opacity"] / 255.0)
+    col = torch.tensor(hex01(tk_["colour"]), dtype=img.dtype, device=img.device)
+    img = img.clone()
+    img[y0:y1, x0:x1] = img[y0:y1, x0:x1] * (1 - w) + col * w
     return img
 
 

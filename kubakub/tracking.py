@@ -697,20 +697,24 @@ def depth_frames(depth, n, H, W, near="bright"):
     """A depth clip from any depth node (n2, h, w[, c], any scale) -> (n, H, W) float32 0-1, near = 1, one scale for the
     whole clip (2nd / 98th percentile of a few frames), so a thing keeps its depth from frame to frame. Fewer frames
     than the video: the last one holds."""
-    d = depth.cpu().float().numpy() if hasattr(depth, "cpu") else np.asarray(depth, np.float32)
-    if d.ndim == 4:
-        d = d[..., :3].mean(-1)
+    import torch                                   # the whole clip at once in torch: a long video is many frames
+    d = (depth if hasattr(depth, "cpu") else torch.from_numpy(np.asarray(depth, np.float32))).cpu().float()
+    if d.ndim == 4:                                # the mean of the colours (summed: a mean over 3 is slow in torch)
+        c = min(3, int(d.shape[-1]))
+        d = sum(d[..., k] for k in range(c)) / c if c > 1 else d[..., 0]
     if d.ndim == 2:
         d = d[None]
-    pick = d[np.linspace(0, len(d) - 1, min(len(d), 12)).astype(int)]
+    pick = d[np.linspace(0, len(d) - 1, min(len(d), 12)).astype(int)].numpy()
     lo, hi = np.percentile(pick, 2), np.percentile(pick, 98)
     out = np.empty((n, H, W), np.float32)
-    for i in range(n):
-        f = d[min(i, len(d) - 1)]
-        if f.shape != (H, W):
-            f = cv2.resize(f, (W, H), interpolation=cv2.INTER_LINEAR)
-        f = np.clip((f - lo) / max(1e-6, hi - lo), 0, 1)
-        out[i] = f if near != "dark" else 1.0 - f
+    o = torch.from_numpy(out)
+    step = 16
+    for i in range(0, n, step):
+        f = d[[min(k, len(d) - 1) for k in range(i, min(n, i + step))]]
+        if tuple(f.shape[1:]) != (H, W):
+            f = torch.nn.functional.interpolate(f[:, None], size=(H, W), mode="bilinear", align_corners=False)[:, 0]
+        f = ((f - lo) / max(1e-6, hi - lo)).clamp_(0, 1)
+        o[i:i + len(f)] = f if near != "dark" else 1.0 - f
     return out
 
 

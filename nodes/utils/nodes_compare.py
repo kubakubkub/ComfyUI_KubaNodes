@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
@@ -25,13 +26,25 @@ PREVIEWS = ["1280", "1920", "full"]
 MAX_FRAMES = 3000
 
 
+_last_video = [None, None]                        # [weakref to the VIDEO, (frames, fps)]: the last one decoded
+
+
 def frames_of(x):
-    """IMAGE (n, h, w, c) or a VIDEO -> (frames tensor, fps or None, 'image' | 'video')."""
+    """IMAGE (n, h, w, c) or a VIDEO -> (frames tensor, fps or None, 'image' | 'video'). A VIDEO is decoded once:
+    Load Video hands every node after it (and every run while it is cached) the same object, so the tracker, the
+    point cloud and a re-run read the frames decoded the first time. The frames are read only, never changed."""
     if x is None:
         return None, None, None
     if hasattr(x, "get_components"):
+        ref = _last_video[0]
+        if ref is not None and ref() is x:
+            return (*_last_video[1], "video")
         c = x.get_components()
         fps = float(c.frame_rate) if getattr(c, "frame_rate", None) else None
+        try:
+            _last_video[:] = [weakref.ref(x), (c.images, fps)]
+        except TypeError:
+            _last_video[:] = [None, None]
         return c.images, fps, "video"
     if hasattr(x, "shape") and len(x.shape) == 4:
         return x, None, "image"
@@ -47,7 +60,7 @@ def write_side(frames, tag: str, side: int | None) -> dict:
     first = frames[0].cpu().float().numpy()
     probe = (np.clip(first[::max(1, h // 64), ::max(1, w // 64), :3], 0, 1) * 255).astype(np.uint8).tobytes()
     last = (np.clip(frames[n - 1].cpu().float().numpy()[::max(1, h // 64), ::max(1, w // 64), :3], 0, 1) * 255).astype(np.uint8).tobytes()
-    key = hashlib.sha1(probe + last + f"{n}|{w}|{h}|{pw}|{float(frames.float().mean())}".encode()).hexdigest()[:16]
+    key = hashlib.sha1(probe + last + f"{n}|{w}|{h}|{pw}|{float(frames[:, ::4, ::4].float().mean())}".encode()).hexdigest()[:16]
     sub = f"kubakub_compare/{key}"
     out = os.path.join(folder_paths.get_temp_directory(), "kubakub_compare", key)
     os.makedirs(out, exist_ok=True)

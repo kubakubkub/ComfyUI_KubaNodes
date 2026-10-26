@@ -230,12 +230,11 @@ class KUBA_PointCloud(io.ComfyNode):
                     ply = pc.write_ply(ply_path(), P[alive], c[alive])
                 cam = pc.basis(pc.camera_at(lk, a), lk["depth"])
                 im, al = pc.splat(P, c, dist, alive, lk, cam, Wo, Ho, gh)
-                im = im.cpu().numpy()
                 if t3 is not None:
                     tf = f % len(t3) if mode == "pictures" else min(f % n, len(t3) - 1)
-                    pc.draw_tracks(im, t3[tf], lk, cam, aspect, lk["depth"])
-                out[f] = torch.from_numpy(im)
-                alpha[f] = al.cpu()
+                    im = pc.draw_tracks(im, t3[tf], lk, cam, aspect, lk["depth"])
+                out[f].copy_(im)
+                alpha[f].copy_(al)
                 pbar.update(1)
         finally:
             try:
@@ -246,9 +245,9 @@ class KUBA_PointCloud(io.ComfyNode):
         meta = {"mode": mode, "n": n, "K": K, "W": W, "H": H, "fps": fps, "n_out": n_out, "T": T,
                 "depth_from": depth_from, "near": lk["near"],
                 "colour": write_side(frames, "c", PREVIEW_SIDE),
-                "depth": write_side(torch.from_numpy(np.repeat(np.asarray(dz, np.float32)[..., None], 3, -1)), "d", PREVIEW_SIDE)}
+                "depth": write_side(torch.from_numpy(np.asarray(dz, np.float32))[..., None].expand(-1, -1, -1, 3), "d", PREVIEW_SIDE)}
         if fld is not None:
-            meta["field"] = write_side(fld[..., None].repeat(1, 1, 1, 3), "f", PREVIEW_SIDE)
+            meta["field"] = write_side(fld[..., None].expand(-1, -1, -1, 3), "f", PREVIEW_SIDE)
         if t3 is not None:
             meta["tracks"] = _save_json({"frames": t3}, "kubakub_pointcloud")
         report = "\n".join([f"{gw * gh:,} points ({gw} x {gh}), {mode}: {n} {'frame(s)' if mode == 'video' else 'picture(s)'} "
