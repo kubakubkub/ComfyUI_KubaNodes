@@ -6,7 +6,8 @@ may have changed since.
 
 ## next (not released yet)
 
-Crop by drawing, compare anything with anything, and track what moves in a video to draw it as a diagram.
+Crop by drawing, compare anything with anything, track what moves in a video to draw it as a diagram, and film a
+picture or a video as a point cloud.
 
 - **kubakub crop** (utils): crop on the picture as in Photoshop, nothing to type. Drag a box, move it, size it
   by its handles (Shift keeps the shape, Alt from the centre); ratio pills (original, the shape of a connected
@@ -37,6 +38,13 @@ Crop by drawing, compare anything with anything, and track what moves in a video
 - **Tracks steer other nodes:** kubakub shader takes `tracks` (its arrow follows the biggest thing, its field glows
   around everything tracked), and the director's new behaviours *follow a tracked thing* / *grow with a tracked
   thing* move a layer with it.
+- **kubakub point cloud** (2d / motion): a picture or a video lifted into up to two million points by the depth of
+  any depth node, filmed with a camera move. It plays live on the node: drag to look around, *start = view* /
+  *end = view* set the move, and colours (true, mono, tint, negative), glow / ink / solid, depth, far cut, point
+  size and the motion (drift, breathe, wind, a scan through the depth) change while it plays. A batch of pictures
+  morphs (every point travels to the point of the next picture with the same brightness); a mask on `field` (the
+  tracker's `near`) pushes points out; the tracker's tracks sit in the cloud at their depth as rings joined by
+  lines. Writes a .ply for Blender, Houdini or TouchDesigner. With nothing connected: a sample facade.
 - **The director crops and compares too.** The crop tool (C) crops an image or video layer on the canvas with the
   same pills; compare (\\) swipes the composition against itself without the selected layer, the base picture, or
   as it was when the window opened.
