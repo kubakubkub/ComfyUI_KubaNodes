@@ -77,12 +77,13 @@ class KUBA_PointCloud(io.ComfyNode):
                          "a camera move. Connect the depth of any depth node (Depth Anything 3 / 2, Marigold ...). On "
                          "the node: drag to look around (Shift-drag moves, the wheel goes nearer), set the move from "
                          "the view, pick a camera (push in, orbit, handheld ...) or record your own; the look (colours, "
-                         "glow / ink / solid, depth, point size, drift, breathe, wind, curl, trails, a scan through the "
-                         "depth, arrows you draw that push the points) changes live while it plays. A batch of pictures "
+                         "glow / ink / solid, depth, fine points, a flow that streams parts of the cloud along smooth "
+                         "swirls: everywhere, in a mask, near tracked things or along arrows you draw; trails, breathe, "
+                         "wind, curl, a scan through the depth) changes live while it plays. A batch of pictures "
                          "morphs: every point travels to the point of the next picture with the same brightness. "
                          "'field' (a mask, e.g. the tracker's 'near') pushes points out; the tracker's tracks sit in the "
-                         "cloud at their depth; a sound makes the points burst on the beat, swell with the bass and "
-                         "move more when it is loud. Nothing connected: a sample facade."),
+                         "cloud at their depth; a sound makes the flowing parts burst on the beat, the cloud swell with "
+                         "the bass. Nothing connected: a sample facade."),
             is_output_node=True,                       # runs on its own, to see the cloud on the node
             inputs=[
                 io.MultiType.Input("image", types=[io.Image, io.Video], optional=True,
@@ -95,10 +96,12 @@ class KUBA_PointCloud(io.ComfyNode):
                 io.Mask.Input("field", optional=True,
                               tooltip="Pushes the points out where it is white, frame by frame: the tracker's 'near' "
                                       "(the points burst around what moves), kubakub mask animate, a shader's mask. "
-                                      "How far: 'push' on the node."),
+                                      "How far: 'push' on the node. With 'where' = field the flow and the beat act "
+                                      "only there."),
                 TracksType.Input("tracks", optional=True,
                                  tooltip="From kubakub tracker on the same video: each tracked thing gets a ring at its "
-                                         "place in the cloud, joined by lines (network, tree, within a distance)."),
+                                         "place in the cloud, joined by lines (network, tree, within a distance). "
+                                         "With 'where' = tracked the flow and the beat act only near them."),
                 io.Audio.Input("audio", optional=True,
                                tooltip="A sound the cloud follows: the points burst out on the beat, swell with the "
                                        "bass, move more when it is loud (how much: 'sound' on the node). It plays with "
@@ -230,16 +233,18 @@ class KUBA_PointCloud(io.ComfyNode):
                     cb, db, perm = (*pic(k + 1), perms[k]) if s > 0 else (None, None, None)
                 ff = fld_one if fld_one is not None else fld[min(f, len(fld) - 1)].to(dev)[None] if fld is not None else None
                 snd = {k: v[f] for k, v in per_frame.items()} if per_frame else None
-                fr = dict(col_a=ca, dep_a=da, aspect=aspect, col_b=cb, dep_b=db, perm=perm, s=s, field=ff, device=dev, snd=snd)
-                P, c, dist, alive = pc.points(lk, t, **fr)
+                tf = None if t3 is None else f % len(t3) if mode == "pictures" else min(f % n, len(t3) - 1)
+                trk = [p[1:3] for p in t3[tf]] if tf is not None and t3[tf] else None
+                fr = dict(col_a=ca, dep_a=da, aspect=aspect, col_b=cb, dep_b=db, perm=perm, s=s, field=ff, device=dev, snd=snd,
+                          tracked=trk)
+                P, c, dist, alive, fade = pc.points(lk, t, **fr)
                 if f == 0 and save_ply:
                     ply = pc.write_ply(ply_path(), P[alive], c[alive])
                 cam = pc.basis(pc.camera_at(lk, a, t), lk["depth"])
                 lines = pc.trail_lines(lk, t, fr, cam, Wo, Ho) if lk["trails"] > 0 else None
                 size = lk["size"] * (1 + lk["sound"]["size"] * snd["level"]) if snd else None
-                im, al = pc.splat(P, c, dist, alive, lk, cam, Wo, Ho, gh, lines, size)
+                im, al = pc.splat(P, c, dist, alive, lk, cam, Wo, Ho, gh, lines, size, fade)
                 if t3 is not None:
-                    tf = f % len(t3) if mode == "pictures" else min(f % n, len(t3) - 1)
                     im = pc.draw_tracks(im, t3[tf], lk, cam, aspect)
                 out[f].copy_(im)
                 alpha[f].copy_(al)

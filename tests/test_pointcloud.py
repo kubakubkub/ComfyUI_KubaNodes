@@ -52,7 +52,7 @@ try:
     check("empty look = the defaults", lk == pc.DEFAULT_LOOK)
     lk = pc.look({"density": 99999, "depth": -3, "colour": "rainbow", "blend": "ink", "tint": ["#000000", "nope"],
                   "camera": {"end": {"yaw": 500}, "ease": "linear"}, "tracks": {"lines": "tree", "colour": "#12ab34"}})
-    check("look: numbers clamped, wrong words ignored", lk["density"] == 2048 and lk["depth"] == 0 and lk["colour"] == "true"
+    check("look: numbers clamped, wrong words ignored", lk["density"] == 3072 and lk["depth"] == 0 and lk["colour"] == "true"
           and lk["blend"] == "ink" and lk["tint"] == ["#000000", pc.DEFAULT_LOOK["tint"][1]])
     check("look: camera and tracks", lk["camera"]["end"]["yaw"] == 180 and lk["camera"]["ease"] == "linear"
           and lk["camera"]["end"]["dolly"] == pc.DEFAULT_LOOK["camera"]["end"]["dolly"] and lk["tracks"]["lines"] == "tree"
@@ -67,8 +67,9 @@ try:
     W, H = 128, 72
     col = torch.rand(3, H, W)
     flat = torch.full((1, H, W), 1.0)
-    lk = pc.look({"density": 128, "jitter": 0, "drift": 0})
-    P, c, dist, alive = pc.points(lk, 0.0, col, flat, W / H)
+    STILL = {"density": 128, "jitter": 0, "drift": 0, "flow": 0}
+    lk = pc.look(STILL)
+    P, c, dist, alive, _f = pc.points(lk, 0.0, col, flat, W / H)
     check("a near (d = 1) picture sits at distance 1, the picture's own size", torch.allclose(dist, torch.ones_like(dist))
           and torch.allclose(P[:, 2], -torch.ones_like(dist)) and float(P[:, 0].abs().max()) <= W / H / 2 + 1e-5)
     cam0 = pc.basis(pc.camera_at(lk, 0.0), lk["depth"])
@@ -76,12 +77,12 @@ try:
     u, v = pc.grid_uv(torch.arange(len(P)), 128, 72, 0.0)
     check("from the start view every point lands on its own pixel", torch.allclose(sx, u * W, atol=1e-3) and torch.allclose(sy, v * H, atol=1e-3))
     far = torch.zeros((1, H, W))
-    lk2 = pc.look({"density": 128, "jitter": 0, "drift": 0, "depth": 1.0})
-    P2, _c, dist2, _a = pc.points(lk2, 0.0, col, far, W / H)
+    lk2 = pc.look(dict(STILL, depth=1.0))
+    P2, _c, dist2, _a, _f = pc.points(lk2, 0.0, col, far, W / H)
     sx2, sy2, z2 = pc.project(P2, cam0, W, H)
     check("a far point is farther but lands on the same pixel", torch.allclose(dist2, torch.full_like(dist2, 3.0))
           and torch.allclose(sx2, sx, atol=1e-3) and torch.allclose(z2, torch.full_like(z2, 3.0), atol=1e-5))
-    _P, _c, _d, alive = pc.points(pc.look({"density": 128, "far_cut": 0.5}), 0.0, col, far, W / H)
+    _P, _c, _d, alive, _f = pc.points(pc.look({"density": 128, "far_cut": 0.5}), 0.0, col, far, W / H)
     check("far cut leaves out what is farther", not bool(alive.any()))
     k, s = pc.morph_at(0.5, 6.0, 2)
     k2, s2 = pc.morph_at(2.99, 6.0, 2)
@@ -93,20 +94,24 @@ try:
 
     # --- drawing -----------------------------------------------------------------------------------
     grey = torch.full((3, H, W), 0.5)
-    lk = pc.look({"density": 128, "jitter": 0, "drift": 0, "opacity": 1.0, "size": 1.0})
-    P, c, dist, alive = pc.points(lk, 0.0, grey, flat, W / H)
+    lk = pc.look(dict(STILL, opacity=1.0, size=1.0))
+    P, c, dist, alive, _f = pc.points(lk, 0.0, grey, flat, W / H)
     gw, gh = pc.grid_size(128, W, H)
     im, al = pc.splat(P, c, dist, alive, lk, cam0, W, H, gh)
     check("glow from the start view: one point per pixel = the picture", torch.allclose(im, torch.full_like(im, 0.5), atol=1e-3)
           and float(al.min()) > 0.99, f"{float(im.min())} {float(im.max())}")
-    im_ink, _ = pc.splat(P, c, dist, alive, pc.look({"density": 128, "blend": "ink", "opacity": 1.0}), cam0, W, H, gh)
+    im_ink, _ = pc.splat(P, c, dist, alive, pc.look({"density": 128, "blend": "ink", "opacity": 1.0, "size": 1.0}), cam0, W, H, gh)
     check("ink: the colour multiplied onto white", torch.allclose(im_ink, torch.full_like(im_ink, 0.5), atol=1e-3))
-    lk_s = pc.look({"density": 128, "blend": "solid", "size": 4})
+    lk_s = pc.look({"density": 128, "blend": "solid", "size": 4, "flow": 0})
     im_s, al_s = pc.splat(P, c, dist, alive, lk_s, cam0, W, H, gh)
     check("solid: big round points cover the picture", float(al_s.mean()) > 0.99 and torch.allclose(im_s[al_s > 0], torch.tensor(0.5), atol=1e-3))
     turned = pc.basis({"yaw": 40, "pitch": 0, "dolly": 0, "x": 0, "y": 0}, 1.0)
     im_t, al_t = pc.splat(P, c, dist, alive, lk, turned, W, H, gh)
     check("turned 40 degrees: the picture is seen at an angle (part of the view empty)", 0.2 < float(al_t.mean()) < 0.95, str(float(al_t.mean())))
+    one = pc.splat(torch.tensor([[(10.75 / W - 0.5) * W / H, 0.5 - 20.5 / H, -1.0]]), torch.ones(1, 3), torch.ones(1), torch.ones(1, dtype=torch.bool),
+                   pc.look({"density": 128, "size": 0.5, "opacity": 4.0}), cam0, W, H, gh)[0][..., 0]
+    check("a point smaller than a pixel shares its light with the pixels around it (no grain)", abs(float(one[20, 10]) - 0.75) < 0.02
+          and abs(float(one[20, 11]) - 0.25) < 0.02 and float(one.sum()) < 1.01, str(one[19:22, 9:13]))
 
     # --- the node ------------------------------------------------------------------------------------
     out = run()
@@ -149,22 +154,58 @@ try:
           and all(0 <= p[3] <= 1 for p in t3["frames"][5]))
     red = (images[..., 0] > 0.6) & (images[..., 1] < 0.35) & (images[..., 2] < 0.35)
     check("the tracked things are drawn (rings and lines in their colour)", int(red[0].sum()) > 20, str(int(red[0].sum())))
+    lk = dict(lk, flow=0)
     lk_off = dict(lk, push=0.0)
     out2 = run(image=clip, depth=depth, field=field, tracks=tracks, batch="video", look=json.dumps(lk_off), fps=25.0)
     check("the field pushes points out (push 0 = not)", float((out2.args[0] - images).abs().mean()) > 0.002 if hasattr(out2, "args")
           else float((out2.result[0] - images).abs().mean()) > 0.002)
 
     # --- forces, curl, trails, sound -------------------------------------------------------------------
-    lk = pc.look({"density": 128, "jitter": 0, "drift": 0, "forces": [[0.2, 0.5, 0.8, 0.5]], "reach": 0.1})
-    P0, *_ = pc.points(pc.look({"density": 128, "jitter": 0, "drift": 0}), 0.0, col, flat, W / H)
-    P1, *_ = pc.points(lk, 0.0, col, flat, W / H)
+    lk = pc.look(dict(STILL, forces=[[0.2, 0.5, 0.8, 0.5]], reach=0.1, flowing=1.0))
+    P0, *_ = pc.points(pc.look(STILL), 0.0, col, flat, W / H)
+    P1, *_ = pc.points(lk, 1.0, col, flat, W / H)
     dx = (P1 - P0)[:, 0].reshape(72, 128)
-    check("a drawn arrow pushes the points along it, only near it", float(dx[36, 64]) > 0.1 and float(dx[5, 64].abs()) < 1e-6
-          and float((P1 - P0)[:, 1].abs().max()) < 1e-6)
-    Pc, *_ = pc.points(pc.look({"density": 128, "drift": 0, "curl": 1.0}), 1.0, col, flat, W / H)
-    Pc2, *_ = pc.points(pc.look({"density": 128, "drift": 0, "curl": 1.0}), 1.5, col, flat, W / H)
-    check("curl moves the points on loops", 0.001 < float((Pc - Pc2).norm(dim=-1).mean()) < 0.05)
-    lk_t = pc.look({"density": 128, "curl": 1.0, "trails": 1.0, "trail_share": 0.25})
+    check("a drawn arrow is a current: the points near it flow along it, the far ones hold", float(dx[36, 30:90].mean()) > 0.01
+          and float(dx[5].abs().max()) < 1e-6 and float((P1 - P0)[:, 1].reshape(72, 128)[5].abs().max()) < 1e-6)
+    Pc, *_ = pc.points(pc.look(dict(STILL, curl=1.0)), 1.0, col, flat, W / H)
+    Pc2, *_ = pc.points(pc.look(dict(STILL, curl=1.0)), 1.5, col, flat, W / H)
+    check("curl sways the cloud on loops", 0.001 < float((Pc - Pc2).norm(dim=-1).mean()) < 0.05)
+
+    # --- the flow: born at its place, flows smoothly, fades, is born again; where it acts -----------------------
+    FL = {"density": 128, "jitter": 0, "drift": 0, "flow": 1.0, "flowing": 1.0, "life": 2.0, "speed": 1.0}
+    lkf = pc.look(FL)
+    g = pc.grid(128, 72, 0.0, "cpu")
+    t_b = float((1.0 - g["r4"][0]) * 2.0)           # point 0 is born again at t_b (its age is 0)
+    Pb, _c, _d, _a, fb = pc.points(lkf, t_b + 1e-4, col, flat, W / H)
+    check("a flowing point is born at its own place, unseen", float((Pb[0] - P0[0]).norm()) < 1e-3 and float(fb[0]) < 0.05)
+    steps = [pc.points(lkf, 0.7 + k / 24, col, flat, W / H) for k in range(3)]
+    v1, v2 = steps[1][0] - steps[0][0], steps[2][0] - steps[1][0]
+    cont = steps[0][3] & steps[1][3] & steps[2][3] & (v1.norm(dim=-1) > 1e-4) & (v1.norm(dim=-1) < 0.05) & (v2.norm(dim=-1) < 0.05)
+    turn = torch.nn.functional.cosine_similarity(v1[cont], v2[cont], dim=-1)
+    check("the flow is smooth: from frame to frame a point keeps its way (no jitter)", float(turn.median()) > 0.98
+          and float(cont.float().mean()) > 0.8, f"{float(turn.median())} {float(cont.float().mean())}")
+    nb = torch.cdist(P0[:300, :2], P0[:, :2]).topk(2, largest=False).indices[:, 1]
+    both = (v1[:300].norm(dim=-1) > 1e-4) & (v1[nb].norm(dim=-1) > 1e-4)
+    same = torch.nn.functional.cosine_similarity(v1[:300][both], v1[nb][both], dim=-1)
+    check("neighbours flow the same way (a liquid, not noise)", float(same.median()) > 0.6, str(float(same.median())))
+    _P, _c, _d, ad, _f = pc.points(lkf, 0.7, col, flat, W / H, now=0.7 + 1.0)
+    check("a trail's earlier point of another life is not drawn", 0 < int(ad.sum()) < len(ad))
+    lkh = pc.look(dict(FL, flowing=0.3))
+    Ph, *_ = pc.points(lkh, 1.3, col, flat, W / H)
+    moved = (Ph - P0).norm(dim=-1) > 1e-5
+    check("'of points': only that share flows, the rest holds the form", 0.2 < float(moved.float().mean()) < 0.4, str(float(moved.float().mean())))
+    fld = torch.zeros((1, H, W))
+    fld[:, :, : W // 2] = 1.0
+    Pz, *_ = pc.points(pc.look(dict(FL, where="field")), 1.3, col, flat, W / H, field=fld)
+    mz = ((Pz - P0).norm(dim=-1) > 1e-5).reshape(72, 128)
+    check("where = field: only the white part flows", float(mz[:, :50].float().mean()) > 0.5 and float(mz[:, 80:].float().mean()) < 0.02)
+    lkt = pc.look(dict(FL, where="tracked", reach=0.15))
+    Pt, *_ = pc.points(lkt, 1.3, col, flat, W / H, tracked=[[0.25, 0.5]])
+    mt = ((Pt - P0).norm(dim=-1) > 1e-5).reshape(72, 128)
+    Pn, *_ = pc.points(lkt, 1.3, col, flat, W / H)
+    check("where = tracked: only near the tracked things (none = nothing flows)", float(mt[30:42, 26:38].float().mean()) > 0.5
+          and not bool(mt[:, 100:].any()) and float((Pn - P0).norm(dim=-1).max()) < 1e-6)
+    lk_t = pc.look({"density": 128, "flow": 1.0, "flowing": 1.0, "trails": 1.0, "trail_share": 0.25})
     fr = dict(col_a=grey, dep_a=flat, aspect=W / H)
     lines = pc.trail_lines(lk_t, 2.0, fr, cam0, W, H)
     check("trails: fine lines from a share of the points", lines is not None and sum(len(c[0]) for c in lines) > 2000
@@ -178,11 +219,16 @@ try:
     lp = pc.look({"camera": {"path": long_path}})["camera"]["path"]
     check("a long recorded move is thinned to 600 keys, its end kept", len(lp) == 600 and lp[-1] == long_path[-1] and lp[0] == long_path[0])
     beat = {"level": 1.0, "low": 1.0, "mid": 0.0, "high": 1.0, "beat": 1.0}
-    lk_s = pc.look({"density": 128, "drift": 0, "sound": {"sparkle": 1.0}})
+    lk_s = pc.look({"density": 128, "drift": 0, "flow": 0, "sound": {"sparkle": 1.0}})
     Ps, cs, *_ = pc.points(lk_s, 0.0, grey, flat, W / H, snd=beat)
     Pq, cq, *_ = pc.points(lk_s, 0.0, grey, flat, W / H)
     check("sound: the beat bursts, the bass swells, the highs sparkle", float((Ps - Pq).norm(dim=-1).mean()) > 0.01
           and float(cs.mean()) > float(cq.mean()))
+    lk_b = pc.look({"density": 128, "drift": 0, "flow": 0, "where": "field", "sound": {"swell": 0}})
+    Pb1, *_ = pc.points(lk_b, 0.0, grey, flat, W / H, snd=beat, field=fld)
+    Pb0, *_ = pc.points(lk_b, 0.0, grey, flat, W / H, field=fld)
+    hit = ((Pb1 - Pb0).norm(dim=-1) > 1e-5).reshape(72, 128)
+    check("the beat hits only where the forces act (where = field)", float(hit[:, :50].float().mean()) > 0.9 and not bool(hit[:, 80:].any()))
     clip_s = torch.from_numpy(__import__("kubapack.kubakub.sound", fromlist=["x"]).sample_sound(3.0, 120, 22050))[None, None]
     out = run(audio={"waveform": clip_s, "sample_rate": 22050}, seconds=0.0)
     images, alpha, fps, ply, report, audio_out = out.args if hasattr(out, "args") else out.result
@@ -215,6 +261,8 @@ try:
                "out.cam = [0, 0.25, 0.5, 1].map(a => M.cameraAt(camera, a));\n"
                "out.shaky = [0, 0.2, 0.4, 0.7, 1].map(a => M.cameraAt(shaky, a, a * 7.3));\n"
                "out.stride = [1, 0.5, 0.4, 0.1, 0.03, 0.01].map(M.trailStride);\n"
+               "out.tp = [1, 3, 10, 33].map(s => idx.slice(0, 40).map(b => M.trailPoint(b % 90000, s, 3000000)));\n"
+               "out.flow = [M.WAVES, M.FLOW_STEPS, M.FINE, M.MAX_TRACKED, M.WHERE];\n"
                "out.proj = cams.map(c => { const B = M.basis(c, 1.3); return pts.map(p => M.project(M.trackWorld(p, 16 / 9, 1.3), B, 1920, 1080)); });\n"
                "out.edges = ['within', 'off'].map(l => M.trackEdges(pts, { lines: l, distance: 0.3 }, 16 / 9, null, null));\n"
                "console.log(JSON.stringify(out));\n")
@@ -238,7 +286,11 @@ try:
             lks = pc.look({"camera": shaky})
             check("recorded path + handheld shake", len(lks["camera"]["path"]) == 3 and all(
                 abs(js["shaky"][n][k] - pc.camera_at(lks, a, a * 7.3)[k]) < 1e-9 for n, a in enumerate([0, 0.2, 0.4, 0.7, 1]) for k in pc._CAM_RANGES))
-            check("trail points", js["stride"] == [int(pc.trail_index(pc.look({"trail_share": s}), 1000)[1]) if s < 1 else 1
+            check("trail points: one by a hash in every block", js["tp"] == [[int(pc.trail_points(3000000, st)[b % 90000]) for b in idx[:40]]
+                                                                             for st in [1, 3, 10, 33]])
+            check("the flow's numbers (waves, steps, fine, tracked, where)", js["flow"] == [[list(w) for w in pc.WAVES], pc.FLOW_STEPS, pc.FINE,
+                                                                                         pc.MAX_TRACKED, list(pc.WHERE)])
+            check("trail strides", js["stride"] == [pc.trail_stride(pc.look({"trail_share": s}))
                                                      for s in [1, 0.5, 0.4, 0.1, 0.03, 0.01]])
             ok = True
             for cam, row in zip(cams, js["proj"]):

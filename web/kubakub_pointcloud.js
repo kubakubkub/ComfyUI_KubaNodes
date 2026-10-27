@@ -6,7 +6,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { LAV, ORANGE, PALETTE, delaunayEdges, esc, frameURL, hideWidget, mstEdges, renderWithSavers, stop, tidyRows, viewURL } from "./kubakub_track.js";
-import { CAM_KEYS, basis, cameraAt, gridSize, gridUV, morphAt, project, rankPerm, trackEdges, trackWorld, trailStride, LUMA, TRAIL_STEPS } from "./kubakub_pointcloud_math.js";
+import { CAM_KEYS, basis, cameraAt, gridSize, gridUV, morphAt, project, rankPerm, trackEdges, trackWorld, trailStride, FLOW_STEPS, FINE, LUMA, MAX_TRACKED, TRAIL_STEPS, WAVES, WHERE } from "./kubakub_pointcloud_math.js";
 
 const HERE = new URL(".", import.meta.url).href;
 const MAX_POINT = 64, RING = 14;                 // = pointcloud.MAX_POINT, RING
@@ -19,10 +19,12 @@ const COMMON = `#version 300 es
 precision highp float; precision highp int; precision highp usampler2D; precision highp sampler2D;
 uniform sampler2D uColA, uDepA, uColB, uDepB, uField;
 uniform usampler2D uPerm;
-uniform int uGW, uGH, uColour, uHasField, uMorphOn, uFlip, uNForces, uStride;
+uniform int uGW, uGH, uColour, uHasField, uMorphOn, uFlip, uNForces, uStride, uWhere, uNTrk, uBlend;
 uniform float uJitter, uDepth, uFarCut, uSize, uOpacity, uT, uDrift, uBreathe, uWind, uCurl, uPush, uScan, uS, uSwarm, uAspect, uOutAspect, uH, uMaxPoint;
 uniform float uForce, uReach, uLevel, uLow, uHigh, uBeat, uSBurst, uSSwell, uSSparkle, uSMotion, uTrail, uTrailOp;
+uniform float uFlow, uSwirl, uLife, uFlowing;
 uniform vec4 uForces[${8}];
+uniform vec2 uTrk[${MAX_TRACKED}];
 uniform vec3 uTintA, uTintB, uCamC, uCamR, uCamU, uCamF;
 out vec3 vCol; out float vA; out float vSize;
 uint pcg(uint v) { uint s = v * 747796405u + 2891336453u; uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u; return (w >> 22u) ^ w; }
@@ -33,7 +35,33 @@ float depthAt(sampler2D t, vec2 uv) { float d = texture(t, uv).r; return uFlip =
 float distOf(float d) { return 1.0 + uDepth * 2.0 * (1.0 - d); }
 vec3 placeAt(vec2 uv, float d) { float di = distOf(d); return vec3((uv.x - 0.5) * uAspect * di, (0.5 - uv.y) * di, -di); }
 vec3 dirOf(uint i) { vec3 q = vec3(rnd(i, 5u) - 0.5, rnd(i, 6u) - 0.5, rnd(i, 7u) - 0.5); return q / (length(q) + 1e-6); }
-bool cloudPoint(uint i, float tt, out vec3 P, out vec3 c, out float dist) {
+// = pointcloud.swirl: the curl of a stream function of a few waves (picture heights a second, y down; vz near)
+vec2 swirl(vec2 q, float t, float sp, out float vz) {
+  float K = 6.2831853 / uSwirl; vec2 v = vec2(0.0); vz = 0.0;
+  ${WAVES.map(([ang, f, a, w]) => `{ float g = (${Math.cos(ang).toFixed(9)} * q.x + ${Math.sin(ang).toFixed(9)} * q.y) * (${f.toFixed(4)} * K) + ${w.toFixed(4)} * t + ${(3.7 * ang).toFixed(6)};
+    float cs = cos(g) * ${(a * f / WAVES.reduce((s, x) => s + x[2] * x[1], 0)).toFixed(9)}; v += vec2(cs * ${Math.sin(ang).toFixed(9)}, -cs * ${Math.cos(ang).toFixed(9)}); vz += sin(g) * ${(a / WAVES.reduce((s, x) => s + x[2], 0)).toFixed(9)}; }`).join("\n  ")}
+  vz *= sp * 0.5; return v * sp;
+}
+// = pointcloud._arrows: how near the nearest arrow is, and the current along them
+float arrowsAt(vec2 q, out vec2 cur) {
+  float wm = 0.0; cur = vec2(0.0);
+  for (int n = 0; n < ${8}; n++) { if (n >= uNForces) break;
+    vec4 F = uForces[n]; vec2 a = vec2(F.x * uAspect, F.y), ab = vec2(F.z * uAspect, F.w) - a;
+    float k = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0), w = clamp(1.0 - length(q - (a + k * ab)) / uReach, 0.0, 1.0);
+    w = w * w * (3.0 - 2.0 * w); cur += w * ab / max(length(ab), 1e-9) * (uForce * 0.12); wm = max(wm, w); }
+  return wm;
+}
+// = pointcloud.zone: where the flow and the beat act
+float zoneAt(vec2 q) {
+  if (uWhere == 1) return uHasField == 1 ? clamp(texture(uField, vec2(q.x / uAspect, q.y)).r, 0.0, 1.0) : 0.0;
+  if (uWhere == 3) { vec2 cur; return arrowsAt(q, cur); }
+  if (uWhere == 2) { float w = 0.0;
+    for (int n = 0; n < ${MAX_TRACKED}; n++) { if (n >= uNTrk) break;
+      float e = clamp(1.0 - length(q - vec2(uTrk[n].x * uAspect, uTrk[n].y)) / uReach, 0.0, 1.0); w = max(w, e * e * (3.0 - 2.0 * e)); }
+    return w; }
+  return 1.0;
+}
+bool cloudPoint(uint i, float tt, out vec3 P, out vec3 c, out float dist, out float fade) {
   vec2 uv = gridUV(i);
   c = texture(uColA, uv).rgb; float d = depthAt(uDepA, uv);
   dist = distOf(d); P = placeAt(uv, d);
@@ -42,43 +70,58 @@ bool cloudPoint(uint i, float tt, out vec3 P, out vec3 c, out float dist) {
     vec2 uv2 = gridUV(j); vec3 c2 = texture(uColB, uv2).rgb; float d2 = depthAt(uDepB, uv2);
     float dist2 = distOf(d2); vec3 P2 = placeAt(uv2, d2);
     P = P + (P2 - P) * uS; c = c + (c2 - c) * uS; d = d + (d2 - d) * uS; dist = dist + (dist2 - dist) * uS;
-    P += dirOf(i) * (uSwarm * sin(3.14159265 * uS) * 0.25 * dist);
+    P += dirOf(i) * (uSwarm * sin(3.14159265 * uS) * 0.1 * dist);
   }
   float r2 = rnd(i, 2u), r3 = rnd(i, 3u), r4 = rnd(i, 4u), tau = 6.2831853, m = 1.0 + uSMotion * uLevel;
-  if (uDrift > 0.0) P += vec3(sin(0.8 * tt + tau * r2), sin(0.7 * tt + tau * r3), sin(0.6 * tt + tau * r4)) * (uDrift * 0.01 * m * dist);
+  float cell = 1.0 / float(uGH);    // = pointcloud.points: each point on its own in point spacings, neighbours together in the height
+  bool alive = true; fade = 1.0;
+  if (uDrift > 0.0) P += vec3(sin(0.8 * tt + tau * r2), sin(0.7 * tt + tau * r3), sin(0.6 * tt + tau * r4)) * (uDrift * 4.0 * cell * m * dist);
   if (uBreathe > 0.0) P *= 1.0 + uBreathe * 0.025 * m * sin(1.6 * tt - d * 6.0);
-  if (uWind > 0.0) { P.x += uWind * 0.03 * m * dist * (sin(1.3 * tt + uv.y * 9.0 + r2 * 3.0) + 0.5 * sin(2.3 * tt + r3 * tau));
-                     P.y += uWind * 0.01 * m * dist * sin(1.7 * tt + uv.x * 7.0 + r4 * tau); }
-  if (uCurl > 0.0) { float ph = tau * (0.5 + 0.5 * sin(5.3 * uv.x + 3.1 * sin(4.1 * uv.y))) + 1.3 * r3, a = uCurl * 0.012 * m * dist, w = 0.9 * tt;
-                     P += vec3(cos(w + ph) + 0.45 * cos(2.7 * w + 1.7 * ph), sin(w + ph) + 0.45 * sin(2.7 * w + 1.7 * ph), 0.5 * sin(0.6 * w + 2.0 * ph)) * a; }
-  if (uForce > 0.0) for (int n = 0; n < ${8}; n++) { if (n >= uNForces) break;
-    vec4 F = uForces[n]; vec2 a = vec2(F.x * uAspect, F.y), ab = vec2(F.z * uAspect, F.w) - a, p = vec2(uv.x * uAspect, uv.y);
-    float k = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0), e = length(p - (a + k * ab)), w = clamp(1.0 - e / uReach, 0.0, 1.0);
-    w = w * w * (3.0 - 2.0 * w) * dist * (uForce * 0.5 * m) * (1.0 + 0.3 * sin(1.1 * tt + tau * r2));
-    P.x += w * ab.x; P.y -= w * ab.y; }
+  if (uWind > 0.0) { P.x += uWind * m * dist * 0.02 * sin(1.3 * tt + uv.y * 9.0 + uv.x * 2.0);
+                     P.y += uWind * m * dist * 0.007 * sin(1.7 * tt + uv.x * 7.0 + uv.y * 3.0); }
+  if (uCurl > 0.0) { float ph = tau * (0.5 + 0.5 * sin(5.3 * uv.x + 3.1 * sin(4.1 * uv.y))), w = 0.9 * tt;
+                     P += vec3(cos(w + ph) + 0.45 * cos(2.7 * w + 1.7 * ph), sin(w + ph) + 0.45 * sin(2.7 * w + 1.7 * ph), 0.5 * sin(0.6 * w + 2.0 * ph)) * (uCurl * 0.008 * m * dist); }
+  bool arrowsOn = uNForces > 0 && uForce > 0.0;
+  if ((uFlow > 0.0 || arrowsOn) && uFlowing > 0.0 && r3 < uFlowing) {   // = pointcloud.flow_path: born at its place, it flows, fades, is born again
+    float cyc = tt / uLife + r4, life = floor(cyc), age = (cyc - life) * uLife, born = tt - age, h = uLife / float(${FLOW_STEPS});
+    vec2 q0 = vec2(uv.x * uAspect, uv.y), q = q0, cur; float z = 0.0;
+    for (int k = 0; k < ${FLOW_STEPS}; k++) { float dt = clamp(age - float(k) * h, 0.0, h); if (dt <= 0.0) break;
+      vec2 mv = vec2(0.0); float mz = 0.0, wa = 0.0;
+      if (arrowsOn) { wa = arrowsAt(q, cur); mv = cur; }
+      if (uFlow > 0.0) { float vz; vec2 v = swirl(q, born + float(k) * h, uFlow * 0.35, vz); float w = uWhere == 3 ? wa : zoneAt(q); mv += v * w; mz = vz * w; }
+      q += mv * dt; z += mz * dt; }
+    float a = age / uLife, w0 = uFlow > 0.0 ? zoneAt(q0) : 0.0;
+    if (arrowsOn) w0 = max(w0, arrowsAt(q0, cur));
+    fade = 1.0 - clamp(w0, 0.0, 1.0) * (1.0 - smoothstep(0.0, 0.08, a) * (1.0 - smoothstep(0.55, 1.0, a)));
+    alive = floor(uT / uLife + r4) == life;           // a trail's earlier point of another life is not drawn
+    P += vec3(q.x - q0.x, q0.y - q.y, z) * dist; }
   if (uHasField == 1 && uPush > 0.0) { float f = texture(uField, uv).r; P += dirOf(i) * (uPush * f * 0.3 * dist * (0.4 + r2)); }
   if (uSSwell > 0.0 && uLow > 0.0) P *= 1.0 + uSSwell * 0.06 * uLow;
-  if (uSBurst > 0.0 && uBeat > 0.0) P += dirOf(i) * (uSBurst * uBeat * 0.08 * dist * (0.4 + r2));
+  if (uSBurst > 0.0 && uBeat > 0.0) { vec2 q = vec2(uv.x * uAspect, uv.y); float b = uSBurst * uBeat * uBeat * uBeat * zoneAt(q), vz;   // = pointcloud.points: where the forces act, pop + a kick along the swirls
+    vec2 v = swirl(q, tt, 0.35, vz); vec3 k3 = vec3(v.x, -v.y, vz); k3 = k3 / (length(k3) + 1e-6) * (0.6 + 0.4 * r2);
+    P += (vec3((uv.x - 0.5) * uAspect, 0.5 - uv.y, 0.5 * d) * 0.06 + k3 * 0.05) * (b * dist); }
   c = clamp(c, 0.0, 1.0);
   float lum = dot(c, vec3(${LUMA.join(", ")}));
   if (uColour == 1) c = vec3(lum); else if (uColour == 2) c = uTintA + (uTintB - uTintA) * lum; else if (uColour == 3) c = 1.0 - c;
   if (uScan > 0.0) { float sc = 1.0 - fract(tt * 0.25); float w = max(0.0, 1.0 - abs(d - sc) / 0.04) * uScan;
                      c = c + (1.0 - c) * min(w * 0.8, 1.0); P += dirOf(i) * (w * 0.02 * dist); }
   if (uSSparkle > 0.0 && uHigh > 0.0) c = c + (1.0 - c) * clamp((fract(r2 + r3) - (1.0 - uSSparkle * uHigh * 0.3)) / 0.02, 0.0, 1.0);
-  return d >= uFarCut;
+  return alive && d >= uFarCut;
 }
 vec4 clipOf(vec3 P, out float z) { vec3 q = P - uCamC; z = dot(q, uCamF);
   return vec4(dot(q, uCamR) / (max(z, 1e-6) * 0.5 * uOutAspect), dot(q, uCamU) / (max(z, 1e-6) * 0.5), clamp(z / 50.0, 0.0, 1.0) * 2.0 - 1.0, 1.0); }
 `;
 const VS = COMMON + `
 void main() {
-  vec3 P, c; float dist, z;
-  bool alive = cloudPoint(uint(gl_VertexID), uT, P, c, dist);
+  vec3 P, c; float dist, z, fade;
+  bool alive = cloudPoint(uint(gl_VertexID), uT, P, c, dist, fade);
   vec4 g = clipOf(P, z); vCol = c;
-  if (!alive || z <= 0.05) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; vA = 0.0; vSize = 0.0; return; }
+  if (!alive || z <= 0.05 || fade <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; vA = 0.0; vSize = 0.0; return; }
   gl_Position = g;
   float px = uSize * (uH / float(uGH)) * dist / z;
-  vA = uOpacity * min(1.0, px * px); vSize = clamp(px, 1.0, uMaxPoint); gl_PointSize = vSize;
+  vA = min(1.0, uOpacity * px * px) * fade;
+  // = pointcloud.splat: a point smaller than FINE pixels is a soft 2 px sprite sharing its light by where it falls
+  if (px < ${FINE} && uBlend != 2) { vSize = -1.0; gl_PointSize = 2.0; } else { vSize = clamp(px, 1.0, uMaxPoint); gl_PointSize = vSize; }
 }`;
 // the trails: TRAIL_STEPS straight pieces per chosen point, its way over the last uTrail (time) - pointcloud.trail_lines.
 // vSize carries 'this end is alive and in front': a piece with one dead end is discarded whole (the value is < 1 all
@@ -86,24 +129,25 @@ void main() {
 const VS_LINES = COMMON + `
 void main() {
   int S = ${TRAIL_STEPS}, e = gl_VertexID % (2 * S), seg = e / 2, k = seg + e % 2;
-  uint i = uint(gl_VertexID / (2 * S)) * uint(uStride);
-  vec3 P, c, P0, c0; float dist, z;
-  cloudPoint(i, uT, P0, c0, dist);
-  bool alive = cloudPoint(i, uT - uTrail * float(k) / float(S), P, c, dist);
+  uint b = uint(gl_VertexID / (2 * S)), i = uStride > 1 ? min(b * uint(uStride) + uint(floor(rnd(b, 3u) * float(uStride))), uint(uGW * uGH - 1)) : b;   // = pointcloud.trail_points
+  vec3 P, c, P0, c0; float dist, z, f0, f;
+  cloudPoint(i, uT, P0, c0, dist, f0);
+  bool alive = cloudPoint(i, uT - uTrail * float(k) / float(S), P, c, dist, f);
   gl_Position = clipOf(P, z); vCol = c0;
   vSize = alive && z > 0.05 ? 1.0 : 0.0;
-  vA = uTrailOp * uOpacity * (1.0 - float(seg) / float(S));
+  vA = uTrailOp * min(uOpacity, 1.0) * (1.0 - float(seg) / float(S)) * f0;
 }`;
 const FS = `#version 300 es
-precision highp float;
+precision highp float; precision highp int;
 in vec3 vCol; in float vA; in float vSize; uniform int uBlend; out vec4 o;
 void main() {
   float a = vA;
-  if (vSize >= 2.5) { float r = length(gl_PointCoord - 0.5) * 2.0; if (r > 1.0) discard; a *= 1.0 - smoothstep(0.6, 1.0, r); }
+  if (vSize < 0.0) { vec2 q = abs(gl_PointCoord - 0.5) * 2.0; a *= max(0.0, 1.0 - q.x) * max(0.0, 1.0 - q.y); }
+  else if (vSize >= 2.5) { float r = length(gl_PointCoord - 0.5) * 2.0; if (r > 1.0) discard; a *= 1.0 - smoothstep(0.6, 1.0, r); }
   if (uBlend == 0) o = vec4(vCol * a, 1.0); else if (uBlend == 1) o = vec4(1.0 - a * (1.0 - vCol), 1.0); else o = vec4(vCol, 1.0);
 }`;
 const FS_LINES = `#version 300 es
-precision highp float;
+precision highp float; precision highp int;
 in vec3 vCol; in float vA; in float vSize; uniform int uBlend; out vec4 o;
 void main() {
   if (vSize < 0.999) discard;
@@ -220,12 +264,13 @@ class Cloud {
     gl.useProgram(prog.p);
     for (const [name, t] of Object.entries(this.tex)) gl.uniform1i(L[name], t.unit);
     gl.uniform1i(L.uPerm, 5);
-    for (const k of ["uGW", "uGH", "uColour", "uHasField", "uMorphOn", "uFlip", "uNForces", "uStride"]) gl.uniform1i(L[k], u[k] | 0);
+    for (const k of ["uGW", "uGH", "uColour", "uHasField", "uMorphOn", "uFlip", "uNForces", "uStride", "uWhere", "uNTrk"]) gl.uniform1i(L[k], u[k] | 0);
     gl.uniform1i(L.uBlend, u.blend);
     for (const k of ["uJitter", "uDepth", "uFarCut", "uSize", "uOpacity", "uT", "uDrift", "uBreathe", "uWind", "uCurl", "uPush", "uScan", "uS", "uSwarm",
-      "uAspect", "uOutAspect", "uH", "uForce", "uReach", "uLevel", "uLow", "uHigh", "uBeat", "uSBurst", "uSSwell", "uSSparkle", "uSMotion", "uTrail", "uTrailOp"]) gl.uniform1f(L[k], u[k] || 0);
+      "uAspect", "uOutAspect", "uH", "uForce", "uReach", "uLevel", "uLow", "uHigh", "uBeat", "uSBurst", "uSSwell", "uSSparkle", "uSMotion", "uTrail", "uTrailOp", "uFlow", "uSwirl", "uLife", "uFlowing"]) gl.uniform1f(L[k], u[k] || 0);
     gl.uniform1f(L.uMaxPoint, this.maxPoint);
     if (L.uForces) gl.uniform4fv(L.uForces, u.uForces);
+    if (L.uTrk) gl.uniform2fv(L.uTrk, u.uTrk);
     for (const k of ["uTintA", "uTintB", "uCamC", "uCamR", "uCamU", "uCamF"]) gl.uniform3fv(L[k], u[k]);
   }
   draw(u, view) {                                    // u = uniforms, view = [x, y, w, h] of the picture in the canvas
@@ -360,6 +405,9 @@ function cloudUI(node) {
     const flip = m.depth_from === "node" && lk.near !== m.near ? 1 : 0;
     const sn = heard(), so = lk.sound, forces = (lk.forces || []).slice(0, 8), F = new Float32Array(32);
     forces.forEach((f, n) => F.set(f, n * 4));
+    const tf = st.tracks?.frames?.length ? (m.mode === "pictures" ? st.f % st.tracks.frames.length : Math.min(st.f % m.n, st.tracks.frames.length - 1)) : -1;
+    const trk = (tf >= 0 ? st.tracks.frames[tf] || [] : []).slice(0, MAX_TRACKED), TK = new Float32Array(2 * MAX_TRACKED);
+    trk.forEach((p, n) => TK.set([p[1], p[2]], n * 2));
     cloud.draw({ uGW: gw, uGH: gh, uColour: COLOURS.indexOf(lk.colour), uHasField: hasField, uMorphOn: morphOn, uFlip: flip,
       blend: BLENDS.indexOf(lk.blend), uJitter: lk.jitter, uDepth: lk.depth, uFarCut: lk.far_cut,
       uSize: lk.size * (sn ? 1 + so.size * sn.level : 1), uOpacity: lk.opacity,
@@ -367,9 +415,10 @@ function cloudUI(node) {
       uNForces: forces.length, uForces: F, uForce: forces.length ? lk.force : 0, uReach: lk.reach,
       uLevel: sn?.level, uLow: sn?.low, uHigh: sn?.high, uBeat: sn?.beat, uSBurst: so.burst, uSSwell: so.swell, uSSparkle: so.sparkle, uSMotion: so.motion,
       uTrail: lk.trails * lk.speed, uTrailOp: lk.trail_opacity, uStride: trailStride(lk.trail_share),
+      uFlow: lk.flow, uSwirl: lk.swirl, uLife: lk.life, uFlowing: lk.flowing, uWhere: Math.max(0, WHERE.indexOf(lk.where)), uNTrk: trk.length, uTrk: TK,
       uAspect: m.W / m.H, uOutAspect: vw / vh, uH: vh, uTintA: hex01(lk.tint[0]), uTintB: hex01(lk.tint[1]),
       uCamC: B[0], uCamR: B[1], uCamU: B[2], uCamF: B[3] }, st.view);
-    if (st.tracks?.frames?.length) drawTracks(lk, B, m.mode === "pictures" ? st.f % st.tracks.frames.length : Math.min(st.f % m.n, st.tracks.frames.length - 1));
+    if (tf >= 0) drawTracks(lk, B, tf);
     if (st.drawing) drawArrows(lk);
     hint.textContent = st.rec ? "recording: drag (and the wheel) to steer the camera - it records until the end of the clip (record again stops it)"
       : st.drawing ? "draw arrows: drag on the picture from where the points start to where they go (up to 8) · draw arrows again = done"
@@ -528,30 +577,38 @@ function cloudUI(node) {
     h += pills("blend", "blend", BLENDS, lk.blend);
     if (m?.depth_from === "node") h += pills("near", "near is", ["bright", "dark"], lk.near);
     out.push(["look", "look", h]);
-    out.push(["points", "points", range("density", "points", 256, 2048, 64, lk.density, "Points across the long side (2048 = up to 2 million)")
+    out.push(["points", "points", range("density", "points", 256, 3072, 64, lk.density, "Points across the long side (1920 = 2 million, 3072 = 5 million)")
       + range("size", "size", 0.2, 6, 0.05, lk.size, "In grid cells: 1 = they just touch from the picture's view")
-      + range("opacity", "opacity", 0.02, 1, 0.01, lk.opacity) + range("jitter", "jitter", 0, 1, 0.05, lk.jitter, "0 = an exact grid")
+      + range("opacity", "opacity", 0.02, 4, 0.01, lk.opacity, "Above 1 even a point smaller than a pixel shines") + range("jitter", "jitter", 0, 1, 0.05, lk.jitter, "0 = an exact grid")
       + range("depth", "depth", 0, 4, 0.05, lk.depth, "How deep the picture goes") + range("far_cut", "far cut", 0, 1, 0.01, lk.far_cut, "Leaves out what is farther (the sky, the background)")]);
-    let mo = range("speed", "speed", 0, 4, 0.05, lk.speed) + range("drift", "drift", 0, 2, 0.01, lk.drift, "Every point wanders a little")
+    let mo = range("speed", "speed", 0, 4, 0.05, lk.speed) + range("drift", "drift", 0, 2, 0.01, lk.drift, "Every point wanders a little on its own (a shimmer)")
       + range("breathe", "breathe", 0, 2, 0.01, lk.breathe, "The cloud swells along the view, in waves from near to far") + range("wind", "wind", 0, 2, 0.01, lk.wind, "Sideways, the far points more")
-      + range("curl", "curl", 0, 2, 0.01, lk.curl, "Every point runs on small curly loops; with trails they draw fine curly lines")
+      + range("curl", "curl", 0, 2, 0.01, lk.curl, "The cloud sways on big curly loops")
       + range("scan", "scan", 0, 2, 0.01, lk.scan, "A bright layer that goes through the depth, near to far");
     if (m?.field) mo += range("push", "push", 0, 3, 0.01, lk.push, "How far the field pushes the points out");
     if (m?.K > 1) mo += range("swarm", "swarm", 0, 2, 0.01, lk.swarm, "How far the points fly out on their way to the next picture");
+    out.push(["flow", "flow", range("flow", "flow", 0, 3, 0.01, lk.flow, "Flowing points stream along smooth swirls: born at their place, they flow, fade out and are born again (0 = none)")
+      + range("flowing", "of points", 0, 1, 0.01, lk.flowing, "Which share of the points flows; the others hold the form")
+      + range("swirl", "swirl size", 0.05, 2, 0.01, lk.swirl, "How big the swirls are (of the picture's height)")
+      + range("life", "life", 0.3, 12, 0.1, lk.life, "Seconds a flowing point lives before it is born again at its place")
+      + pills("where", "where", WHERE, lk.where)
+      + `<div class="kkp-row kkp-hint">${{ everywhere: "the flow and the beat act everywhere", field: m?.field ? "the flow and the beat act where the field is white" : "connect a field (a mask): the flow and the beat act where it is white",
+        tracked: st.tracks ? "the flow and the beat act near the tracked things (as far as 'reach')" : "connect tracks: the flow and the beat act near the tracked things",
+        arrows: (lk.forces || []).length ? "the flow and the beat act near your arrows (as far as 'reach')" : "draw arrows (forces): the flow and the beat act near them" }[lk.where] || ""}</div>`]);
     out.push(["motion", "motion", mo]);
-    out.push(["trails", "trails", range("trails", "length", 0, 3, 0.05, lk.trails, "Seconds of each point's way drawn behind it as a fine line (0 = none); with curl they curl")
+    out.push(["trails", "trails", range("trails", "length", 0, 3, 0.05, lk.trails, "Seconds of each point's way drawn behind it as a fine line (0 = none); with the flow they are its flow lines")
       + range("trail_share", "of points", 0.01, 1, 0.01, lk.trail_share, "Which share of the points draws a trail (fewer = finer, faster)")
       + range("trail_opacity", "opacity", 0, 1, 0.01, lk.trail_opacity)]);
     const nf = (lk.forces || []).length;
-    out.push(["forces", `forces${nf ? ` (${nf})` : ""}`, `<div class="kkp-row"><span class="k">arrows</span><button data-draw aria-pressed="${st.drawing}" title="Drag on the picture: the points near an arrow are pushed along it, as far as it is long">${st.drawing ? "done" : "draw arrows"}</button>`
+    out.push(["forces", `forces${nf ? ` (${nf})` : ""}`, `<div class="kkp-row"><span class="k">arrows</span><button data-draw aria-pressed="${st.drawing}" title="Drag on the picture: a current the flowing points near it follow">${st.drawing ? "done" : "draw arrows"}</button>`
       + (nf ? `<button data-clear-forces title="Remove every arrow">clear</button><button data-undo-force title="Remove the last arrow">undo</button>` : "") + `</div>`
-      + range("force", "strength", 0, 3, 0.01, lk.force, "How far the arrows push") + range("reach", "reach", 0.02, 1, 0.01, lk.reach, "How far from an arrow it still pushes (the light band around it)")]);
+      + range("force", "strength", 0, 3, 0.01, lk.force, "How strong the arrows' currents are") + range("reach", "reach", 0.02, 1, 0.01, lk.reach, "How far from an arrow (or a tracked thing) it still acts (the light band around it)")]);
     if (m?.sound) {
       const so = lk.sound;
       out.push(["sound", "sound", `<div class="kkp-row"><span class="k">hear it</span><button data-hear aria-pressed="${st.hear}" title="Play the sound with the cloud on the node">${st.hear ? "on" : "off"}</button></div>`
-        + range("sound.burst", "beat → burst", 0, 2, 0.01, so.burst, "On every beat the points jump out")
+        + range("sound.burst", "beat → burst", 0, 2, 0.01, so.burst, "On every beat the points jump out along the swirls, only where the flow acts ('where' under flow)")
         + range("sound.swell", "bass → swell", 0, 2, 0.01, so.swell, "The cloud swells with the low notes")
-        + range("sound.motion", "loud → motion", 0, 2, 0.01, so.motion, "Every motion (drift, wind, curl, arrows) is bigger when it is loud")
+        + range("sound.motion", "loud → motion", 0, 2, 0.01, so.motion, "Drift, breathe, wind and curl are bigger when it is loud")
         + range("sound.size", "loud → size", 0, 2, 0.01, so.size, "The points grow when it is loud")
         + range("sound.sparkle", "highs → sparkle", 0, 1, 0.01, so.sparkle, "The high notes light up a few points")]);
     }

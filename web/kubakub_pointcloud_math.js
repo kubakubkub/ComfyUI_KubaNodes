@@ -57,6 +57,14 @@ export function cameraAt(cam, a, t = 0) {            // cam = look.camera; = poi
 }
 export const trailStride = share => Math.max(1, Math.floor(1 / share + 0.5));   // = pointcloud.trail_stride (half up)
 export const TRAIL_STEPS = 12;
+export function trailPoint(b, stride, n) {           // = pointcloud.trail_points: one point of every block, by a hash
+  return stride <= 1 ? b : Math.min(b * stride + Math.floor(rnd(b, 3) * stride), n - 1);
+}
+// the flow, = pointcloud: steps over a life, the waves of the swirls (angle, frequency, amplitude, tempo), where it acts
+export const FLOW_STEPS = 12, FINE = 1.5, MAX_TRACKED = 32;
+export const WAVES = [[0.3, 1.0, 1.0, 0.31], [1.9, 1.7, 0.6, 0.23], [5.5, 2.3, 0.45, 0.11], [3.4, 2.9, 0.35, 0.17], [4.6, 4.3, 0.2, 0.13],
+  [2.6, 6.1, 0.12, 0.29]];
+export const WHERE = ["everywhere", "field", "tracked", "arrows"];
 export function basis(cam, depth) {                   // = pointcloud.basis -> [position, right, up, forward]
   const R = 1 + depth, ya = cam.yaw * Math.PI / 180, pa = cam.pitch * Math.PI / 180;
   const rot = (x, y, z) => { const y1 = y * Math.cos(pa) - z * Math.sin(pa), z1 = y * Math.sin(pa) + z * Math.cos(pa);

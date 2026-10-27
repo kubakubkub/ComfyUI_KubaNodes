@@ -44,21 +44,33 @@ without running again.
 - **settings ▾** unfolds every part below (each part also opens on its own by its title):
   - **look:** colour (true, mono, tint between two colours you pick, negative); blend: *glow* (light adds up, on
     black, like a projector), *ink* (on white, colours multiply), *solid* (the nearest point wins, no see-through).
-  - **points:** *points* (across the long side; 2048 = up to about 2.3 million), *size* (in grid cells: 1 = they
-    just touch from the picture's view; near points grow), *opacity*, *jitter* (0 = an exact grid), *depth* (how deep
-    the picture goes), *far cut* (leaves out what is farther: the sky, the background).
+  - **points:** *points* (across the long side; 1920 = about 2 million, 3072 = about 5 million), *size* (in grid
+    cells: 1 = they just touch from the picture's view; near points grow), *opacity* (above 1 even a point smaller
+    than a pixel shines), *jitter* (0 = an exact grid), *depth* (how deep the picture goes), *far cut* (leaves out
+    what is farther: the sky, the background). A point smaller than a pixel and a half shares its light with the
+    pixels around it by where it falls, so many fine points read as a smooth fine picture, not as grain.
+  - **flow** (the main motion): a share of the points streams along smooth swirls like a liquid. Each flowing point
+    is born at its place in the picture, flows for its *life*, fades out and is born again at its place, so the form
+    keeps coming back while it dissolves. *flow* (how fast; 0 = none), *of points* (which share flows; the others
+    hold the form), *swirl size*, *life* (seconds), *where*: **everywhere**, **field** (where the `field` mask is
+    white), **tracked** (near the tracked things, as far as *reach*), **arrows** (near your arrows). *where* also
+    decides where the beat hits. The swirls have no sources and no sinks, so the points stream around each other
+    instead of bunching up; with *trails* they draw their flow lines.
   - **motion** (formulas of the time, nothing is simulated, so every frame is the same in the render as on the
-    node): *speed*, *drift* (every point wanders a little), *breathe* (the cloud swells along the view, in waves from
-    near to far), *wind* (sideways, the far points more), *curl* (every point runs on small curly loops, its
-    neighbours with it), *scan* (a bright layer that goes through the depth), *push* (with a field), *swarm*
-    (pictures: how far the points fly out on their way to the next picture).
+    node): *speed* (of everything), *drift* (every point wanders a little on its own: a shimmer; 0 by default),
+    *breathe* (the cloud swells along the view, in waves from near to far), *wind* (sideways, the far points more),
+    *curl* (the cloud sways on big curly loops), *scan* (a bright layer that goes through the depth), *push* (with a
+    field), *swarm* (pictures: how far the points fly out on their way to the next picture).
   - **trails:** each point's own way over the last seconds drawn behind it as a fine line: *length* (seconds),
-    *of points* (which share of the points draws one), *opacity*. With *curl* they are fine curly lines.
-  - **forces:** **draw arrows** on the picture (the view holds on the picture while you draw): the points near an
-    arrow are pushed along it, as far as it is long, with a slow sway. *strength*, *reach* (how far from the arrow it
-    still pushes, the light band around it), **undo**, **clear**; up to 8 arrows.
-  - **sound** (with a sound): *beat → burst*, *bass → swell*, *loud → motion* (drift, wind, curl and the arrows get
-    bigger), *loud → size*, *highs → sparkle* (a few points light up); **hear it** plays the sound with the cloud.
+    *of points* (which share of the points draws one), *opacity*. With the flow they are its flow lines; a point
+    that holds draws none.
+  - **forces:** **draw arrows** on the picture (the view holds on the picture while you draw): each arrow is a
+    current, the flowing points near it stream along it (and with *where* = arrows the swirls act only there).
+    *strength*, *reach* (how far from the arrow it still acts, the light band around it), **undo**, **clear**; up to
+    8 arrows.
+  - **sound** (with a sound): *beat → burst* (the parts where the flow acts pop out and kick along the swirls),
+    *bass → swell*, *loud → motion* (drift, breathe, wind and curl get bigger), *loud → size*, *highs → sparkle* (a
+    few points light up); **hear it** plays the sound with the cloud.
   - **tracked things** (with `tracks`): rings on / off, lines off / within / network / tree, colour, opacity, ring size.
 - **render** renders only the cloud and what saves it after it (Create Video, Save ...); the depth and the tracks are
   not made again.
@@ -66,7 +78,8 @@ without running again.
 ## Speed and size
 
 The render draws every frame on the graphics card: 10 to 40 ms a frame for a million points at 1920 x 1080 (a 12 GB
-card; trails take more), so most of the time goes into the depth node. A video is read once and kept, so a second
+card; the flow and the trails take more: each flowing point takes 12 steps through the swirls, a trail 13 times
+that), so most of the time goes into the depth node. A video is read once and kept, so a second
 render (only the look changed) starts at once. The live view draws the same points with WebGL2 in the browser; 2
 million points play smoothly on a recent graphics card, lower *points* (or *of points* for the trails) on a laptop.
 
