@@ -6,7 +6,8 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { LAV, ORANGE, PALETTE, delaunayEdges, esc, frameURL, hideWidget, mstEdges, renderWithSavers, stop, tidyRows, viewURL } from "./kubakub_track.js";
-import { CAM_KEYS, basis, cameraAt, gridSize, gridUV, morphAt, project, rankPerm, trackEdges, trackWorld, trailStride, FLOW_STEPS, FINE, LUMA, MAX_TRACKED, TRAIL_STEPS, WAVES, WHERE } from "./kubakub_pointcloud_math.js";
+import { CAM_KEYS, basis, cameraAt, curvesOf, forceField, gridSize, gridUV, morphAt, project, rankPerm, regionKinds, trackEdges, trackWorld, trailStride,
+  BANDS, BLINK, ROW, CLOSED, CURL_SCALE, CURL_SPEED, CURVE_KINDS, FLOW_STEPS, FINE, LUMA, MAX_CURVE_PTS, MAX_CURVES, MAX_TRACKED, REGION_KINDS, TRAIL_STEPS, WAVES, WHERE } from "./kubakub_pointcloud_math.js";
 
 const HERE = new URL(".", import.meta.url).href;
 const MAX_POINT = 64, RING = 14;                 // = pointcloud.MAX_POINT, RING
@@ -17,22 +18,25 @@ const EASES = ["smooth", "linear", "still"], LINES = ["off", "within", "network"
 // the shared part of both programs: every point at a time, = pointcloud.points() (keep in step)
 const COMMON = `#version 300 es
 precision highp float; precision highp int; precision highp usampler2D; precision highp sampler2D;
-uniform sampler2D uColA, uDepA, uColB, uDepB, uField;
+uniform sampler2D uColA, uDepA, uColB, uDepB, uField, uForceTex;
 uniform usampler2D uPerm;
-uniform int uGW, uGH, uColour, uHasField, uMorphOn, uFlip, uNForces, uStride, uWhere, uNTrk, uBlend;
+uniform int uGW, uGH, uColour, uHasField, uMorphOn, uFlip, uHasForces, uHasCurl, uStride, uWhere, uNTrk, uBlend;
 uniform float uJitter, uDepth, uFarCut, uSize, uOpacity, uT, uDrift, uBreathe, uWind, uCurl, uPush, uScan, uS, uSwarm, uAspect, uOutAspect, uH, uMaxPoint;
 uniform float uForce, uReach, uLevel, uLow, uHigh, uBeat, uSBurst, uSSwell, uSSparkle, uSMotion, uTrail, uTrailOp;
-uniform float uFlow, uSwirl, uLife, uFlowing;
-uniform vec4 uForces[${8}];
+uniform float uFlow, uSwirl, uLife, uFlowing, uShiver, uDropout, uRows, uSSpec, uSSweep, uSShiver, uSFill;
+uniform float uBands[${BANDS}];
 uniform vec2 uTrk[${MAX_TRACKED}];
 uniform vec3 uTintA, uTintB, uCamC, uCamR, uCamU, uCamF;
 out vec3 vCol; out float vA; out float vSize;
 uint pcg(uint v) { uint s = v * 747796405u + 2891336453u; uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u; return (w >> 22u) ^ w; }
+// = pointcloud.blink: 0..1 of point i in the blink step t
+float blink(uint i, uint t) { return float(pcg(i * 1664525u + t * 1013904223u)) / 4294967295.0; }
 float rnd(uint i, uint k) { return float(pcg(i * 8u + k)) / 4294967295.0; }
 vec2 gridUV(uint i) { uint gw = uint(uGW); float gx = float(i % gw), gy = float(i / gw);
   return vec2((gx + 0.5 + (rnd(i, 0u) - 0.5) * uJitter) / float(uGW), (gy + 0.5 + (rnd(i, 1u) - 0.5) * uJitter) / float(uGH)); }
 float depthAt(sampler2D t, vec2 uv) { float d = texture(t, uv).r; return uFlip == 1 ? 1.0 - d : d; }
 float distOf(float d) { return 1.0 + uDepth * 2.0 * (1.0 - d); }
+vec2 rowAt(vec2 uv) { if (uRows <= 0.0) return uv; float vr = (floor(uv.y * float(uGH) / ${ROW}.0) + 0.5) * ${ROW}.0 / float(uGH); return vec2(uv.x, uv.y + (vr - uv.y) * uRows); }
 vec3 placeAt(vec2 uv, float d) { float di = distOf(d); return vec3((uv.x - 0.5) * uAspect * di, (0.5 - uv.y) * di, -di); }
 vec3 dirOf(uint i) { vec3 q = vec3(rnd(i, 5u) - 0.5, rnd(i, 6u) - 0.5, rnd(i, 7u) - 0.5); return q / (length(q) + 1e-6); }
 // = pointcloud.swirl: the curl of a stream function of a few waves (picture heights a second, y down; vz near)
@@ -42,19 +46,12 @@ vec2 swirl(vec2 q, float t, float sp, out float vz) {
     float cs = cos(g) * ${(a * f / WAVES.reduce((s, x) => s + x[2] * x[1], 0)).toFixed(9)}; v += vec2(cs * ${Math.sin(ang).toFixed(9)}, -cs * ${Math.cos(ang).toFixed(9)}); vz += sin(g) * ${(a / WAVES.reduce((s, x) => s + x[2], 0)).toFixed(9)}; }`).join("\n  ")}
   vz *= sp * 0.5; return v * sp;
 }
-// = pointcloud._arrows: how near the nearest arrow is, and the current along them
-float arrowsAt(vec2 q, out vec2 cur) {
-  float wm = 0.0; cur = vec2(0.0);
-  for (int n = 0; n < ${8}; n++) { if (n >= uNForces) break;
-    vec4 F = uForces[n]; vec2 a = vec2(F.x * uAspect, F.y), ab = vec2(F.z * uAspect, F.w) - a;
-    float k = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0), w = clamp(1.0 - length(q - (a + k * ab)) / uReach, 0.0, 1.0);
-    w = w * w * (3.0 - 2.0 * w); cur += w * ab / max(length(ab), 1e-9) * (uForce * 0.12); wm = max(wm, w); }
-  return wm;
-}
+// = pointcloud.forces_at: the force field of the curves and regions (vx, vy, curl, near), made by forceField()
+vec4 forcesAt(vec2 q) { return texture(uForceTex, vec2(q.x / uAspect, q.y)); }
 // = pointcloud.zone: where the flow and the beat act
 float zoneAt(vec2 q) {
   if (uWhere == 1) return uHasField == 1 ? clamp(texture(uField, vec2(q.x / uAspect, q.y)).r, 0.0, 1.0) : 0.0;
-  if (uWhere == 3) { vec2 cur; return arrowsAt(q, cur); }
+  if (uWhere == 3) return uHasForces == 1 ? clamp(forcesAt(q).a, 0.0, 1.0) : 0.0;
   if (uWhere == 2) { float w = 0.0;
     for (int n = 0; n < ${MAX_TRACKED}; n++) { if (n >= uNTrk) break;
       float e = clamp(1.0 - length(q - vec2(uTrk[n].x * uAspect, uTrk[n].y)) / uReach, 0.0, 1.0); w = max(w, e * e * (3.0 - 2.0 * e)); }
@@ -64,34 +61,41 @@ float zoneAt(vec2 q) {
 bool cloudPoint(uint i, float tt, out vec3 P, out vec3 c, out float dist, out float fade) {
   vec2 uv = gridUV(i);
   c = texture(uColA, uv).rgb; float d = depthAt(uDepA, uv);
-  dist = distOf(d); P = placeAt(uv, d);
+  dist = distOf(d);
+  P = placeAt(rowAt(uv), d);                         // = pointcloud: scan lines
   if (uMorphOn == 1 && uS > 0.0) {
     uint j = texelFetch(uPerm, ivec2(int(i % uint(uGW)), int(i / uint(uGW))), 0).r;
     vec2 uv2 = gridUV(j); vec3 c2 = texture(uColB, uv2).rgb; float d2 = depthAt(uDepB, uv2);
-    float dist2 = distOf(d2); vec3 P2 = placeAt(uv2, d2);
+    float dist2 = distOf(d2); vec3 P2 = placeAt(rowAt(uv2), d2);
     P = P + (P2 - P) * uS; c = c + (c2 - c) * uS; d = d + (d2 - d) * uS; dist = dist + (dist2 - dist) * uS;
     P += dirOf(i) * (uSwarm * sin(3.14159265 * uS) * 0.1 * dist);
   }
   float r2 = rnd(i, 2u), r3 = rnd(i, 3u), r4 = rnd(i, 4u), tau = 6.2831853, m = 1.0 + uSMotion * uLevel;
   float cell = 1.0 / float(uGH);    // = pointcloud.points: each point on its own in point spacings, neighbours together in the height
   bool alive = true; fade = 1.0;
+  vec3 ray = P / max(length(P), 1e-6);              // = pointcloud.points: the line of sight, the fine motion
+  if (uShiver > 0.0) { float fq = 2.0 + 5.0 * r4, sv = 0.6 * sin(tau * (fq * tt + r2)) + 0.4 * sin(tau * (1.7 * fq * tt + r3));
+    P += ray * (uShiver * 2.0 * cell * dist * (1.0 + uSShiver * uHigh) * sv); }
+  if (uDropout > 0.0 && blink(i, uint(int(floor(tt * ${BLINK.toFixed(1)} + r2 * 7.0)))) < uDropout * (1.0 - uSFill * uLevel)) alive = false;
   if (uDrift > 0.0) P += vec3(sin(0.8 * tt + tau * r2), sin(0.7 * tt + tau * r3), sin(0.6 * tt + tau * r4)) * (uDrift * 4.0 * cell * m * dist);
   if (uBreathe > 0.0) P *= 1.0 + uBreathe * 0.025 * m * sin(1.6 * tt - d * 6.0);
   if (uWind > 0.0) { P.x += uWind * m * dist * 0.02 * sin(1.3 * tt + uv.y * 9.0 + uv.x * 2.0);
                      P.y += uWind * m * dist * 0.007 * sin(1.7 * tt + uv.x * 7.0 + uv.y * 3.0); }
   if (uCurl > 0.0) { float ph = tau * (0.5 + 0.5 * sin(5.3 * uv.x + 3.1 * sin(4.1 * uv.y))), w = 0.9 * tt;
                      P += vec3(cos(w + ph) + 0.45 * cos(2.7 * w + 1.7 * ph), sin(w + ph) + 0.45 * sin(2.7 * w + 1.7 * ph), 0.5 * sin(0.6 * w + 2.0 * ph)) * (uCurl * 0.008 * m * dist); }
-  bool arrowsOn = uNForces > 0 && uForce > 0.0;
-  if ((uFlow > 0.0 || arrowsOn) && uFlowing > 0.0 && r3 < uFlowing) {   // = pointcloud.flow_path: born at its place, it flows, fades, is born again
+  bool forcesOn = uHasForces == 1;
+  if ((uFlow > 0.0 || forcesOn) && uFlowing > 0.0 && r3 < uFlowing) {   // = pointcloud.flow_path: born at its place, it flows, fades, is born again
     float cyc = tt / uLife + r4, life = floor(cyc), age = (cyc - life) * uLife, born = tt - age, h = uLife / float(${FLOW_STEPS});
-    vec2 q0 = vec2(uv.x * uAspect, uv.y), q = q0, cur; float z = 0.0;
+    vec2 q0 = vec2(uv.x * uAspect, uv.y), q = q0; float z = 0.0;
     for (int k = 0; k < ${FLOW_STEPS}; k++) { float dt = clamp(age - float(k) * h, 0.0, h); if (dt <= 0.0) break;
-      vec2 mv = vec2(0.0); float mz = 0.0, wa = 0.0;
-      if (arrowsOn) { wa = arrowsAt(q, cur); mv = cur; }
-      if (uFlow > 0.0) { float vz; vec2 v = swirl(q, born + float(k) * h, uFlow * 0.35, vz); float w = uWhere == 3 ? wa : zoneAt(q); mv += v * w; mz = vz * w; }
+      vec2 mv = vec2(0.0); float mz = 0.0, near = 0.0;
+      if (forcesOn) { vec4 F = forcesAt(q); mv = F.rg * uForce; near = F.a;
+        if (uHasCurl == 1) { float cz; vec2 cv = swirl(q * ${CURL_SCALE.toFixed(4)}, born + float(k) * h, ${CURL_SPEED.toFixed(4)} * uForce, cz); mv += F.b * cv; mz = F.b * cz; } }
+      if (uFlow > 0.0) { float vz; vec2 v = swirl(q, born + float(k) * h, uFlow * 0.35, vz); float w = uWhere == 3 ? clamp(near, 0.0, 1.0) : zoneAt(q); mv += v * w; mz += vz * w; }
       q += mv * dt; z += mz * dt; }
-    float a = age / uLife, w0 = uFlow > 0.0 ? zoneAt(q0) : 0.0;
-    if (arrowsOn) w0 = max(w0, arrowsAt(q0, cur));
+    float near0 = forcesOn ? forcesAt(q0).a : 0.0;
+    float a = age / uLife, w0 = uFlow > 0.0 ? (uWhere == 3 ? clamp(near0, 0.0, 1.0) : zoneAt(q0)) : 0.0;
+    if (forcesOn) w0 = max(w0, near0);
     fade = 1.0 - clamp(w0, 0.0, 1.0) * (1.0 - smoothstep(0.0, 0.08, a) * (1.0 - smoothstep(0.55, 1.0, a)));
     alive = floor(uT / uLife + r4) == life;           // a trail's earlier point of another life is not drawn
     P += vec3(q.x - q0.x, q0.y - q.y, z) * dist; }
@@ -100,6 +104,11 @@ bool cloudPoint(uint i, float tt, out vec3 P, out vec3 c, out float dist, out fl
   if (uSBurst > 0.0 && uBeat > 0.0) { vec2 q = vec2(uv.x * uAspect, uv.y); float b = uSBurst * uBeat * uBeat * uBeat * zoneAt(q), vz;   // = pointcloud.points: where the forces act, pop + a kick along the swirls
     vec2 v = swirl(q, tt, 0.35, vz); vec3 k3 = vec3(v.x, -v.y, vz); k3 = k3 / (length(k3) + 1e-6) * (0.6 + 0.4 * r2);
     P += (vec3((uv.x - 0.5) * uAspect, 0.5 - uv.y, 0.5 * d) * 0.06 + k3 * 0.05) * (b * dist); }
+  if (uSSpec > 0.0) { float x = clamp(d, 0.0, 1.0) * float(${BANDS - 1}); int b0 = clamp(int(floor(x)), 0, ${BANDS - 2});
+    float e = uBands[b0] + (uBands[b0 + 1] - uBands[b0]) * (x - float(b0));
+    P -= ray * (uSSpec * e * e * 0.05 * dist); c = c + (1.0 - clamp(c, 0.0, 1.0)) * min(uSSpec * e * e * 0.35, 1.0); }
+  if (uSSweep > 0.0 && uBeat > 0.05) { float w = max(0.0, 1.0 - abs(d - uBeat) / 0.035) * uSSweep;
+    c = c + (1.0 - clamp(c, 0.0, 1.0)) * min(w * 0.7, 1.0); P -= ray * (w * 0.012 * dist); }
   c = clamp(c, 0.0, 1.0);
   float lum = dot(c, vec3(${LUMA.join(", ")}));
   if (uColour == 1) c = vec3(lum); else if (uColour == 2) c = uTintA + (uTintB - uTintA) * lum; else if (uColour == 3) c = 1.0 - c;
@@ -203,6 +212,8 @@ function merged(raw, def) {                           // the look on the widget 
       for (const [k2, v2] of Object.entries(v)) out[k][k2] = v2 && typeof v2 === "object" && !Array.isArray(v2) ? { ...(out[k][k2] || {}), ...v2 } : v2;
     } else out[k] = v;
   }
+  out.curves = curvesOf(out); delete out.forces;       // older looks, read once as pointcloud.look() does
+  if (out.where === "arrows") out.where = "forces";
   return out;
 }
 
@@ -239,6 +250,8 @@ class Cloud {
     this.vao = gl.createVertexArray();
     this.tex = {}; this.uploaded = {};
     for (const [name, unit] of [["uColA", 0], ["uDepA", 1], ["uColB", 2], ["uDepB", 3], ["uField", 4]]) { this.tex[name] = this.texture(); this.tex[name].unit = unit; this.blank(name); }
+    this.forceTex = this.texture(); this.forceKey = null;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(4));
     this.permTex = gl.createTexture(); this.permKey = null;
     gl.bindTexture(gl.TEXTURE_2D, this.permTex); this.nearest();
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32UI, 1, 1, 0, gl.RED_INTEGER, gl.UNSIGNED_INT, new Uint32Array([0]));
@@ -254,6 +267,11 @@ class Cloud {
     gl.bindTexture(gl.TEXTURE_2D, this.tex[name]); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); this.uploaded[name] = key;
   }
+  forces(ff, key) {                                  // the force field (forceField()) as a half float texture
+    if (this.forceKey === key) return; const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.forceTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, ff.fw, ff.fh, 0, gl.RGBA, gl.FLOAT, ff.data); this.forceKey = key;
+  }
   perm(data, gw, gh, key) {
     if (this.permKey === key) return; const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.permTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
@@ -263,13 +281,13 @@ class Cloud {
     const gl = this.gl, L = prog.loc;
     gl.useProgram(prog.p);
     for (const [name, t] of Object.entries(this.tex)) gl.uniform1i(L[name], t.unit);
-    gl.uniform1i(L.uPerm, 5);
-    for (const k of ["uGW", "uGH", "uColour", "uHasField", "uMorphOn", "uFlip", "uNForces", "uStride", "uWhere", "uNTrk"]) gl.uniform1i(L[k], u[k] | 0);
+    gl.uniform1i(L.uPerm, 5); gl.uniform1i(L.uForceTex, 6);
+    for (const k of ["uGW", "uGH", "uColour", "uHasField", "uMorphOn", "uFlip", "uHasForces", "uHasCurl", "uStride", "uWhere", "uNTrk"]) gl.uniform1i(L[k], u[k] | 0);
     gl.uniform1i(L.uBlend, u.blend);
     for (const k of ["uJitter", "uDepth", "uFarCut", "uSize", "uOpacity", "uT", "uDrift", "uBreathe", "uWind", "uCurl", "uPush", "uScan", "uS", "uSwarm",
-      "uAspect", "uOutAspect", "uH", "uForce", "uReach", "uLevel", "uLow", "uHigh", "uBeat", "uSBurst", "uSSwell", "uSSparkle", "uSMotion", "uTrail", "uTrailOp", "uFlow", "uSwirl", "uLife", "uFlowing"]) gl.uniform1f(L[k], u[k] || 0);
+      "uAspect", "uOutAspect", "uH", "uForce", "uReach", "uLevel", "uLow", "uHigh", "uBeat", "uSBurst", "uSSwell", "uSSparkle", "uSMotion", "uTrail", "uTrailOp", "uFlow", "uSwirl", "uLife", "uFlowing", "uShiver", "uDropout", "uRows", "uSSpec", "uSSweep", "uSShiver", "uSFill"]) gl.uniform1f(L[k], u[k] || 0);
+    if (L.uBands) gl.uniform1fv(L.uBands, u.uBands);
     gl.uniform1f(L.uMaxPoint, this.maxPoint);
-    if (L.uForces) gl.uniform4fv(L.uForces, u.uForces);
     if (L.uTrk) gl.uniform2fv(L.uTrk, u.uTrk);
     for (const k of ["uTintA", "uTintB", "uCamC", "uCamR", "uCamU", "uCamF"]) gl.uniform3fv(L[k], u[k]);
   }
@@ -283,6 +301,7 @@ class Cloud {
     gl.bindVertexArray(this.vao);
     for (const t of Object.values(this.tex)) { gl.activeTexture(gl.TEXTURE0 + t.unit); gl.bindTexture(gl.TEXTURE_2D, t); }
     gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, this.permTex);
+    gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, this.forceTex);
     this.uniforms(this.points, u);
     if (u.blend === 0) { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_COLOR); gl.disable(gl.DEPTH_TEST); }
     else if (u.blend === 1) { gl.enable(gl.BLEND); gl.blendFunc(gl.ZERO, gl.SRC_COLOR); gl.disable(gl.DEPTH_TEST); }
@@ -317,6 +336,32 @@ function pointLum(img, gw, gh, jitter) {
   return out;
 }
 
+// the forces' words on the node
+const KIND_LABEL = { off: "off", wind: "wind", attract: "attract", repel: "repel", "curl+": "curl +", "curl-": "curl −" };
+const KIND_TIP = { wind: "the points near it stream along it, the way you drew it", attract: "the points near it are pulled onto it",
+  repel: "the points near it are pushed away from it", "curl+": "the points near it turn round it anticlockwise, with small eddies (a loop: round its middle)",
+  "curl-": "the points near it turn round it clockwise, with small eddies (a loop: round its middle)" };
+const REGION_TIP = { off: "this group does nothing", attract: "the flowing points near these regions stream into them and gather there",
+  repel: "the flowing points leave these regions and keep away", "curl+": "the flowing points turn round each region anticlockwise",
+  "curl-": "the flowing points turn round each region clockwise" };
+// the regions' basis (pointcloud.region_basis, written by the node as one PNG: the groups one under the other, each
+// two cells wide) -> { file, names, default, q: [Uint8Array (fh * fw * 6)] }
+async function regionBasis(R) {
+  try {
+    const im = new Image(); im.crossOrigin = "anonymous"; im.src = viewURL(R.basis); await im.decode();
+    const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight;
+    const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(im, 0, 0);
+    const px = g.getImageData(0, 0, c.width, c.height).data, { fw, fh } = R, q = [];
+    for (let n = 0; n < R.names.length; n++) {
+      const a = new Uint8Array(fw * fh * 6);
+      for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) for (let k = 0; k < 6; k++) {
+        const o = ((n * fh + y) * 2 * fw + x + (k < 3 ? 0 : fw)) * 4 + (k % 3); a[(y * fw + x) * 6 + k] = px[o]; }
+      q.push(a);
+    }
+    return { file: R.basis.filename, names: R.names, default: R.default, q };
+  } catch (e) { console.error("[kubakub pointclouder] regions:", e); return null; }
+}
+
 // ------------------------------------------------------------------------------------------ the node
 function cloudUI(node) {
   style();
@@ -334,8 +379,8 @@ function cloudUI(node) {
   const scrub = el.querySelector("[data-scrub]"), timeEl = el.querySelector(".time"), playBtn = el.querySelector("[data-play]"), allBtn = el.querySelector("[data-all]");
   const ov = cvOv.getContext("2d");
   const W_ = n => node.widgets?.find(w => w.name === n);
-  const st = { meta: null, def: null, f: 0, playing: false, free: null, follow: true, tracks: null, perms: new Map(), lums: new Map(), view: [0, 0, 1, 1],
-    rec: null, drawing: false, arrow: null, audio: null, hear: true };
+  const st = { meta: null, def: null, f: 0, bands: new Float32Array(BANDS), playing: false, free: null, follow: true, tracks: null, perms: new Map(), lums: new Map(), view: [0, 0, 1, 1],
+    rec: null, drawing: false, stroke: null, kind: "wind", reg: null, ff: null, audio: null, hear: true };
   let cloud = null;
   const makeCloud = () => { try { cloud = new Cloud(cvGL); if (cloud.err) { msg.textContent = cloud.err; cloud = null; } }
     catch (e) { console.error("[kubakub pointclouder]", e); msg.textContent = "the live view could not start (WebGL2): " + e.message; cloud = null; } };
@@ -359,7 +404,7 @@ function cloudUI(node) {
   const STILL = { yaw: 0, pitch: 0, dolly: 0, x: 0, y: 0 };
   const camNow = lk => st.free && !st.follow ? st.free : cameraAt(lk.camera, nOut() > 1 ? st.f / (nOut() - 1) : 0, st.f / fps());
   const heard = () => { const s = st.meta?.sound; if (!s) return null; const f = Math.min(st.f, (s.level?.length || 1) - 1);
-    return { level: s.level[f] || 0, low: s.low[f] || 0, high: s.high[f] || 0, beat: s.beat[f] || 0 }; };
+    return { level: s.level[f] || 0, low: s.low[f] || 0, high: s.high[f] || 0, beat: s.beat[f] || 0, bands: s.bands?.[f] || null }; };
   function layout() {
     const d = Math.min(devicePixelRatio || 1, 2), w = Math.max(10, Math.round(stage.clientWidth * d)), h = Math.max(10, Math.round(stage.clientHeight * d));
     for (const c of [cvGL, cvOv]) if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
@@ -403,8 +448,9 @@ function cloudUI(node) {
     if (st.rec && st.playing) st.rec.keys.push([nOut() > 1 ? st.f / (nOut() - 1) : 0, ...CAM_KEYS.map(k2 => round(st.free[k2]))]);
     const cam = st.drawing ? STILL : camNow(lk), B = basis(cam, lk.depth), vw = st.view[2], vh = st.view[3];
     const flip = m.depth_from === "node" && lk.near !== m.near ? 1 : 0;
-    const sn = heard(), so = lk.sound, forces = (lk.forces || []).slice(0, 8), F = new Float32Array(32);
-    forces.forEach((f, n) => F.set(f, n * 4));
+    const sn = heard(), so = lk.sound, ff = lk.force > 0 ? fieldNow(lk) : null;   // strength 0 = no forces (= pointcloud.force_field)
+    st.bands.fill(0); if (sn?.bands) st.bands.set(sn.bands);
+    if (ff) cloud.forces(ff.ff, ff.key);
     const tf = st.tracks?.frames?.length ? (m.mode === "pictures" ? st.f % st.tracks.frames.length : Math.min(st.f % m.n, st.tracks.frames.length - 1)) : -1;
     const trk = (tf >= 0 ? st.tracks.frames[tf] || [] : []).slice(0, MAX_TRACKED), TK = new Float32Array(2 * MAX_TRACKED);
     trk.forEach((p, n) => TK.set([p[1], p[2]], n * 2));
@@ -412,16 +458,18 @@ function cloudUI(node) {
       blend: BLENDS.indexOf(lk.blend), uJitter: lk.jitter, uDepth: lk.depth, uFarCut: lk.far_cut,
       uSize: lk.size * (sn ? 1 + so.size * sn.level : 1), uOpacity: lk.opacity,
       uT: t * lk.speed, uDrift: lk.drift, uBreathe: lk.breathe, uWind: lk.wind, uCurl: lk.curl, uPush: lk.push, uScan: lk.scan, uS: morphOn ? s : 0, uSwarm: lk.swarm,
-      uNForces: forces.length, uForces: F, uForce: forces.length ? lk.force : 0, uReach: lk.reach,
+      uHasForces: ff ? 1 : 0, uHasCurl: ff?.ff.curly ? 1 : 0, uForce: lk.force, uReach: lk.reach,
       uLevel: sn?.level, uLow: sn?.low, uHigh: sn?.high, uBeat: sn?.beat, uSBurst: so.burst, uSSwell: so.swell, uSSparkle: so.sparkle, uSMotion: so.motion,
       uTrail: lk.trails * lk.speed, uTrailOp: lk.trail_opacity, uStride: trailStride(lk.trail_share),
+      uShiver: lk.shiver, uDropout: lk.dropout, uRows: lk.rows,
+      uSSpec: sn ? so.spectrum : 0, uSSweep: sn ? so.sweep : 0, uSShiver: so.shiver, uSFill: so.fill, uBands: st.bands,
       uFlow: lk.flow, uSwirl: lk.swirl, uLife: lk.life, uFlowing: lk.flowing, uWhere: Math.max(0, WHERE.indexOf(lk.where)), uNTrk: trk.length, uTrk: TK,
       uAspect: m.W / m.H, uOutAspect: vw / vh, uH: vh, uTintA: hex01(lk.tint[0]), uTintB: hex01(lk.tint[1]),
       uCamC: B[0], uCamR: B[1], uCamU: B[2], uCamF: B[3] }, st.view);
     if (tf >= 0) drawTracks(lk, B, tf);
-    if (st.drawing) drawArrows(lk);
+    if (st.drawing) drawCurves(lk, ff);
     hint.textContent = st.rec ? "recording: drag (and the wheel) to steer the camera - it records until the end of the clip (record again stops it)"
-      : st.drawing ? "draw arrows: drag on the picture from where the points start to where they go (up to 8) · draw arrows again = done"
+      : st.drawing ? `draw: drag a curve on the picture - ${KIND_TIP[st.kind]} (up to ${MAX_CURVES}; a curve that ends where it began is a loop) · done = back to the move`
       : `${(gw * gh).toLocaleString()} points · ${m.mode === "video" ? `video, ${m.n} frames` : m.K > 1 ? `${m.K} pictures that morph` : "a picture"}`
       + (m.depth_from === "light" ? " · no depth connected: a relief from the brightness" : m.depth_from === "sample" ? " · the sample facade" : "")
       + (lk.camera.path?.length ? " · your recorded move" : "")
@@ -440,17 +488,33 @@ function cloudUI(node) {
     if (tl.marks) { ov.beginPath(); for (const q of xy) if (q) { ov.moveTo(q[0] + RING * tl.size * unit, q[1]); ov.arc(q[0], q[1], RING * tl.size * unit, 0, Math.PI * 2); } ov.stroke(); }
     ov.restore();
   }
-  function drawArrows(lk) {                          // the forces, on the picture's own view (the camera holds there while drawing)
+  // the force field of the curves and regions, made again only when they change (= pointcloud.force_field)
+  function fieldNow(lk) {
+    const m = st.meta, reg = st.reg?.file === m?.regions?.basis?.filename ? st.reg : null;
+    const key = JSON.stringify([lk.curves, regionKinds(lk, reg), lk.reach, m.W / m.H, reg?.file || ""]);
+    if (st.ff?.key !== key) st.ff = { key, ff: forceField(lk, m.W / m.H, reg), shown: null };
+    return st.ff.ff ? st.ff : null;
+  }
+  function drawCurves(lk, ff) {                      // the forces, on the picture's own view (the camera holds there while drawing)
     const [vx, vy, vw, vh] = st.view, d = Math.min(devicePixelRatio || 1, 2);
-    const list = [...(lk.forces || []), ...(st.arrow ? [st.arrow] : [])];
-    const reach = lk.reach * vh;
-    ov.save(); ov.lineCap = "round";
-    for (const f of list) {
-      const x0 = vx + f[0] * vw, y0 = vy + f[1] * vh, x1 = vx + f[2] * vw, y1 = vy + f[3] * vh, ang = Math.atan2(y1 - y0, x1 - x0), hd = 12 * d;
-      ov.strokeStyle = "rgba(241,138,88,.18)"; ov.lineWidth = reach * 2; ov.beginPath(); ov.moveTo(x0, y0); ov.lineTo(x1, y1); ov.stroke();
-      ov.strokeStyle = ORANGE; ov.lineWidth = 2 * d; ov.beginPath(); ov.moveTo(x0, y0); ov.lineTo(x1, y1);
-      ov.moveTo(x1, y1); ov.lineTo(x1 - hd * Math.cos(ang - 0.45), y1 - hd * Math.sin(ang - 0.45));
-      ov.moveTo(x1, y1); ov.lineTo(x1 - hd * Math.cos(ang + 0.45), y1 - hd * Math.sin(ang + 0.45)); ov.stroke();
+    if (ff) {                                          // where they act, lit faintly
+      if (!ff.shown) { const { fw, fh, data } = ff.ff, c = document.createElement("canvas"); c.width = fw; c.height = fh;
+        const g = c.getContext("2d"), im = g.createImageData(fw, fh);
+        for (let o = 0; o < fw * fh; o++) { im.data.set([241, 138, 88, Math.round(Math.min(1, data[o * 4 + 3]) * 70)], o * 4); }
+        g.putImageData(im, 0, 0); ff.shown = c; }
+      ov.drawImage(ff.shown, vx, vy, vw, vh);
+    }
+    const list = [...lk.curves, ...(st.stroke?.length > 1 ? [{ kind: st.kind, pts: st.stroke }] : [])];
+    ov.save(); ov.lineCap = "round"; ov.lineJoin = "round";
+    for (const c of list) {
+      const P = c.pts.map(p => [vx + p[0] * vw, vy + p[1] * vh]), n = P.length;
+      ov.strokeStyle = c.kind === "repel" ? LAV : ORANGE; ov.lineWidth = 2 * d; ov.setLineDash(c.kind.startsWith("curl") ? [6 * d, 4 * d] : []);
+      ov.beginPath(); P.forEach((p, k) => k ? ov.lineTo(...p) : ov.moveTo(...p)); ov.stroke(); ov.setLineDash([]);
+      const [x1, y1] = P[n - 1], [x0, y0] = P[Math.max(0, n - 3)], ang = Math.atan2(y1 - y0, x1 - x0), hd = 12 * d;
+      if (c.kind === "wind") { ov.beginPath(); ov.moveTo(x1, y1); ov.lineTo(x1 - hd * Math.cos(ang - 0.45), y1 - hd * Math.sin(ang - 0.45));
+        ov.moveTo(x1, y1); ov.lineTo(x1 - hd * Math.cos(ang + 0.45), y1 - hd * Math.sin(ang + 0.45)); ov.stroke(); }
+      ov.fillStyle = ov.strokeStyle; ov.font = `${11 * d}px "Hanken Grotesk KKD", sans-serif`;
+      ov.fillText(KIND_LABEL[c.kind], P[0][0] + 6 * d, P[0][1] - 6 * d);
     }
     ov.restore();
   }
@@ -496,29 +560,42 @@ function cloudUI(node) {
     play(false); setPath("camera.path", path);
   }
 
-  // ---- looking around / drawing arrows
+  // ---- looking around / drawing curves
   let drag = null;
   const toPic = e => { const r = cvOv.getBoundingClientRect(), [vx, vy, vw, vh] = st.view;
     return [((e.clientX - r.left) * cvOv.width / r.width - vx) / vw, ((e.clientY - r.top) * cvOv.height / r.height - vy) / vh]; };
   cvOv.addEventListener("pointerdown", e => { if (!st.meta) return; e.preventDefault(); e.stopPropagation(); cvOv.setPointerCapture(e.pointerId);
-    if (st.drawing) { const p = toPic(e); st.arrow = [p[0], p[1], p[0], p[1]]; drag = { arrow: true }; return; }
+    if (st.drawing) { st.stroke = [toPic(e)]; drag = { stroke: true }; return; }
     const lk = getLook(); if (st.follow) { st.free = { ...camNow(lk) }; st.follow = false; buildCam(); }
     drag = { x: e.clientX, y: e.clientY, cam: { ...st.free }, pan: e.shiftKey || e.button === 1 || e.button === 2 }; stage.style.cursor = "grabbing"; });
   cvOv.addEventListener("pointermove", e => { if (!drag) return; e.stopPropagation();
-    if (drag.arrow) { const p = toPic(e); st.arrow[2] = p[0]; st.arrow[3] = p[1]; paint(); return; }
+    if (drag.stroke) { const p = toPic(e), q = st.stroke[st.stroke.length - 1]; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 0.004) { st.stroke.push(p); paint(); } return; }
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y, h = Math.max(50, stage.clientHeight);
     if (drag.pan) { st.free.x = drag.cam.x - dx / h; st.free.y = drag.cam.y + dy / h; }
     else { st.free.yaw = Math.max(-180, Math.min(180, drag.cam.yaw + dx * 0.25)); st.free.pitch = Math.max(-89, Math.min(89, drag.cam.pitch - dy * 0.25)); }
     if (!st.playing) paint(); });
   const end = e => { if (!drag) return;
-    if (drag.arrow) { const a = st.arrow.map(v => round(Math.min(1.5, Math.max(-0.5, v)))); st.arrow = null;   // = pointcloud.look()
-      if (Math.hypot(a[2] - a[0], a[3] - a[1]) > 0.01) setLook(lk => { lk.forces = [...(lk.forces || []), a].slice(-8); }); else paint(); }
+    if (drag.stroke) { const pts = smoothStroke(st.stroke); st.stroke = null;
+      if (pts.length >= 2) setLook(lk => { lk.curves = [...lk.curves, { kind: st.kind, pts }].slice(-MAX_CURVES); }); else paint(); }
     drag = null; stage.style.cursor = ""; try { cvOv.releasePointerCapture(e.pointerId); } catch { /* gone */ } };
   cvOv.addEventListener("pointerup", end); cvOv.addEventListener("pointercancel", end);
   cvOv.addEventListener("contextmenu", e => e.preventDefault());
   cvOv.addEventListener("wheel", e => { if (!st.meta || st.drawing) return; e.preventDefault(); e.stopPropagation();
     const lk = getLook(); if (st.follow) { st.free = { ...camNow(lk) }; st.follow = false; buildCam(); }
     st.free.dolly = Math.max(-3, Math.min(0.95, st.free.dolly - e.deltaY * 0.0008)); if (!st.playing) paint(); }, { passive: false });
+
+  // a drawn stroke -> at most MAX_CURVE_PTS points evenly along it (a loop is closed exactly), = pointcloud.look()
+  function smoothStroke(raw) {
+    const len = [0]; for (let k = 1; k < raw.length; k++) len.push(len[k - 1] + Math.hypot(raw[k][0] - raw[k - 1][0], raw[k][1] - raw[k - 1][1]));
+    const L = len[len.length - 1]; if (L < 0.02) return [];
+    const n = Math.min(MAX_CURVE_PTS, Math.max(2, Math.ceil(L / 0.015) + 1)), out = [];
+    for (let k = 0, j = 0; k < n; k++) { const at = L * k / (n - 1); while (j < len.length - 2 && len[j + 1] < at) j++;
+      const f = (at - len[j]) / Math.max(len[j + 1] - len[j], 1e-9);
+      out.push([0, 1].map(c => round(Math.min(1.5, Math.max(-0.5, raw[j][c] + (raw[j + 1][c] - raw[j][c]) * f))))); }
+    const aspect = st.meta ? st.meta.W / st.meta.H : 1;
+    if (n >= 4 && Math.hypot((out[0][0] - out[n - 1][0]) * aspect, out[0][1] - out[n - 1][1]) < CLOSED * 1.5) out[n - 1] = [...out[0]];
+    return out;
+  }
 
   // ---- the camera: the move, presets, record
   const round = v => Math.round(v * 1000) / 1000;
@@ -587,6 +664,9 @@ function cloudUI(node) {
       + range("scan", "scan", 0, 2, 0.01, lk.scan, "A bright layer that goes through the depth, near to far");
     if (m?.field) mo += range("push", "push", 0, 3, 0.01, lk.push, "How far the field pushes the points out");
     if (m?.K > 1) mo += range("swarm", "swarm", 0, 2, 0.01, lk.swarm, "How far the points fly out on their way to the next picture");
+    out.push(["fine", "fine motion", range("shiver", "shiver", 0, 3, 0.01, lk.shiver, "Every point trembles along its own line of sight, at its own rhythm (a scanner's look; 1 = about two point spacings)")
+      + range("dropout", "dropout", 0, 1, 0.01, lk.dropout, "Which share of the points blinks out now and then, each on its own clock")
+      + range("rows", "scan lines", 0, 1, 0.01, lk.rows, "The points gather into horizontal scan lines")]);
     out.push(["flow", "flow", range("flow", "flow", 0, 3, 0.01, lk.flow, "Flowing points stream along smooth swirls: born at their place, they flow, fade out and are born again (0 = none)")
       + range("flowing", "of points", 0, 1, 0.01, lk.flowing, "Which share of the points flows; the others hold the form")
       + range("swirl", "swirl size", 0.05, 2, 0.01, lk.swirl, "How big the swirls are (of the picture's height)")
@@ -594,18 +674,27 @@ function cloudUI(node) {
       + pills("where", "where", WHERE, lk.where)
       + `<div class="kkp-row kkp-hint">${{ everywhere: "the flow and the beat act everywhere", field: m?.field ? "the flow and the beat act where the field is white" : "connect a field (a mask): the flow and the beat act where it is white",
         tracked: st.tracks ? "the flow and the beat act near the tracked things (as far as 'reach')" : "connect tracks: the flow and the beat act near the tracked things",
-        arrows: (lk.forces || []).length ? "the flow and the beat act near your arrows (as far as 'reach')" : "draw arrows (forces): the flow and the beat act near them" }[lk.where] || ""}</div>`]);
+        forces: st.ff?.ff ? "the flow and the beat act near your curves and regions (as far as 'reach')" : "draw curves or connect regions (forces): the flow and the beat act near them" }[lk.where] || ""}</div>`]);
     out.push(["motion", "motion", mo]);
     out.push(["trails", "trails", range("trails", "length", 0, 3, 0.05, lk.trails, "Seconds of each point's way drawn behind it as a fine line (0 = none); with the flow they are its flow lines")
       + range("trail_share", "of points", 0.01, 1, 0.01, lk.trail_share, "Which share of the points draws a trail (fewer = finer, faster)")
       + range("trail_opacity", "opacity", 0, 1, 0.01, lk.trail_opacity)]);
-    const nf = (lk.forces || []).length;
-    out.push(["forces", `forces${nf ? ` (${nf})` : ""}`, `<div class="kkp-row"><span class="k">arrows</span><button data-draw aria-pressed="${st.drawing}" title="Drag on the picture: a current the flowing points near it follow">${st.drawing ? "done" : "draw arrows"}</button>`
-      + (nf ? `<button data-clear-forces title="Remove every arrow">clear</button><button data-undo-force title="Remove the last arrow">undo</button>` : "") + `</div>`
-      + range("force", "strength", 0, 3, 0.01, lk.force, "How strong the arrows' currents are") + range("reach", "reach", 0.02, 1, 0.01, lk.reach, "How far from an arrow (or a tracked thing) it still acts (the light band around it)")]);
+    const nf = lk.curves.length, R = m?.regions, kinds = R ? regionKinds(lk, st.reg) : {};
+    let fo = `<div class="kkp-row"><span class="k">curves</span><button data-draw aria-pressed="${st.drawing}" title="Drag on the picture with the mouse: a curve the flowing points near it follow (what it does: the pills below)">${st.drawing ? "done" : "draw curves"}</button>`
+      + (nf ? `<button data-undo-force title="Remove the last curve">undo</button><button data-clear-forces title="Remove every curve">clear</button>` : "") + `</div>`
+      + `<div class="kkp-row"><span class="k">a new curve</span>${CURVE_KINDS.map(k => `<button data-kind="${k}" aria-pressed="${st.kind === k}" title="${esc(KIND_TIP[k])}">${KIND_LABEL[k]}</button>`).join("")}</div>`;
+    if (R) fo += R.names.map((g, n) => `<div class="kkp-row"><span class="k" title="${R.counts[n]} region(s)">${esc(g)}</span>${REGION_KINDS.map(k =>
+      `<button data-region="${esc(g)}" data-val="${k}" aria-pressed="${(kinds[g] || "off") === k}" title="${esc(REGION_TIP[k])}">${KIND_LABEL[k]}</button>`).join("")}</div>`).join("");
+    else fo += `<div class="kkp-row kkp-hint">connect regions (a kubakub regions node, or a mask): each group can attract, repel or curl</div>`;
+    fo += range("force", "strength", 0, 3, 0.01, lk.force, "How strong the curves and regions act") + range("reach", "reach", 0.02, 1, 0.01, lk.reach, "How far from a curve, a region (or a tracked thing) it still acts (the light band around it)");
+    out.push(["forces", `forces${nf ? ` (${nf} curve${nf > 1 ? "s" : ""})` : ""}`, fo]);
     if (m?.sound) {
       const so = lk.sound;
       out.push(["sound", "sound", `<div class="kkp-row"><span class="k">hear it</span><button data-hear aria-pressed="${st.hear}" title="Play the sound with the cloud on the node">${st.hear ? "on" : "off"}</button></div>`
+        + range("sound.spectrum", "spectrum → depth", 0, 2, 0.01, so.spectrum, "The depth hears the song: far = the bass ... near = the highs; each slice comes forward and lights up with its band")
+        + range("sound.sweep", "beat → sweep", 0, 2, 0.01, so.sweep, "On every beat a thin bright plane rushes through the depth, near to far")
+        + range("sound.shiver", "highs → shiver", 0, 3, 0.01, so.shiver, "The highs make the points tremble more ('shiver' under fine motion)")
+        + range("sound.fill", "loud → fill", 0, 1, 0.01, so.fill, "When it is loud the blinked out points come back ('dropout' under fine motion)")
         + range("sound.burst", "beat → burst", 0, 2, 0.01, so.burst, "On every beat the points jump out along the swirls, only where the flow acts ('where' under flow)")
         + range("sound.swell", "bass → swell", 0, 2, 0.01, so.swell, "The cloud swells with the low notes")
         + range("sound.motion", "loud → motion", 0, 2, 0.01, so.motion, "Drift, breathe, wind and curl are bigger when it is loud")
@@ -636,8 +725,11 @@ function cloudUI(node) {
     if (b.dataset.set) setPath(b.dataset.set, b.dataset.val);
     else if (b.dataset.tog) setLook(lk => setIn(lk, b.dataset.tog, v => !v));
     else if (b.dataset.draw !== undefined) { st.drawing = !st.drawing; if (st.drawing) { st.rec = null; play(false); } buildPanel(); buildCam(); paint(); }
-    else if (b.dataset.clearForces !== undefined) setLook(lk => { lk.forces = []; });
-    else if (b.dataset.undoForce !== undefined) setLook(lk => { lk.forces = (lk.forces || []).slice(0, -1); });
+    else if (b.dataset.clearForces !== undefined) setLook(lk => { lk.curves = []; });
+    else if (b.dataset.undoForce !== undefined) setLook(lk => { lk.curves = lk.curves.slice(0, -1); });
+    else if (b.dataset.kind) { st.kind = b.dataset.kind; (node.properties ||= {}).kkp_kind = st.kind; if (!st.drawing) { st.drawing = true; st.rec = null; play(false); } buildPanel(); buildCam(); paint(); }
+    else if (b.dataset.region) { const now = regionKinds(getLook(), st.reg);
+      setLook(lk => { lk.regions = Object.fromEntries((st.meta?.regions?.names || []).map(g => [g, now[g] || "off"])); lk.regions[b.dataset.region] = b.dataset.val; }); }
     else if (b.dataset.hear !== undefined) { st.hear = !st.hear; if (!st.hear) st.audio?.pause(); else if (st.playing && soundOn()) { st.audio.currentTime = st.f / fps(); st.audio.play().catch(() => {}); } buildPanel(); } });
   panel.addEventListener("input", e => { const i = e.target; if (!i.dataset.in) return; const path = i.dataset.in;
     if (path.startsWith("tint.")) { setLook(lk => { lk.tint[+path.slice(5)] = i.value; }); return; }
@@ -654,8 +746,10 @@ function cloudUI(node) {
     const m = node.properties?.kubakub_pointcloud || null;
     const fresh = JSON.stringify(m) !== JSON.stringify(st.meta);
     st.meta = m;
+    st.kind = node.properties?.kkp_kind || st.kind;
     if (fresh) {
-      st.perms.clear(); st.lums.clear(); st.tracks = null;
+      st.perms.clear(); st.lums.clear(); st.tracks = null; st.ff = null;
+      if (m?.regions) st.reg = await regionBasis(m.regions); else st.reg = null;
       if (m?.tracks) try { st.tracks = await (await fetch(viewURL(m.tracks))).json(); } catch { st.tracks = null; }
       st.audio?.pause(); st.audio = m?.audio ? new Audio(viewURL(m.audio)) : null;
       scrub.max = Math.max(0, (m?.n_out || 1) - 1); st.f = Math.min(st.f, +scrub.max); scrub.value = st.f;

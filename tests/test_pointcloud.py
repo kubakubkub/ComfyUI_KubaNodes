@@ -8,6 +8,7 @@ Run from the ComfyUI_windows_portable folder:
 """
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -67,7 +68,7 @@ try:
     W, H = 128, 72
     col = torch.rand(3, H, W)
     flat = torch.full((1, H, W), 1.0)
-    STILL = {"density": 128, "jitter": 0, "drift": 0, "flow": 0}
+    STILL = {"density": 128, "jitter": 0, "drift": 0, "flow": 0, "shiver": 0}
     lk = pc.look(STILL)
     P, c, dist, alive, _f = pc.points(lk, 0.0, col, flat, W / H)
     check("a near (d = 1) picture sits at distance 1, the picture's own size", torch.allclose(dist, torch.ones_like(dist))
@@ -102,7 +103,7 @@ try:
           and float(al.min()) > 0.99, f"{float(im.min())} {float(im.max())}")
     im_ink, _ = pc.splat(P, c, dist, alive, pc.look({"density": 128, "blend": "ink", "opacity": 1.0, "size": 1.0}), cam0, W, H, gh)
     check("ink: the colour multiplied onto white", torch.allclose(im_ink, torch.full_like(im_ink, 0.5), atol=1e-3))
-    lk_s = pc.look({"density": 128, "blend": "solid", "size": 4, "flow": 0})
+    lk_s = pc.look({"density": 128, "blend": "solid", "size": 4, "flow": 0, "shiver": 0})
     im_s, al_s = pc.splat(P, c, dist, alive, lk_s, cam0, W, H, gh)
     check("solid: big round points cover the picture", float(al_s.mean()) > 0.99 and torch.allclose(im_s[al_s > 0], torch.tensor(0.5), atol=1e-3))
     turned = pc.basis({"yaw": 40, "pitch": 0, "dolly": 0, "x": 0, "y": 0}, 1.0)
@@ -163,16 +164,65 @@ try:
     # --- forces, curl, trails, sound -------------------------------------------------------------------
     lk = pc.look(dict(STILL, forces=[[0.2, 0.5, 0.8, 0.5]], reach=0.1, flowing=1.0))
     P0, *_ = pc.points(pc.look(STILL), 0.0, col, flat, W / H)
-    P1, *_ = pc.points(lk, 1.0, col, flat, W / H)
+    P1, *_ = pc.points(lk, 1.0, col, flat, W / H, forces=pc.force_field(lk, W / H))
     dx = (P1 - P0)[:, 0].reshape(72, 128)
     check("a drawn arrow is a current: the points near it flow along it, the far ones hold", float(dx[36, 30:90].mean()) > 0.01
           and float(dx[5].abs().max()) < 1e-6 and float((P1 - P0)[:, 1].reshape(72, 128)[5].abs().max()) < 1e-6)
+    lko = pc.look({"forces": [[0.2, 0.5, 0.8, 0.5]], "curves": [{"kind": "curl+", "pts": [[0.1, 0.1], [0.2, 0.2]]}, {"kind": "nope", "pts": [[0, 0], [1, 1]]},
+                                                               {"kind": "wind", "pts": [[0.5, 0.5]]}], "where": "arrows", "regions": {"a": "attract", "b": "bad"}})
+    check("an older look: arrows are wind curves, 'arrows' is 'forces'; wrong curves and kinds are left out",
+          lko["curves"] == [{"kind": "wind", "pts": [[0.2, 0.5], [0.8, 0.5]]}, {"kind": "curl+", "pts": [[0.1, 0.1], [0.2, 0.2]]}]
+          and lko["where"] == "forces" and lko["regions"] == {"a": "attract"})
+
+    def moved_by(curves, at, t=1.0, **kw):          # the mean way of the points near `at` (u, v) under these curves, x right, y up
+        lk_ = pc.look(dict(STILL, curves=curves, flowing=1.0, life=4.0, reach=0.12, speed=1.0, **kw))
+        Q, *_ = pc.points(lk_, t, col, flat, W / H, forces=pc.force_field(lk_, W / H))
+        g_ = pc.grid(128, 72, 0.0, "cpu")
+        near = ((g_["u"] - at[0]) * W / H).abs().lt(0.03) & (g_["v"] - at[1]).abs().lt(0.03)
+        return (Q - P0)[near][:, :2].mean(0)
+    line = [[0.3, 0.5], [0.5, 0.5], [0.7, 0.5]]
+    ma, mr = moved_by([{"kind": "attract", "pts": line}], (0.5, 0.42)), moved_by([{"kind": "repel", "pts": line}], (0.5, 0.42))
+    mw = moved_by([{"kind": "wind", "pts": line[::-1]}], (0.5, 0.47))
+    check("a curve: attract pulls onto it, repel pushes away, wind blows the way it was drawn",
+          float(ma[1]) < -0.005 and float(mr[1]) > 0.005 and float(mw[0]) < -0.01 and abs(float(mw[1])) < 0.3 * abs(float(mw[0])), f"{ma} {mr} {mw}")
+    ring = [[0.5 + 0.12 * H / W * math.cos(a), 0.5 + 0.12 * math.sin(a)] for a in np.linspace(0, 2 * math.pi, 24)]
+    mp, mm = moved_by([{"kind": "curl+", "pts": ring}], (0.5 + 0.08 * H / W, 0.5), 0.6), moved_by([{"kind": "curl-", "pts": ring}], (0.5 + 0.08 * H / W, 0.5), 0.6)
+    check("a loop with curl + turns anticlockwise, curl - clockwise (right of the middle: up / down)",
+          float(mp[1]) > 0.005 and float(mm[1]) < -0.005, f"{mp} {mm}")
+    lab = -np.ones((H, W), np.int32)
+    for k_, x_ in enumerate([20, 60, 100]):
+        lab[30:42, x_:x_ + 8] = k_
+    lab[0:10, :] = 3
+    reg = pc.region_basis(lab, {"windows": [0, 1, 2], "roof": [3]}, W / H)
+    check("regions: the group with the most regions comes first and is the default", reg["names"] == ["windows", "roof"] and reg["default"] == "windows"
+          and pc.region_kinds(pc.look({}), reg) == {"windows": "attract"} and pc.region_kinds(pc.look({"regions": {"roof": "repel"}}), reg) == {"roof": "repel"})
+    lkr = pc.look(dict(STILL, flowing=1.0, life=4.0, reach=0.15, speed=1.0))
+    Fr = pc.force_field(lkr, W / H, reg)
+    check("strength 0: no forces", pc.force_field(pc.look(dict(lkr, force=0)), W / H, reg) is None)
+    Qr, *_ = pc.points(lkr, 1.2, col, flat, W / H, forces=Fr)
+    g = pc.grid(128, 72, 0.0, "cpu")
+    side = ((g["u"] * W - 33).abs() < 1.5) & ((g["v"] * H - 36).abs() < 1.5)      # right of a window: pulled left into it
+    above = ((g["u"] * W - 24).abs() < 3) & ((g["v"] * H - 24).abs() < 1.5)       # above a window: pulled down into it
+    far = (g["v"] * H) > 60
+    check("regions attract: the points near a window stream into it, the far ones hold",
+          float((Qr - P0)[above][:, 1].mean()) < -0.01 and float((Qr - P0)[side][:, 0].mean()) < -0.01
+          and float((Qr - P0)[far].norm(dim=-1).max()) < 1e-6, f"{(Qr - P0)[above][:, 1].mean()} {(Qr - P0)[side][:, 0].mean()}")
+    Qw, *_ = pc.points(pc.look(dict(lkr, where="forces", flow=1.0, regions={"windows": "curl+"})), 1.2, col, flat, W / H,
+                       forces=pc.force_field(pc.look(dict(lkr, regions={"windows": "curl+"})), W / H, reg))
+    mw_ = ((Qw - P0).norm(dim=-1) > 1e-5).reshape(72, 128)
+    check("where = forces: the flow acts only near the curves and regions", float(mw_[33:39, 60:68].float().mean()) > 0.5
+          and not bool(mw_[60:].any()))
+    out_r = run(regions=torch.from_numpy((lab >= 0) & (lab < 3)).float()[None], look=json.dumps({"density": 128}))
+    meta_r = out_r.ui["kubakub_pointcloud"][0]
+    rep_r = (out_r.args if hasattr(out_r, "args") else out_r.result)[4]
+    check("the regions input: a mask's parts are regions, they attract, the node gets their basis", meta_r["regions"]["names"] == ["mask"]
+          and meta_r["regions"]["counts"] == [3] and meta_r["regions"]["basis"]["filename"].endswith(".png") and "mask attract" in rep_r, rep_r)
     Pc, *_ = pc.points(pc.look(dict(STILL, curl=1.0)), 1.0, col, flat, W / H)
     Pc2, *_ = pc.points(pc.look(dict(STILL, curl=1.0)), 1.5, col, flat, W / H)
     check("curl sways the cloud on loops", 0.001 < float((Pc - Pc2).norm(dim=-1).mean()) < 0.05)
 
     # --- the flow: born at its place, flows smoothly, fades, is born again; where it acts -----------------------
-    FL = {"density": 128, "jitter": 0, "drift": 0, "flow": 1.0, "flowing": 1.0, "life": 2.0, "speed": 1.0}
+    FL = {"density": 128, "jitter": 0, "drift": 0, "flow": 1.0, "flowing": 1.0, "life": 2.0, "speed": 1.0, "shiver": 0}
     lkf = pc.look(FL)
     g = pc.grid(128, 72, 0.0, "cpu")
     t_b = float((1.0 - g["r4"][0]) * 2.0)           # point 0 is born again at t_b (its age is 0)
@@ -219,22 +269,60 @@ try:
     lp = pc.look({"camera": {"path": long_path}})["camera"]["path"]
     check("a long recorded move is thinned to 600 keys, its end kept", len(lp) == 600 and lp[-1] == long_path[-1] and lp[0] == long_path[0])
     beat = {"level": 1.0, "low": 1.0, "mid": 0.0, "high": 1.0, "beat": 1.0}
-    lk_s = pc.look({"density": 128, "drift": 0, "flow": 0, "sound": {"sparkle": 1.0}})
+    LOUD = {"burst": 0.5, "swell": 0.3, "sparkle": 1.0, "spectrum": 0, "sweep": 0}
+    lk_s = pc.look({"density": 128, "drift": 0, "flow": 0, "shiver": 0, "sound": LOUD})
     Ps, cs, *_ = pc.points(lk_s, 0.0, grey, flat, W / H, snd=beat)
     Pq, cq, *_ = pc.points(lk_s, 0.0, grey, flat, W / H)
     check("sound: the beat bursts, the bass swells, the highs sparkle", float((Ps - Pq).norm(dim=-1).mean()) > 0.01
           and float(cs.mean()) > float(cq.mean()))
-    lk_b = pc.look({"density": 128, "drift": 0, "flow": 0, "where": "field", "sound": {"swell": 0}})
+    lk_b = pc.look({"density": 128, "drift": 0, "flow": 0, "shiver": 0, "where": "field", "sound": dict(LOUD, swell=0, sparkle=0)})
     Pb1, *_ = pc.points(lk_b, 0.0, grey, flat, W / H, snd=beat, field=fld)
     Pb0, *_ = pc.points(lk_b, 0.0, grey, flat, W / H, field=fld)
     hit = ((Pb1 - Pb0).norm(dim=-1) > 1e-5).reshape(72, 128)
     check("the beat hits only where the forces act (where = field)", float(hit[:, :50].float().mean()) > 0.9 and not bool(hit[:, 80:].any()))
+    # --- the fine motion: every point on its own (his note: subtle, not big groups) and the song's bands ------------
+    lk_v = pc.look(dict(STILL, shiver=1.0, speed=1.0))
+    Pv1, *_ = pc.points(lk_v, 1.0, col, flat, W / H)
+    Pv2, *_ = pc.points(lk_v, 1.05, col, flat, W / H)
+    mv = Pv2 - Pv1
+    ray0 = P0 / P0.norm(dim=-1, keepdim=True)
+    side = (mv - ray0 * (mv * ray0).sum(-1, keepdim=True)).norm(dim=-1)
+    nbv = torch.cdist(P0[:300, :2], P0[:, :2]).topk(2, largest=False).indices[:, 1]
+    same_v = torch.nn.functional.cosine_similarity(mv[:300], mv[nbv], dim=-1)
+    check("shiver: each point trembles along its own line of sight, small, neighbours not together",
+          float(side.max()) < 1e-5 and 0 < float(mv.norm(dim=-1).max()) < 4.5 / 72 and abs(float(same_v.mean())) < 0.3,
+          f"{float(side.max())} {float(mv.norm(dim=-1).max())} {float(same_v.mean())}")
+    lk_d = pc.look(dict(STILL, dropout=0.4, speed=1.0))
+    al_d = [pc.points(lk_d, t_, col, flat, W / H)[3] for t_ in (0.0, 0.1, 0.6)]
+    check("dropout: that share blinks out, other points at other times",
+          all(0.33 < 1 - float(a.float().mean()) < 0.47 for a in al_d) and bool((al_d[0] != al_d[2]).any()),
+          str([1 - float(a.float().mean()) for a in al_d]))
+    Pr, *_ = pc.points(pc.look(dict(STILL, rows=1.0)), 0.0, col, flat, W / H)
+    check("scan lines: the points sit on rows (every ROW points)", len(torch.unique(Pr[:, 1].round(decimals=5))) == 72 // pc.ROW)
+    bands = {"level": 0.0, "low": 0.0, "mid": 0.0, "high": 0.0, "beat": 0.0, "bands": [1.0, 0, 0, 0, 0, 0, 0, 0]}
+    lk_sp = pc.look(dict(STILL, depth=1.0, sound={"spectrum": 1.0, "sweep": 0, "swell": 0, "sparkle": 0}))
+    ramp = torch.linspace(0, 1, W).expand(1, H, W).contiguous()     # far on the left .. near on the right
+    Q0, c0_, *_ = pc.points(lk_sp, 0.0, col, ramp, W / H)
+    Q1, c1_, *_ = pc.points(lk_sp, 0.0, col, ramp, W / H, snd=bands)
+    gF = pc.grid(128, 72, 0.0, "cpu")
+    lft, rgt = gF["u"] < 0.08, gF["u"] > 0.35                       # the bass: the farthest slice only
+    moved_sp = (Q1 - Q0).norm(dim=-1)
+    check("spectrum: the bass moves and lights the far slice only", float(moved_sp[lft].mean()) > 1e-3 and float(moved_sp[rgt].max()) < 1e-6
+          and float((c1_ - c0_)[lft].mean()) > 0.05, f"{float(moved_sp[lft].mean())} {float(moved_sp[rgt].max())}")
+    hz_ = 22050
+    tone = np.concatenate([np.sin(2 * np.pi * 60 * np.arange(hz_) / hz_), np.sin(2 * np.pi * 6000 * np.arange(hz_) / hz_)]).astype(np.float32)
+    spc = pc.spectrum(tone, hz_, 10, 20)
+    check("the song's bands: a low tone lights the lowest band, a high one a high band",
+          spc[5][0] > 0.8 and spc[5][-1] < 0.2 and spc[15][0] < 0.5 and spc[15][-1] > 0.6, f"{spc[5]} {spc[15]}")
+    spl = pc.spectrum(tone[:hz_ // 2], hz_, 10, 40)                 # the render goes on 3.5 s after the sound ends
+    check("a render longer than its sound: the bands go quiet after its end", len(spl) == 40 and max(spl[-1]) < 0.05, str(spl[-1]))
     clip_s = torch.from_numpy(__import__("kubapack.kubakub.sound", fromlist=["x"]).sample_sound(3.0, 120, 22050))[None, None]
     out = run(audio={"waveform": clip_s, "sample_rate": 22050}, seconds=0.0)
     images, alpha, fps, ply, report, audio_out = out.args if hasattr(out, "args") else out.result
     meta = out.ui["kubakub_pointcloud"][0]
     check("a sound: a picture lasts as long as it, plays on the node, goes on to 'audio'", images.shape[0] == 72
-          and len(meta["sound"]["beat"]) == 72 and max(meta["sound"]["beat"]) > 0.5 and meta["audio"]["filename"].endswith(".wav")
+          and len(meta["sound"]["beat"]) == 72 and max(meta["sound"]["beat"]) > 0.5 and len(meta["sound"]["bands"]) == 72
+          and len(meta["sound"]["bands"][0]) == pc.BANDS and meta["audio"]["filename"].endswith(".wav")
           and audio_out["waveform"].shape[-1] == 3 * 22050, report)
 
     # --- the live view computes the same (node) ------------------------------------------------------
@@ -242,6 +330,11 @@ try:
     if node is None:
         print("skip the JavaScript checks: node is not installed")
     else:
+        for f in ("kubakub_pointcloud.js", "kubakub_pointcloud_math.js"):    # parsed as a module, as the browser does
+            with open(os.path.join(HERE, "..", "web", f), encoding="utf-8") as fh:
+                res = subprocess.run([node, "--check", "--input-type=module"], stdin=fh, capture_output=True, text=True,
+                                     encoding="utf-8", errors="replace", timeout=60)
+            check(f"{f} parses as a module", res.returncode == 0, res.stderr[-400:])
         rng = np.random.default_rng(3)
         idx = [int(v) for v in rng.integers(0, 4_000_000, 300)]
         cams = [{"yaw": float(rng.uniform(-90, 90)), "pitch": float(rng.uniform(-60, 60)), "dolly": float(rng.uniform(-1, 0.9)),
@@ -251,6 +344,14 @@ try:
         shaky = {"start": cams[0], "end": cams[1], "ease": "linear", "shake": 0.7,
                  "path": [[0, 0, 0, 0, 0, 0], [0.4, 20, -5, 0.3, 0.1, 0], [1, -30, 10, 0.5, 0, 0.2]]}
         math_js = Path(HERE, "..", "web", "kubakub_pointcloud_math.js").resolve().as_uri()
+        # a look with every kind of curve (a loop too) and two region groups: the node's field = the render's
+        circle = [[0.6 + 0.1 * math.cos(a), 0.4 + 0.15 * math.sin(a)] for a in np.linspace(0, 2 * math.pi, 20)]
+        FLK = pc.look({"force": 1.3, "reach": 0.11, "curves": [{"kind": k, "pts": [[0.1, 0.2 + 0.1 * n], [0.4, 0.25 + 0.1 * n], [0.7, 0.2 + 0.1 * n]]}
+                                                              for n, k in enumerate(pc.CURVE_KINDS)] + [{"kind": "curl-", "pts": circle}],
+                       "regions": {"windows": "repel", "roof": "curl+"}})
+        FLK["curves"] = FLK["curves"][-pc.MAX_CURVES:]
+        REG = pc.region_basis(lab, {"windows": [0, 1, 2], "roof": [3]}, 1.6)
+        REGJ = {"names": REG["names"], "default": REG["default"], "q": [q.flatten().tolist() for q in REG["q"]]}
         src = (f"import * as M from {json.dumps(math_js)};\n"
                f"const idx = {json.dumps(idx)}, cams = {json.dumps(cams)}, pts = {json.dumps(pts)}, camera = {json.dumps(camera)}, shaky = {json.dumps(shaky)};\n"
                "const out = {};\n"
@@ -262,7 +363,12 @@ try:
                "out.shaky = [0, 0.2, 0.4, 0.7, 1].map(a => M.cameraAt(shaky, a, a * 7.3));\n"
                "out.stride = [1, 0.5, 0.4, 0.1, 0.03, 0.01].map(M.trailStride);\n"
                "out.tp = [1, 3, 10, 33].map(s => idx.slice(0, 40).map(b => M.trailPoint(b % 90000, s, 3000000)));\n"
-               "out.flow = [M.WAVES, M.FLOW_STEPS, M.FINE, M.MAX_TRACKED, M.WHERE];\n"
+               "out.flow = [M.WAVES, M.FLOW_STEPS, M.FINE, M.MAX_TRACKED, M.WHERE, M.BANDS, M.ROW, M.BLINK];\n"
+               f"const FLK = {json.dumps(FLK)}, REG = {json.dumps(REGJ)};\n"
+               "REG.q = REG.q.map(a => Uint8Array.from(a));\n"
+               "const ff = M.forceField(FLK, 1.6, REG); out.ff = [ff.fw, ff.fh, Array.from(ff.data)];\n"
+               "out.forces = [M.CURVE_KINDS, M.REGION_KINDS, M.MAX_CURVES, M.MAX_CURVE_PTS, M.FIELD_H, M.CLOSED, M.PULL, M.CURL_SCALE, M.CURL_SPEED, M.BASIS];\n"
+               "out.curves = M.curvesOf({ forces: [[0.1, 0.2, 0.3, 0.4]], curves: [{ kind: 'repel', pts: [[0, 0], [2, 0.5]] }, { kind: 'x', pts: [[0, 0], [1, 1]] }] });\n"
                "out.proj = cams.map(c => { const B = M.basis(c, 1.3); return pts.map(p => M.project(M.trackWorld(p, 16 / 9, 1.3), B, 1920, 1080)); });\n"
                "out.edges = ['within', 'off'].map(l => M.trackEdges(pts, { lines: l, distance: 0.3 }, 16 / 9, null, null));\n"
                "console.log(JSON.stringify(out));\n")
@@ -288,8 +394,18 @@ try:
                 abs(js["shaky"][n][k] - pc.camera_at(lks, a, a * 7.3)[k]) < 1e-9 for n, a in enumerate([0, 0.2, 0.4, 0.7, 1]) for k in pc._CAM_RANGES))
             check("trail points: one by a hash in every block", js["tp"] == [[int(pc.trail_points(3000000, st)[b % 90000]) for b in idx[:40]]
                                                                              for st in [1, 3, 10, 33]])
-            check("the flow's numbers (waves, steps, fine, tracked, where)", js["flow"] == [[list(w) for w in pc.WAVES], pc.FLOW_STEPS, pc.FINE,
-                                                                                         pc.MAX_TRACKED, list(pc.WHERE)])
+            check("the flow's numbers (waves, steps, fine, tracked, where, bands, rows, blink)", js["flow"] == [[list(w) for w in pc.WAVES], pc.FLOW_STEPS, pc.FINE,
+                                                                                         pc.MAX_TRACKED, list(pc.WHERE), pc.BANDS, pc.ROW, pc.BLINK])
+            ffp = pc.curve_field(FLK, 1.6)
+            pc.region_field(FLK, REG, ffp)
+            fw_, fh_ = pc.field_size(1.6)
+            check("the force field (every kind of curve, a loop, regions) is the same on the node",
+                  js["ff"][:2] == [fw_, fh_] and np.allclose(np.array(js["ff"][2]).reshape(fh_, fw_, 4), ffp.transpose(1, 2, 0), atol=1e-5),
+                  str(np.abs(np.array(js["ff"][2]).reshape(fh_, fw_, 4) - ffp.transpose(1, 2, 0)).max()))
+            check("the forces' numbers", js["forces"] == [list(pc.CURVE_KINDS), list(pc.REGION_KINDS), pc.MAX_CURVES, pc.MAX_CURVE_PTS, pc.FIELD_H,
+                                                          pc.CLOSED, pc.PULL, pc.CURL_SCALE, pc.CURL_SPEED, [list(b) for b in pc.BASIS]])
+            check("older arrows and wrong curves read the same way", js["curves"] == pc.curves_of({"forces": [[0.1, 0.2, 0.3, 0.4]],
+                  "curves": [{"kind": "repel", "pts": [[0, 0], [2, 0.5]]}, {"kind": "x", "pts": [[0, 0], [1, 1]]}]}))
             check("trail strides", js["stride"] == [pc.trail_stride(pc.look({"trail_share": s}))
                                                      for s in [1, 0.5, 0.4, 0.1, 0.03, 0.01]])
             ok = True

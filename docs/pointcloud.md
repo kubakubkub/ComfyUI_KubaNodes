@@ -15,6 +15,7 @@ of points, pictures that morph, tracked things in 3D, the sound, a .ply.
 | `image` | a picture, a batch of pictures or a video (*Load Video* directly, or any frames). A batch of up to 16 pictures is a set that **morphs**: every point travels to the point of the next picture with the same brightness. More is a video (`batch` on the node changes that). Nothing connected: the sample facade. |
 | `depth` | the depth of the same picture(s) or video from any depth node: Depth Anything 3 per frame, DA3 Streaming (steady over a long clip), Depth Anything 2, Marigold, Video Depth Anything. *near is* bright / dark on the node: bright for Depth Anything, dark for Marigold. Nothing connected: a soft relief from the brightness (the hint on the node says so). |
 | `field` | a mask that pushes the points out where it is white, frame by frame: the tracker's `near` (the points burst around what moves), kubakub mask animate, a mask from kubakub shader. How far: *push*. |
+| `regions` | from any kubakub regions node (regions from matrix / masks / sam3 / id renders ...), or a mask: its groups become forces, set per group on the node (*forces*: attract, repel, curl + / −). Connected as it is, the group with the most regions (the windows, as a rule) attracts. A mask: every separate white part is a region, all in one group *mask*. |
 | `tracks` | from kubakub tracker on the same video: a ring on every tracked thing at its place in the cloud, joined by lines (network, tree, within a distance: the same joins as track draw). |
 | `audio` / `sound` | a sound the cloud follows (Load Audio, a video's sound, or kubakub sound on `sound`): the points burst out on the beat, swell with the bass, move more when it is loud (how much: *sound* on the node). It plays with the cloud on the node. Pictures last as long as the sound. |
 | `seconds` | how long the render is. 0 = a video's own length; pictures as long as the sound, else 3 s each (one picture 4 s). Longer than the video: it loops. |
@@ -49,11 +50,15 @@ without running again.
     than a pixel shines), *jitter* (0 = an exact grid), *depth* (how deep the picture goes), *far cut* (leaves out
     what is farther: the sky, the background). A point smaller than a pixel and a half shares its light with the
     pixels around it by where it falls, so many fine points read as a smooth fine picture, not as grain.
-  - **flow** (the main motion): a share of the points streams along smooth swirls like a liquid. Each flowing point
+  - **fine motion** (the main motion, each point on its own, like a scanner's points): *shiver* (every point
+    trembles along its own line of sight at its own rhythm; 1 = about two point spacings; 0.3 by default),
+    *dropout* (which share of the points blinks out now and then, each on its own clock), *scan lines* (the points
+    gather into horizontal rows, the colour stays theirs).
+  - **flow** (off by default): a share of the points streams along smooth swirls like a liquid. Each flowing point
     is born at its place in the picture, flows for its *life*, fades out and is born again at its place, so the form
     keeps coming back while it dissolves. *flow* (how fast; 0 = none), *of points* (which share flows; the others
     hold the form), *swirl size*, *life* (seconds), *where*: **everywhere**, **field** (where the `field` mask is
-    white), **tracked** (near the tracked things, as far as *reach*), **arrows** (near your arrows). *where* also
+    white), **tracked** (near the tracked things, as far as *reach*), **forces** (near your curves and regions). *where* also
     decides where the beat hits. The swirls have no sources and no sinks, so the points stream around each other
     instead of bunching up; with *trails* they draw their flow lines.
   - **motion** (formulas of the time, nothing is simulated, so every frame is the same in the render as on the
@@ -64,11 +69,22 @@ without running again.
   - **trails:** each point's own way over the last seconds drawn behind it as a fine line: *length* (seconds),
     *of points* (which share of the points draws one), *opacity*. With the flow they are its flow lines; a point
     that holds draws none.
-  - **forces:** **draw arrows** on the picture (the view holds on the picture while you draw): each arrow is a
-    current, the flowing points near it stream along it (and with *where* = arrows the swirls act only there).
-    *strength*, *reach* (how far from the arrow it still acts, the light band around it), **undo**, **clear**; up to
-    8 arrows.
-  - **sound** (with a sound): *beat → burst* (the parts where the flow acts pop out and kick along the swirls),
+  - **forces:** what the flowing points do near a curve you draw or near a group of regions.
+    - **draw curves:** drag on the picture with the mouse (the view holds on the picture while you draw, where
+      they act is lit faintly). What a new curve does, the pills under it: **wind** (the points stream along it,
+      the way you drew it), **attract** (they are pulled onto it), **repel** (pushed away), **curl +** / **curl −**
+      (they turn round it anticlockwise / clockwise, with small eddies). A curve that ends where it began is a loop:
+      curl turns round its middle like a whirlpool, and inside it counts as near. Up to 8 curves, **undo**,
+      **clear**. An older look's arrows are wind curves.
+    - **regions:** with `regions` connected, every group has its row: **off**, **attract** (the points near its
+      regions stream into them and gather there), **repel** (they leave them and keep away), **curl +** / **curl −**
+      (they turn round each region's middle). So all windows can attract while the piers repel.
+    - *strength* (of the curves and regions), *reach* (how far from a curve or region it still acts). With *where* =
+      forces the swirls and the beat act only there; the curves and regions act whatever *where* says.
+  - **sound** (with a sound): *spectrum → depth* (the depth hears the song band by band: far = the bass, near =
+    the highs; each slice comes forward and lights up with its band), *beat → sweep* (on every beat a thin bright
+    plane rushes through the depth), *highs → shiver*, *loud → fill* (when it is loud the blinked out points come
+    back), *beat → burst* (the parts where the flow acts pop out and kick along the swirls; 0 by default),
     *bass → swell*, *loud → motion* (drift, breathe, wind and curl get bigger), *loud → size*, *highs → sparkle* (a
     few points light up); **hear it** plays the sound with the cloud.
   - **tracked things** (with `tracks`): rings on / off, lines off / within / network / tree, colour, opacity, ring size.

@@ -13,18 +13,17 @@ regions of starter 01 connected):
 
 ## What's new
 
-**0.5.0**, Flux 3 Klein, and your 3D app live:
-- **Flux 3 Klein in the region sampler**, with the crop and a style picture as references, about 9 s a region on
-  a 12 GB laptop GPU; a *flux 3 klein* preset in the director.
-- **The whole facade in one pass, each material in its place.** `first_pass` with Flux 3 tells the model which
-  regions each prompt is for (boxes taken from your regions). *after first pass = whole picture only* paints a
-  75 region facade in under a minute; or let every region refine it for the full detail.
-- **A prompt upsampler** turns your short region prompts into full instructions while it looks at each crop.
-- **Live from Blender or Houdini.** kubakub scene render takes the scene open in your app, through your viewport
-  or a camera from a list; press refresh. Installing the add-ons: [docs/live-link.md](docs/live-link.md).
-- **Tidier nodes:** the fine-tuning inputs fold behind one *more settings* row (changed ones stay visible).
-- **Paste an OSL shader** into kubakub shader; **video with any LTX or H3 model**; and every `which regions`
-  field reads your text the same way and names the regions when a typo matches none.
+**0.6.0**, point clouds that hear the song, tracking, crop and compare:
+- **kubakub pointclouder:** a picture or a video lifted into millions of points by any depth node and filmed with
+  a camera move, live on the node (drag, pick a move or record your own). The points shiver, blink and fall into
+  scan lines each on their own; the song moves the depth band by band and sweeps through it on the beat. Draw
+  force curves with the mouse or let your regions (all the windows) attract the points. Writes a .ply too.
+  [docs/pointcloud.md](docs/pointcloud.md)
+- **kubakub tracker and track draw:** follow what moves in a video (motion, a colour, people, things you name,
+  hands, a motif you click) and draw it as a live diagram with marks, lines, depth layers and blend modes; it can
+  pulse with a sound. Tracks also steer kubakub shader and the director.
+- **kubakub crop, uncrop and compare:** crop by drawing as in Photoshop (outpaint mask included), put the edit
+  back, and compare any two pictures or videos frame by frame; the director crops and compares too.
 
 Everything that changed, version by version: [CHANGELOG.md](CHANGELOG.md). Updates arrive through ComfyUI Manager
 (*Update*) or `git pull`; a problem or a wish: [open an issue](https://github.com/kubakubkub/ComfyUI_KubaNodes/issues).

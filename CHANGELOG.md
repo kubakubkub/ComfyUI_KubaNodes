@@ -4,7 +4,7 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
-## next (not released yet)
+## 0.6.0 (2026-10-27)
 
 Crop by drawing, compare anything with anything, track what moves in a video to draw it as a diagram, and film a
 picture or a video as a point cloud that follows the sound.
@@ -42,10 +42,14 @@ picture or a video as a point cloud that follows the sound.
   any depth node, filmed with a camera move. It plays live on the node: drag to look around, *start = view* /
   *end = view* set the move, or pick one (push in, pull out, pan, tilt, orbit, crane, handheld shake), or press
   *record* and steer the camera with the mouse while the clip plays. Colours (true, mono, tint, negative), glow /
-  ink / solid, depth, far cut, point size and the motion (drift, breathe, wind, curl, a scan through the depth)
-  change while it plays; *trails* draw each point's own way behind it as a fine line (curly with curl); arrows
-  drawn on the picture push the points along them; a sound makes them burst on the beat, swell with the bass and
-  move more when it is loud, and plays with the cloud on the node. The settings fold away under *settings*. A batch of pictures
+  ink / solid, depth, far cut and point size change while it plays. The points move subtly, each on its own like
+  a scanner's points: *shiver* (each trembles along its line of sight), *dropout* (points blink out), *scan lines*.
+  A sound plays with the cloud on the node and moves it: *spectrum → depth* (far = the bass, near = the highs,
+  each slice comes forward with its band), *beat → sweep* (a bright plane through the depth on every beat), the
+  highs shiver, the loud parts fill in, the bass swells. Bigger motion when you want it: drift, breathe, wind,
+  curl, a scan, a flow along smooth swirls with *trails*, and forces: draw curves on the picture with the mouse
+  (wind, attract, repel, curl + / -) or connect `regions` (a kubakub regions node or a mask) and set each group to
+  attract, repel or curl, so all windows can pull the points in. The settings fold away under *settings*. A batch of pictures
   morphs (every point travels to the point of the next picture with the same brightness); a mask on `field` (the
   tracker's `near`) pushes points out; the tracker's tracks sit in the cloud at their depth as rings joined by
   lines. Writes a .ply for Blender, Houdini or TouchDesigner. With nothing connected: a sample facade.

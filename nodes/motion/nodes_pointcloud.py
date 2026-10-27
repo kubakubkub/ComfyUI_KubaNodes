@@ -8,6 +8,7 @@ same points with the same formulas at full size.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -20,13 +21,14 @@ import comfy.utils
 import folder_paths
 from comfy_api.latest import io
 
+from ...kubakub import maskfields as mf
 from ...kubakub import pointcloud as pc
 from ...kubakub import shader_render as sr
 from ...kubakub import sound as so
 from ...kubakub import tracking as tk
-from ...kubakub.io_types import SoundType, TracksType
+from ...kubakub.io_types import RegionsType, SoundType, TracksType
 from ..shader.nodes_shader import _ram_check
-from ..utils.nodes_compare import frames_of, free_vram, save_json, save_wav, write_side
+from ..utils.nodes_compare import frames_of, free_vram, save_json, save_wav, temp_file, write_side
 
 log = logging.getLogger("KUBA.regions")
 
@@ -51,6 +53,34 @@ def out_size(W, H, long_side):
         return W, H
     k = long_side / max(W, H)
     return max(2, int(round(W * k / 2)) * 2), max(2, int(round(H * k / 2)) * 2)
+
+
+def regions_of(regions, notes):
+    """The regions input -> pointcloud.region_basis(): a kubakub regions node (its groups), or a mask / mask batch
+    (every separate white part is a region, all in one group 'mask'; specks are left out)."""
+    if isinstance(regions, torch.Tensor):
+        m = regions.float().cpu()
+        lab, n = mf.from_masks((m if m.ndim == 2 else m.amax(0)).numpy())
+        return lab, {"mask": list(range(n))}
+    if int(regions.labels.shape[0]) > 1:
+        notes.append("regions: the first frame's regions are used")
+    return regions.labels[0].cpu().numpy(), regions.table.get("groups") or {}
+
+
+def basis_file(reg):
+    """The regions' basis as one PNG in temp for the node's live view: the groups one under the other, each two cells
+    wide (channels 0-2 left, 3-5 right)."""
+    import cv2
+    q = reg["q"]
+    G, fh, fw, _ = q.shape
+    img = np.concatenate([q[..., :3], q[..., 3:]], 2).reshape(G * fh, 2 * fw, 3)
+
+    def write(path):                                 # encoded here: imwrite fails silently on a path with non-ASCII letters
+        ok, buf = cv2.imencode(".png", np.ascontiguousarray(img[..., ::-1]))
+        if not ok:
+            raise RuntimeError("the regions' basis could not be written as a PNG")
+        buf.tofile(path)
+    return temp_file("kubakub_pointcloud", hashlib.sha1(img.tobytes()).hexdigest()[:20] + ".png", write)
 
 
 def timeline(mode, n, K, seconds, fps, sound_secs=0.0):
@@ -78,8 +108,10 @@ class KUBA_PointCloud(io.ComfyNode):
                          "the node: drag to look around (Shift-drag moves, the wheel goes nearer), set the move from "
                          "the view, pick a camera (push in, orbit, handheld ...) or record your own; the look (colours, "
                          "glow / ink / solid, depth, fine points, a flow that streams parts of the cloud along smooth "
-                         "swirls: everywhere, in a mask, near tracked things or along arrows you draw; trails, breathe, "
-                         "wind, curl, a scan through the depth) changes live while it plays. A batch of pictures "
+                         "swirls: everywhere, in a mask, near tracked things or near your forces; trails, breathe, "
+                         "wind, curl, a scan through the depth) changes live while it plays. Forces: draw curves with "
+                         "the mouse (wind along them, attract, repel, curl either way) and connect regions (all windows "
+                         "attract ...). A batch of pictures "
                          "morphs: every point travels to the point of the next picture with the same brightness. "
                          "'field' (a mask, e.g. the tracker's 'near') pushes points out; the tracker's tracks sit in the "
                          "cloud at their depth; a sound makes the flowing parts burst on the beat, the cloud swell with "
@@ -98,6 +130,11 @@ class KUBA_PointCloud(io.ComfyNode):
                                       "(the points burst around what moves), kubakub mask animate, a shader's mask. "
                                       "How far: 'push' on the node. With 'where' = field the flow and the beat act "
                                       "only there."),
+                io.MultiType.Input("regions", types=[RegionsType, io.Mask], optional=True,
+                                   tooltip="From any kubakub regions node (regions from matrix / masks / sam3 ...), or a "
+                                           "mask: its groups become forces, set on the node per group (attract, repel, "
+                                           "curl + / -). Connected as it is, the group with the most regions (the windows) "
+                                           "attracts the flowing points. A mask: every white part is a region."),
                 TracksType.Input("tracks", optional=True,
                                  tooltip="From kubakub tracker on the same video: each tracked thing gets a ring at its "
                                          "place in the cloud, joined by lines (network, tree, within a distance). "
@@ -136,7 +173,7 @@ class KUBA_PointCloud(io.ComfyNode):
 
     @classmethod
     def execute(cls, image=None, depth=None, field=None, tracks=None, audio=None, sound=None, look="", seconds=0.0,
-                fps=24.0, long_side=0, batch="auto", save_ply=False) -> io.NodeOutput:
+                fps=24.0, long_side=0, batch="auto", save_ply=False, regions=None) -> io.NodeOutput:
         t0 = time.perf_counter()
         lk = pc.look(look)
         notes = []
@@ -169,6 +206,7 @@ class KUBA_PointCloud(io.ComfyNode):
         per_frame = None
         if mono is not None:
             per_frame, lines = sr.frame_sound(mono, hz, heard, fps, n_out)
+            per_frame["bands"] = pc.spectrum(mono, hz, fps, n_out)
             notes.append("sound: " + "; ".join(lines))
         Wo, Ho = out_size(W, H, int(long_side))
         aspect = W / H
@@ -220,6 +258,12 @@ class KUBA_PointCloud(io.ComfyNode):
                 pics[j] = (col(j), dep(j))
             return pics[j]
         fld_one = fld[0].to(dev)[None] if fld is not None and len(fld) == 1 else None
+        reg = None
+        if regions is not None:
+            reg = pc.region_basis(*regions_of(regions, notes), aspect)
+            kinds = pc.region_kinds(lk, reg)
+            notes.append(f"regions: {len(reg['names'])} group(s); " + (", ".join(f"{k} {v}" for k, v in kinds.items()) or "none acts (set them on the node)"))
+        forces = pc.force_field(lk, aspect, reg, dev)
         try:
             for f in range(n_out):
                 t = f / fps
@@ -236,7 +280,7 @@ class KUBA_PointCloud(io.ComfyNode):
                 tf = None if t3 is None else f % len(t3) if mode == "pictures" else min(f % n, len(t3) - 1)
                 trk = [p[1:3] for p in t3[tf]] if tf is not None and t3[tf] else None
                 fr = dict(col_a=ca, dep_a=da, aspect=aspect, col_b=cb, dep_b=db, perm=perm, s=s, field=ff, device=dev, snd=snd,
-                          tracked=trk)
+                          tracked=trk, forces=forces)
                 P, c, dist, alive, fade = pc.points(lk, t, **fr)
                 if f == 0 and save_ply:
                     ply = pc.write_ply(ply_path(), P[alive], c[alive])
@@ -260,6 +304,10 @@ class KUBA_PointCloud(io.ComfyNode):
             meta["field"] = write_side(fld[..., None].expand(-1, -1, -1, 3), "f", PREVIEW_SIDE)
         if t3 is not None:
             meta["tracks"] = save_json({"frames": t3}, "kubakub_pointcloud")
+        if reg is not None and reg["names"]:
+            fw, fh = pc.field_size(aspect)
+            meta["regions"] = {"basis": basis_file(reg), "names": reg["names"], "counts": reg["counts"], "default": reg["default"],
+                               "fw": fw, "fh": fh}
         audio_out = so.sound_out(wave, hz, n_out / fps)
         if per_frame:
             meta["sound"] = per_frame
