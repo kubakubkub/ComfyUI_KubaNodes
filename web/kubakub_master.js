@@ -25,6 +25,8 @@ const r4 = v => +(+v).toFixed(4);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 export const wholeFps = v => { const f = Math.round(+v); return Number.isFinite(f) ? clamp(f, 1, 120) : 25; };   // = project.whole_fps
 const defProps = () => ({ opacity: 1, x: 0, y: 0, scale: 1, fit: "fit" });
+export const ANIM = ["opacity", "x", "y", "scale"];   // the picture settings that take keys
+export const EASES = ["smooth", "linear", "hold"];
 const newTrack = name => ({ id: uid("t"), name, muted: false, hidden: false, items: [] });
 export function newDoc() {
   return { version: 1, duration: 10, fps: 25, width: 3840, height: 2160, tracks: [newTrack("v2"), newTrack("v1")], media: [] };
@@ -41,7 +43,15 @@ export function migrate(d) {                         // an older / partial docum
   for (const t of d.tracks) {
     t.id = t.id || uid("t"); t.name = String(t.name || "v");
     t.items = (Array.isArray(t.items) ? t.items : []).filter(i => i && (i.type === "clip" || i.type === "director"));
-    for (const i of t.items) { i.id = i.id || uid("i"); i.props = Object.assign(defProps(), i.props || {}); }
+    for (const i of t.items) {
+      i.id = i.id || uid("i"); i.props = Object.assign(defProps(), i.props || {});
+      const anim = {};
+      for (const p of ANIM) {
+        const ks = (Array.isArray(i.anim?.[p]) ? i.anim[p] : []).filter(k => k && Number.isFinite(k.t) && Number.isFinite(k.v));
+        if (ks.length) anim[p] = ks.map(k => ({ t: k.t, v: k.v, e: EASES.includes(k.e) ? k.e : "smooth" })).sort((a, b) => a.t - b.t);
+      }
+      if (Object.keys(anim).length) i.anim = anim; else delete i.anim;
+    }
   }
   return d;
 }
@@ -77,6 +87,7 @@ export function spanOf(it, env) {
 export function splitItem(it, t, env) {
   const [a, b] = spanOf(it, env); if (t - a < 1 / env.fps - 1e-9 || b - t < 1 / env.fps - 1e-9) return null;
   const B = { ...it, id: uid("i"), props: { ...it.props }, start: r4(t) };
+  if (it.anim) { B.anim = JSON.parse(JSON.stringify(it.anim)); shiftKeys(B, a - t); }
   if (it.type === "director") {
     const s = dirSpan(it, env.dirDur(it.node), env.fps);
     B.in = r4(s.in + (t - s.start)); B.length = +it.length > 0 ? r4(b - t) : -1; it.length = r4(t - a);
@@ -92,8 +103,11 @@ export function splitItem(it, t, env) {
   }
   return [it, B];
 }
-// move an item's left edge to t (trim in), like the left grip in the director
+// move an item's left edge to t (trim in), like the left grip in the director; its keys stay where they are in time
 export function trimLeftTo(it, t, env) {
+  const s0 = +it.start || 0; trimLeft(it, t, env); shiftKeys(it, s0 - it.start);
+}
+function trimLeft(it, t, env) {
   const fps = env.fps;
   if (it.type === "director") {
     const s = dirSpan(it, env.dirDur(it.node), fps), nin = Math.max(0, s.in + (t - s.start)), start = s.start + (nin - s.in);
@@ -132,6 +146,52 @@ export function clearRange(track, a, b, keep, env) {
   }
   track.items = out.sort((p, q) => p.start - q.start);
 }
+// ---- keys: item.anim = { opacity | x | y | scale: [{ t, v, e }] }, t in seconds from the item's start (they move with it)
+// keys sorted by t -> the value at t (= keyValue in kubakub_director.js / key_value in kubakub/director/render.py, numbers)
+export function keyValue(keys, t) {
+  if (t <= keys[0].t) return keys[0].v;
+  const n = keys.length; if (t >= keys[n - 1].t) return keys[n - 1].v;
+  let i = 0; while (i < n - 2 && keys[i + 1].t <= t) i++;
+  const a = keys[i], b = keys[i + 1];
+  if (a.e === "hold") return a.v;
+  let u = (t - a.t) / Math.max(1e-9, b.t - a.t); if (a.e !== "linear") u = u * u * (3 - 2 * u);
+  return a.v + (b.v - a.v) * u;
+}
+// the picture settings of an item at timeline time t: its props, the keyed ones at t
+export function propsAt(it, t) {
+  const p = { ...it.props };
+  for (const k of ANIM) if (it.anim?.[k]?.length) p[k] = keyValue(it.anim[k], t - (+it.start || 0));
+  return p;
+}
+export const offSpeed = speed => Math.abs(speed - 1) > 1e-3;   // no sound at another speed (as in the director and the render)
+const keyAt = (keys, lt, fps) => keys?.find(k => Math.abs(k.t - lt) < 0.5 / fps);
+const shiftKeys = (it, d) => { for (const ks of Object.values(it.anim || {})) for (const k of ks) k.t = r4(k.t + d); };
+// a picture setting edited at timeline time t: a key there when it has keys (like the director), else the plain value
+export function setProp(it, p, v, t, fps) {
+  const ks = it.anim?.[p];
+  if (!ks?.length) { it.props[p] = v; return; }
+  const lt = r4(t - (+it.start || 0)), k = keyAt(ks, lt, fps);
+  if (k) k.v = v; else { ks.push({ t: lt, v, e: "smooth" }); ks.sort((a, b) => a.t - b.t); }
+}
+// the key button: a key of p at t (with the value shown there), or that key removed (the last one leaves its value)
+export function toggleKey(it, p, t, fps) {
+  const lt = r4(t - (+it.start || 0)), ks = it.anim?.[p], k = keyAt(ks, lt, fps);
+  if (k) {
+    ks.splice(ks.indexOf(k), 1);
+    if (!ks.length) { it.props[p] = k.v; delete it.anim[p]; if (!Object.keys(it.anim).length) delete it.anim; }
+    return;
+  }
+  const v = propsAt(it, t)[p];
+  it.anim = it.anim || {}; (it.anim[p] = ks || []).push({ t: lt, v, e: "smooth" }); it.anim[p].sort((a, b) => a.t - b.t);
+}
+// the times of an item's keys (seconds from its start), each once
+export const keyTimes = it => [...new Set(Object.values(it.anim || {}).flatMap(ks => ks.map(k => k.t)))].sort((a, b) => a - b);
+// the easing of every key of an item at t (seconds on the timeline)
+export function easeAt(it, t, fps, e) {
+  const lt = t - (+it.start || 0);
+  for (const ks of Object.values(it.anim || {})) { const k = keyAt(ks, lt, fps); if (k) k.e = e; }
+}
+
 // where a picture of sw x sh goes in the W x H frame (centre-anchored, x / y in project pixels)
 export function layoutRect(p, sw, sh, W, H) {
   let w = W, h = H;
@@ -238,7 +298,7 @@ class Preview {
     this.playing = false; this.loop = true; this.from = 0; this.t0 = 0; this.dirty = true;
   }
   play() { if (this.playing) return; const s = this.store; if (s.time >= s.doc.duration - 1e-6) s.setTime(0); this.playing = true; this.resync(); }
-  pause() { if (!this.playing) return; this.playing = false; for (const v of this.videos.values()) v.el.pause(); this.dirty = true; }
+  pause() { if (!this.playing) return; this.playing = false; for (const v of this.videos.values()) v.el.pause(); this.dirty = true; this.store.emit("time"); }
   toggle() { this.playing ? this.pause() : this.play(); }
   resync() { this.from = this.store.time; this.t0 = performance.now(); }
   active(t, ahead = 0) {                             // bottom track first (it is drawn first); hidden tracks still sound
@@ -274,8 +334,9 @@ class Preview {
         const redraw = () => (this.dirty = true); el.addEventListener("seeked", redraw); el.addEventListener("loadeddata", redraw);
         v = { el, url }; this.videos.set(it.id, v);
       }
-      const el = v.el; el.muted = tr.muted || !!it.muted;
-      const seg = segOf(it, m.info?.duration || 0), ts = srcTime(seg, on ? t : seg.start) ?? seg.in;
+      const seg = segOf(it, m.info?.duration || 0), el = v.el;
+      el.muted = tr.muted || !!it.muted || offSpeed(seg.speed);
+      const ts = srcTime(seg, on ? t : seg.start) ?? seg.in;
       const fps = m.info?.fps || s.doc.fps, centre = Math.min(seg.out - 0.5 / fps, Math.floor(ts * fps + 1e-6) / fps + 0.5 / fps);
       const held = on && (t - seg.start) >= seg.natural - 1e-9 && seg.fill === "hold";
       if (this.playing && on && !held && !seg.reverse) {   // backwards: seek frame by frame (browsers cannot play reverse)
@@ -313,8 +374,8 @@ class Preview {
         else { const im = this.image(sourceURL(m.source)); if (!im.complete || !im.naturalWidth) continue; src = im; sw = im.naturalWidth; sh = im.naturalHeight; }
       }
       if (!sw || !sh) continue;
-      const r = layoutRect(it.props, sw, sh, W, H);
-      ctx.globalAlpha = clamp(+it.props.opacity, 0, 1); ctx.drawImage(src, r.x, r.y, r.w, r.h);
+      const p = propsAt(it, s.time), r = layoutRect(p, sw, sh, W, H);
+      ctx.globalAlpha = clamp(+p.opacity, 0, 1); ctx.drawImage(src, r.x, r.y, r.w, r.h);
     }
     ctx.restore();
   }
@@ -389,7 +450,12 @@ class Timeline {
       const it = tr.items[k], [a, b] = spanOf(it, env), x0 = this.tx(a), x1 = this.tx(b);
       if (x < x0 || x > x1) continue;
       const e = Math.min(EDGE, (x1 - x0) / 3);
-      return { tr, ti, it, zone: x - x0 <= e ? "l" : x1 - x <= e ? "r" : "body" };
+      if (x - x0 <= e || x1 - x <= e) return { tr, ti, it, zone: x - x0 <= e ? "l" : "r" };   // the grips first
+      if (it.anim && y >= this.ty(ti) + TRACK_H - 15) {
+        const kt = keyTimes(it).find(k => Math.abs(this.tx(a + k) - x) <= 5);
+        if (kt !== undefined) return { tr, ti, it, zone: "key", t: a + kt };
+      }
+      return { tr, ti, it, zone: "body" };
     }
     return null;
   }
@@ -417,6 +483,7 @@ class Timeline {
     }
     const h = this.hit(x, y);
     if (!h) { if (!e.shiftKey) s.sel.clear(); s.emit("sel"); this.drag = { type: "scrub" }; this.seek(x); return; }
+    if (h.zone === "key") { s.sel.clear(); s.sel.add(h.it.id); s.emit("sel"); s.setTime(h.t); this.panel.seeked(); return; }
     const id = h.it.id; let click = false;
     if (e.shiftKey) s.sel.has(id) ? s.sel.delete(id) : s.sel.add(id);
     else if (!s.sel.has(id)) { s.sel.clear(); s.sel.add(id); } else click = true;
@@ -449,7 +516,7 @@ class Timeline {
       else {
         let t = s.q(b + dt); t += this.snapD([t], skip, e); t = s.q(t);
         const len = Math.max(1 / env.fps, t - l.o.start);
-        if (l.it.type === "clip" && d.alt) {           // Alt: speed (the same piece of the file plays in the new length)
+        if (l.it.type === "clip" && d.alt && env.mediaDur(l.o.media)) {           // Alt: speed (the same piece of the file plays in the new length)
           const sg = segOf(l.o, env.mediaDur(l.o.media)); l.it.speed = r4(clamp((sg.out - sg.in) / len, 0.05, 20)); l.it.length = -1;
         } else if (l.it.type === "clip" && d.shift) l.it.length = r4(len);   // Shift: length (then hold / loop)
         else trimRightTo(l.it, t, env);
@@ -542,7 +609,7 @@ class Timeline {
     ctx.fillStyle = isDir ? (n ? C.stage : "#7a3a3a") : m ? ({ video: LAV, audio: "#5f7f9e", image: "#7d9a8a" }[m.kind] || LAV) : "#7a3a3a";
     this.round(ctx, x0, y0, w, hh, 6); ctx.fill();
     if (isDir) { ctx.fillStyle = ORANGE; ctx.fillRect(x0, y0 + 3, 3, hh - 6); }
-    if (m) this.wave(ctx, it, m, x0, x1, y0, hh, tr.muted || it.muted);
+    if (m) this.wave(ctx, it, m, x0, x1, y0, hh, tr.muted || it.muted || offSpeed(+it.speed || 1));
     if (sel) { ctx.strokeStyle = ORANGE; ctx.lineWidth = 2; this.round(ctx, x0 + 1, y0 + 1, w - 2, hh - 2, 5); ctx.stroke(); }
     if (w > 26) {
       ctx.save(); ctx.beginPath(); ctx.rect(x0 + 6, y0, w - 12, hh); ctx.clip(); ctx.fillStyle = "#fff"; ctx.textAlign = "left";
@@ -555,6 +622,13 @@ class Timeline {
       if (+it.props.opacity < 1) tags.push(`${Math.round(it.props.opacity * 100)} %`);
       if (tags.length) { ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.fillText(tags.join(" · "), x0 + 9, y0 + 24); }
       ctx.restore();
+    }
+    if (it.anim) {
+      ctx.fillStyle = sel ? ORANGE : "#fff";
+      for (const kt of keyTimes(it)) {
+        const kx = this.tx(a + kt); if (kx < x0 - 1 || kx > x1 + 1) continue;
+        ctx.beginPath(); ctx.moveTo(kx, y0 + hh - 9); ctx.lineTo(kx + 4, y0 + hh - 5); ctx.lineTo(kx, y0 + hh - 1); ctx.lineTo(kx - 4, y0 + hh - 5); ctx.fill();
+      }
     }
     for (const z of ["l", "r"]) if (this.hover === it.id + z) { ctx.fillStyle = ORANGE; ctx.fillRect(z === "l" ? x0 : x1 - 4, y0, 4, hh); }
     ctx.globalAlpha = 1;
@@ -619,6 +693,7 @@ class Panel {
       this.tl.dirty = true; this.preview.dirty = true;
       if (why === "bind") { this.preview.pause(); for (const m of this.store.doc.media) this.cache.ensure(m)?.catch?.(() => {}); requestAnimationFrame(() => this.tl.fit()); }
       if (why !== "time") this.side(why);
+      else if (!this.preview.playing) { const sel = this.store.selected(); if (sel.length === 1 && sel[0].it.anim) this.inspector(); }   // keyed values at the playhead
       this.bar();
     });
     this.frame = this.frame.bind(this); requestAnimationFrame(this.frame);
@@ -930,14 +1005,18 @@ class Panel {
       inp.addEventListener("change", () => { const x = inp.value === "" && o.empty ? -1 : Number(inp.value); if (Number.isFinite(x)) s.edit(() => { const c = cur(); if (c) set(c, x); }); });
       return h("label", { class: "kkt-row2" }, h("span", {}, label), inp);
     };
+    const fps = s.doc.fps, now = propsAt(it, s.time);
+    const keyBtn = key => h("button", { class: "kkd-pill ico kkt-key", "aria-pressed": String(!!keyAt(it.anim?.[key], s.time - it.start, fps)),
+      title: it.anim?.[key] ? "a key here / remove the key here" : "animate: a key here", onclick: () => s.edit(() => { const c = cur(); if (c) toggleKey(c, key, s.time, fps); }) }, "◆");
     const slider = (label, key, lo, hi, st) => {
-      const out = h("span", { class: "kkt-faint" }, String(it.props[key]));
-      const inp = h("input", { type: "range", min: lo, max: hi, step: st, value: it.props[key] });
+      const show = v => String(+(+v).toFixed(2)), out = h("span", { class: "kkt-faint" }, show(now[key]));
+      const inp = h("input", { type: "range", min: lo, max: hi, step: st, value: now[key] });
       inp.addEventListener("pointerdown", () => s.begin());
-      inp.addEventListener("input", () => { const c = cur(); if (!c) return; c.props[key] = Number(inp.value); out.textContent = inp.value; s.moved(); });
+      inp.addEventListener("input", () => { const c = cur(); if (!c) return; setProp(c, key, Number(inp.value), s.time, fps); out.textContent = show(inp.value); s.moved(); });
       inp.addEventListener("change", () => s.end());
-      return h("label", { class: "kkt-row2" }, h("span", {}, label), inp, out);
+      return h("label", { class: "kkt-row2" }, h("span", {}, label), inp, out, keyBtn(key));
     };
+    const keyed = (row, key) => { row.append(keyBtn(key)); return row; };
     const pills = (label, opts, val, set) => h("div", { class: "kkt-row2" }, h("span", {}, label), h("span", { class: "kkd-pills" },
       ...opts.map(o => h("button", { class: "kkd-pill", "aria-pressed": String(val === o), onclick: () => s.edit(() => { const c = cur(); if (c) set(c, o); }) }, String(o)))));
     const isDir = it.type === "director", n = isDir ? rootGraph()?.getNodeById?.(it.node) : null, m = isDir ? null : s.media(it.media);
@@ -957,10 +1036,19 @@ class Panel {
         m?.kind === "image" ? null : pills("sound", ["on", "off"], it.muted ? "off" : "on", (c, o) => (c.muted = o === "off")));
     }
     if (m?.kind === "audio") { box.replaceChildren(...rows.filter(Boolean)); return; }
+    const kts = keyTimes(it).map(k => it.start + k).filter(k => k >= a - 1e-9 && k <= b + 1e-9);   // a cut keeps the keys past its end
+    const go = t => { s.setTime(t); this.seeked(); };
+    const prev = kts.filter(k => k < s.time - 0.5 / fps).pop(), next = kts.find(k => k > s.time + 0.5 / fps);
+    const ease = Object.values(it.anim || {}).map(ks => keyAt(ks, s.time - it.start, fps)).find(Boolean)?.e;
     rows.push(h("h2", { class: "kkt-h2" }, "picture"), slider("opacity", "opacity", 0, 1, 0.01),
-      num("x", it.props.x, (c, x) => (c.props.x = x), { step: 1, tip: "pixels of the show size" }), num("y", it.props.y, (c, x) => (c.props.y = x), { step: 1 }),
-      num("size", it.props.scale, (c, x) => (c.props.scale = clamp(x, 0.01, 20)), { step: 0.05 }),
+      keyed(num("x", now.x, (c, x) => setProp(c, "x", x, s.time, fps), { step: 1, tip: "pixels of the show size" }), "x"),
+      keyed(num("y", now.y, (c, x) => setProp(c, "y", x, s.time, fps), { step: 1 }), "y"),
+      keyed(num("size", now.scale, (c, x) => setProp(c, "scale", clamp(x, 0.01, 20), s.time, fps), { step: 0.05 }), "scale"),
       pills("fit", ["fit", "fill", "stretch"], it.props.fit, (c, o) => (c.props.fit = o)));
+    if (kts.length) rows.push(h("div", { class: "kkt-row2" }, h("span", {}, "keys"), h("span", { class: "kkd-pills" },
+        h("button", { class: "kkd-pill", disabled: prev === undefined, title: "the key before", onclick: () => go(prev) }, "‹"),
+        h("button", { class: "kkd-pill", disabled: next === undefined, title: "the key after", onclick: () => go(next) }, "›"))),
+      ease ? pills("ease", EASES, ease, (c, o) => easeAt(c, s.time, fps, o)) : null);
     box.replaceChildren(...rows.filter(Boolean));
   }
 
@@ -1044,6 +1132,7 @@ function injectStyle() {
 .kkt-insp{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:5px;padding-right:2px;text-transform:lowercase}
 .kkt-h2{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);margin:6px 0 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none}
 .kkt-row2{display:flex;gap:6px;align-items:center;min-height:24px}.kkt-row2>span:first-child{width:62px;flex:none;color:var(--muted)}
+.kkt-root .kkt-key{margin-left:auto;flex:none;font-size:10px;padding:2px 6px}.kkt-root .kkt-key[aria-pressed=true]{background:var(--orange);color:var(--orange-ink);border-color:var(--orange)}
 .kkt-root .kkt-tabs .kkd-pill{padding:3px 9px}`;
   document.head.append(st);
 }
@@ -1056,5 +1145,21 @@ app.registerExtension({
     render: el => { panel = panel || new Panel(); el.style.position = "relative"; el.style.height = "100%"; panel.mount(el); } }],
   setup() {
     api.addEventListener("executed", () => panel?.rendersChanged());
+  },
+  // the render node's hidden 'timeline' input gets the show when queued (so an edit re-renders); not saved in the node
+  async beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData.name !== "KUBA_MasterRender") return;
+    const created = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+      const r = created?.apply(this, arguments);
+      const w = this.widgets?.find(w => w.name === "timeline");
+      if (w) {
+        w.hidden = true; w.computeSize = () => [0, -4];
+        if (w.element) w.element.style.display = "none";
+        if (w.inputEl) w.inputEl.style.display = "none";
+        w.serializeValue = () => { const d = rootGraph()?.extra?.[KEY]; return d ? JSON.stringify(d) : ""; };
+      }
+      return r;
+    };
   },
 });

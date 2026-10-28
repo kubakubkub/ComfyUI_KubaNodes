@@ -73,4 +73,32 @@ const r = layoutRect({ fit: "fit", scale: 1, x: 0, y: 0 }, 1000, 1000, 1920, 108
 check("fit: a square in 16:9 is as high as the frame", Math.abs(r.h - 1080) < 1e-9 && Math.abs(r.x - 420) < 1e-9, r);
 const m = migrate({ fps: 23.976, tracks: [{ items: [{ type: "clip", media: "m" }, { type: "nonsense" }] }] });
 check("migrate: whole fps, unknown pieces dropped, props filled", m.fps === 24 && m.tracks[0].items.length === 1 && m.tracks[0].items[0].props.fit === "fit", m);
+// 5. keys: the director's interpolation; a cut, a trim in and a move keep every key where it is in time
+const kbad = [];
+for (const c of KEY_CASES) c.t.forEach((t, i) => { const g = keyValue(c.keys, t); if (Math.abs(g - c.want[i]) > 1e-9) kbad.push([t, g, c.want[i]]); });
+check(`keyValue = key_value of the director (${KEY_CASES.length} key sets)`, !kbad.length, kbad.slice(0, 3));
+const anim = () => ({ id: "k", type: "clip", media: "m", start: 2, in: 0, out: -1, speed: 1, length: -1, fill: "hold", reverse: false,
+  props: { opacity: 1, x: 0, y: 0, scale: 1, fit: "fit" }, anim: { opacity: [{ t: 0, v: 0, e: "linear" }, { t: 3, v: 1, e: "smooth" }], x: [{ t: 1, v: -50, e: "hold" }, { t: 4, v: 80, e: "smooth" }] } });
+const at = (items, t) => { for (const it of items) { const [a, b] = spanOf(it, env); if (t >= a - 1e-9 && t < b - 1e-9) return propsAt(it, t); } return null; };
+const same = (p, q) => p && q && Math.abs(p.opacity - q.opacity) < 1e-6 && Math.abs(p.x - q.x) < 1e-6;
+const kdiff = [], kwhole = anim();
+const kparts = splitItem(anim(), 4.2, env);
+for (let t = 2; t < 10 - 1e-9; t += 0.04) if (!same(at([kwhole], t), at(kparts, t))) { kdiff.push(["cut", +t.toFixed(2)]); break; }
+const kt = anim(); trimLeftTo(kt, 3.5, env);
+for (let t = 3.5; t < 10 - 1e-9; t += 0.04) if (!same(at([kwhole], t), at([kt], t))) { kdiff.push(["trim", +t.toFixed(2)]); break; }
+check("keys stay in time through a cut and a trim in", !kdiff.length, kdiff[0]);
+const k1 = anim(); k1.start = 5;
+check("keys move with the piece", Math.abs(propsAt(k1, 6.5).opacity - 0.5) < 1e-9 && propsAt(k1, 5).x === -50, propsAt(k1, 6.5));
+const k2 = anim(); delete k2.anim;
+toggleKey(k2, "scale", 3, 25); setProp(k2, "scale", 2, 4, 25); setProp(k2, "opacity", 0.3, 4, 25);
+check("a key button, then edits make keys (a value without keys stays plain)",
+  k2.anim.scale.length === 2 && k2.anim.scale[0].t === 1 && k2.anim.scale[1].v === 2 && !k2.anim.opacity && k2.props.opacity === 0.3, k2);
+setProp(k2, "scale", 3, 4.01, 25); toggleKey(k2, "scale", 3, 25); toggleKey(k2, "scale", 4, 25);
+check("an edit within half a frame changes that key; removing the last key leaves its value",
+  !k2.anim && k2.props.scale === 3, k2);
+const k3 = anim(); easeAt(k3, 2, 25, "hold");
+check("ease: every key at that time", k3.anim.opacity[0].e === "hold" && k3.anim.x[0].e === "hold", k3.anim);
+check("key times, each once", JSON.stringify(keyTimes(anim())) === "[0,1,3,4]", keyTimes(anim()));
+const mk = migrate({ tracks: [{ items: [{ type: "clip", media: "m", anim: { opacity: [{ t: 2, v: 1 }, { t: 1, v: "x" }, { t: 0, v: 0, e: "odd" }], fit: [{ t: 0, v: 1 }], x: [] } }] }] });
+check("migrate: keys sorted and cleaned, only the four settings", JSON.stringify(mk.tracks[0].items[0].anim) === '{"opacity":[{"t":0,"v":0,"e":"smooth"},{"t":2,"v":1,"e":"smooth"}]}', mk.tracks[0].items[0].anim);
 process.exit(fails ? 1 : 0);

@@ -89,6 +89,9 @@ check("probe: size, fps, frames, alpha, audio", (info["w"], info["h"], info["fps
 got = media.decode(mov, [0, 5, 17, 45, 65, 79], info=info)
 ok = all(np.array_equal(got[k][0, 0, :3], colour(k)) for k in (0, 5, 17, 45, 65, 79))
 check("decode: exact frames incl. after a seek past 4 s", ok, str({k: got[k][0, 0].tolist() for k in got}))
+run = media.decode(mov, [24, 25, 26], info=info)
+check("decode: a run after a seek is not a frame late", all(np.array_equal(run[k][0, 0, :3], colour(k)) for k in run),
+      str({k: run[k][0, 0].tolist() for k in run}))
 check("decode: alpha kept", int(got[65][0, 0, 3]) == 40 + 65 and int(got[5][0, 0, 3]) == 45)
 small = media.decode(mov, [12], size=(32, 24), info=info)
 check("decode: scaled to the layer size", small[12].shape == (24, 32, 4) and np.abs(small[12][5, 5, :3].astype(int) - colour(12)).max() <= 2)

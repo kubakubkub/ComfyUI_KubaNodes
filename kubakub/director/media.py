@@ -204,7 +204,9 @@ def decode(path, indices, size=None, info=None):
     out = {}
     for run in _runs(indices, fps):
         first, n = run[0], run[-1] - run[0] + 1
-        start = max(0.0, (first - 0.5) / fps)                    # the first frame at or after = `first`
+        # a quarter frame early: `first` lands inside its slot of the constant-rate output (half a frame lands on the
+        # rounding edge when the file has sound, and the frame before it is repeated)
+        start = max(0.0, (first - 0.25) / fps)
         if vfr:           # the fps grid must stay anchored at the file's own time 0: no input seek
             pre, post, vf = [], (["-ss", f"{start:.6f}"] if start > 0 else []), [f"fps={fps!r}"] + scale
         else:

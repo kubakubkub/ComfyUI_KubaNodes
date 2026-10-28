@@ -42,6 +42,15 @@ The inspector on the right edits the selected piece: **at**, **in**, **out**, **
 (hold / loop), **backwards**, **sound**; and its **picture**: opacity, x / y (pixels of the show size), size and fit
 (fit / fill / stretch). A director block has *at*, *in* (seconds into the director's timeline) and *length*.
 
+## Keys
+
+Opacity, x, y and size of a piece can move. **◆** next to a value in the inspector puts a key there at the playhead
+(pressed = a key is there; press again to remove it). Once a value has keys, editing it at another time makes another key, as
+in the director. Keys belong to the piece: they move with it, and a cut or a trim in keeps them where they were in time.
+The piece shows its keys as small diamonds; click one to go there. **keys ‹ ›** jumps to the key before / after, and
+**ease** sets how the keys at the playhead go on to the next ones: *smooth*, *linear* or *hold* (the director's).
+The preview and the render play them.
+
 ## Sound
 
 A video's own sound and sound files (their own pieces, blue) play with the preview, at the clip's speed. Clips with sound
@@ -53,4 +62,17 @@ it off; a hidden track (◉) is not seen but still heard.
 Bottom left. The separators between preview, list, timeline and inspector can be dragged (double click = back to the
 default); the widths are kept in this browser. Clips play from small preview copies (made once per file, the same ones the director uses), in time with
 the playhead; it is a preview, close but not frame exact. A director block shows the director's last picture (run the
-workflow once). A render node that writes the whole show at the project size and fps comes next.
+workflow once). Clip sound at a speed other than 1 is not played (as in the director and the render); its waveform is drawn dimmed.
+
+## The render
+
+**kubakub timeline render** (kubakub/2d/director) renders the whole show at the project fps and the project size
+times **scale**: every frame, and the sound of the clips, sound files and directors mixed. It reads the show from the
+timeline when you queue; editing the timeline renders again. Connect the **director** output of every director that
+is on the timeline (a new socket appears for the next one); a director block that is not connected is left out and
+the **report** output says so, like missing files and sound left out at another speed. Upper tracks are drawn over
+lower ones, at their opacity, x / y, size and fit; hidden tracks are not drawn, muted ones not heard.
+
+Outputs: **frames**, **fps**, **audio**, **frame_count** and **report**. For a file, connect frames, fps and audio
+to **kubakub export video / frames**. Memory: frames x width x height x 12 bytes, so 1 minute at 25 fps and full HD
+is about 37 GB at scale 1 and 9 GB at 0.5; keep scale low for drafts.

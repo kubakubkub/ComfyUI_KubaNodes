@@ -10,7 +10,18 @@ may have changed since.
 directors. Every director of the workflow is a block on it; rendered clips (output/) and files dropped from Explorer
 go around and over them, cut, trimmed and sped up like a video layer in the director, with a small preview that plays
 the arrangement and its sound (sound files too, waveforms on the clips). Length, fps and size of the show are set there or on project settings, and the directors follow the
-fps. See [docs/master.md](docs/master.md). The render of the whole show comes next.
+fps. See [docs/master.md](docs/master.md).
+
+**kubakub timeline render**: the whole show as frames, fps and sound at the project size (times a scale) and fps,
+with the directors connected to it; into kubakub export video / frames for a file. A report says what was left out.
+
+**Keys on the timeline**: opacity, x, y and size of every piece can be animated (smooth / linear / hold, like the
+director's keys); they move with the piece and survive cuts and trims.
+
+**Fixed:**
+- **Video layers in the director were one frame late after a seek.** In a video file with sound, a piece that does
+  not start at the beginning of the file showed its first frame twice and every frame after it one frame late, in the
+  director's render. The timing is exact now.
 
 **Behaves differently than in 0.6.0:**
 - **project settings: fps is a whole number**, as in the director (25, 30 ...). A workflow saved with 29.97 now gives

@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from kubakub import master as ms  # noqa: E402
 from kubakub.director import media as md  # noqa: E402
+from kubakub.director.render import key_value  # noqa: E402
 
 failures = []
 
@@ -81,6 +82,13 @@ for name, seg, dur in segs:
         want.append(None if r is None else r[1])
     cases.append({"name": name, "seg": seg, "dur": dur, "t": ts, "want": want})
 
+# the panel's keys = the director's (key_value), probed at many times
+key_cases = []
+for keys in ([{"t": 0.5, "v": 0.2, "e": "smooth"}, {"t": 2, "v": 1, "e": "linear"}, {"t": 3, "v": -40, "e": "hold"}, {"t": 4, "v": 7, "e": "smooth"}],
+             [{"t": 1, "v": 3, "e": "linear"}], [{"t": 0, "v": 0, "e": "smooth"}, {"t": 0.04, "v": 100, "e": "smooth"}]):
+    ts = [round(-0.3 + k * 0.091, 4) for k in range(60)]
+    key_cases.append({"keys": keys, "t": ts, "want": [key_value(keys, t) for t in ts]})
+
 node = shutil.which("node")
 if node is None:
     print("skip the JavaScript checks: node is not installed")
@@ -89,7 +97,7 @@ else:
         src = f.read()
     src = re.sub(r"(?m)^import \{ app \} from .*$", "const app = { registerExtension() {} };", src)
     src = re.sub(r"(?m)^import \{ api \} from .*$", "const api = { addEventListener() {} };", src)
-    src += "\nconst CASES = " + json.dumps(cases) + ";\n"
+    src += "\nconst CASES = " + json.dumps(cases) + ";\nconst KEY_CASES = " + json.dumps(key_cases) + ";\n"
     with open(os.path.join(HERE, "js", "master_checks.mjs"), encoding="utf-8") as f:
         src += f.read()
     with tempfile.TemporaryDirectory() as d:

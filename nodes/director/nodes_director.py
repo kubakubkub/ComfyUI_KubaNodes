@@ -1720,7 +1720,7 @@ class KUBA_Director(io.ComfyNode):
         state = DirectorState(doc=seq_doc or doc_obj or None, base=base, sources=dict(sources), labels=labels, table=table,
                               scene=scene, W=W, H=H, pmask=pmask, audio=audio,
                               fps=float(rd.timeline(doc_obj)["fps"] if doc_obj else 25), still=comp,
-                              document=json.dumps(doc_obj) if doc_obj else "")
+                              document=json.dumps(doc_obj) if doc_obj else "", uid=str(getattr(hid, "unique_id", "") or ""))
         return io.NodeOutput(comp, masks, changed, out_regions, r["rules"],
                              json.dumps(doc_obj) if doc_obj else "", report, frames, fps, audio, pm_out, state, ui=ui_dict)
 
@@ -1742,6 +1742,7 @@ class DirectorState:
     fps: float
     still: torch.Tensor
     document: str = ""                                # the director's 'document' output (doc has cutout sources)
+    uid: str = ""                                     # the director node's id: kubakub timeline render finds its blocks by it
 
     def _comfy_cache_tensors(self):
         """What ComfyUI's RAM-pressure cache counts for this output: zero-copy tensor views of the arrays (without

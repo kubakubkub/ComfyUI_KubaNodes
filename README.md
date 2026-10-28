@@ -235,7 +235,7 @@ One page per menu group, with every input, the rule syntax, speeds and tests:
 | [sketch](docs/sketch.md) | scan to line, regions from sketch, line overlay |
 | [generate](docs/generate.md) | region prompt (fields, no rule text), region plan (the rule text), region sampler (Klein, Qwen Image 2.1 and its LoRAs), a shader as the material of your regions, seam pass, frame in frame |
 | [director](docs/director.md) | kubakub sound; the director window: layers, timeline, sound, LTX and H3 clips, diffuse, crop and compare, light layers, video mapping, behaviours, export |
-| [timeline](docs/master.md) | the master timeline in the bottom panel: directors and rendered clips one after another, project length / fps / size, cut, trim, speed, preview |
+| [timeline](docs/master.md) | the master timeline in the bottom panel: directors and rendered clips one after another, project length / fps / size, cut, trim, speed, keys, preview, and the timeline render node |
 | [post](docs/post.md) | colour match (a reference picture or a .cube), deflicker, retime, burn in |
 | [utils](docs/utils.md) | crop by drawing, uncrop, compare pictures and videos |
 | [tracking](docs/tracking.md) | kubakub tracker (every finder, depth, try this frame) and track draw (presets, marks, lines, inside, depth, stamp trail, blend modes, state words); tracks in the shader and the director |
