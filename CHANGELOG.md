@@ -4,7 +4,10 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
-## not released yet
+## 0.7.0 (2026-10-28)
+
+The show on one line: a master timeline above the directors, and two ready apps that go from a facade to a moving
+show (pictures with Flux 2 Klein, clips with LTX, scenes in the director, all on the timeline).
 
 **The master timeline** (*kubakub timeline* in ComfyUI's bottom panel): the whole show on one line, above the
 directors. Every director of the workflow is a block on it; rendered clips (output/) and files dropped from Explorer
@@ -18,7 +21,27 @@ with the directors connected to it; into kubakub export video / frames for a fil
 **Keys on the timeline**: opacity, x, y and size of every piece can be animated (smooth / linear / hold, like the
 director's keys); they move with the piece and survive cuts and trims.
 
+**kubakub timeline render: clips**: connect the output of the Save Video that writes a clip on the timeline (an
+LTX clip made in the same workflow); the show is drawn after that clip is saved, so the first run already has it.
+
+**Apps** (open in App Mode):
+- **09 facade show** (example_workflows/09_facade_show.app.json): a facade picture and its mask folder in, a prompt
+  per region; Flux 2 Klein 4B paints every region, LTX 2.5 moves the ones marked to move. Six fields, two results.
+  See [docs/facade_show_app.md](docs/facade_show_app.md).
+- **10 facade show + timeline** (example_workflows/10_facade_show_timeline.json): the same, with two director scenes
+  (a light sweep with door rays; caustics and flow lines) and the LTX clip on the timeline, rendered into one video.
+
+**kubakub sample facade**: optional **facade_file** and **masks_folder**: your own matrix and mask folder; left
+empty, the built-in sample.
+
 **Fixed:**
+- **A video with a dropped frame got a wrong fps.** A 24 fps file missing one frame was read as 23.75 fps, so the
+  director and the timeline drifted against it. Its clean rate is used now.
+- **Two identical directors shared one result.** Two directors with the same settings in one workflow gave the
+  same picture; each renders its own now.
+- **Timeline keys went to the graph.** Del, Ctrl Z / Y and Ctrl K in the timeline panel also acted on ComfyUI's
+  nodes; they stay in the panel now. Shift + right grip sets the length; a render before the first edit uses the
+  show the panel shows.
 - **Video layers in the director were one frame late after a seek.** In a video file with sound, a piece that does
   not start at the beginning of the file showed its first frame twice and every frame after it one frame late, in the
   director's render. The timing is exact now.

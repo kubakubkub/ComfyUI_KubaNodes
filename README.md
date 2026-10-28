@@ -13,17 +13,15 @@ regions of starter 01 connected):
 
 ## What's new
 
-**0.6.0**, point clouds that hear the song, tracking, crop and compare:
-- **kubakub pointclouder:** a picture or a video lifted into millions of points by any depth node and filmed with
-  a camera move, live on the node (drag, pick a move or record your own). The points shiver, blink and fall into
-  scan lines each on their own; the song moves the depth band by band and sweeps through it on the beat. Draw
-  force curves with the mouse or let your regions (all the windows) attract the points. Writes a .ply too.
-  [docs/pointcloud.md](docs/pointcloud.md)
-- **kubakub tracker and track draw:** follow what moves in a video (motion, a colour, people, things you name,
-  hands, a motif you click) and draw it as a live diagram with marks, lines, depth layers and blend modes; it can
-  pulse with a sound. Tracks also steer kubakub shader and the director.
-- **kubakub crop, uncrop and compare:** crop by drawing as in Photoshop (outpaint mask included), put the edit
-  back, and compare any two pictures or videos frame by frame; the director crops and compares too.
+**0.7.0**, the show on one line:
+- **kubakub timeline:** a tab of the bottom panel that holds the whole show. Every director is a block on it;
+  rendered clips, pictures and sounds go around and over them, cut, trimmed, sped up and keyed (opacity, position,
+  size), with a preview that plays it with sound. *kubakub timeline render* turns it into frames and sound for the
+  projector. [docs/master.md](docs/master.md)
+- **Two facade apps for App Mode:** 09 takes a facade and its masks, paints every region with Flux 2 Klein and moves
+  the chosen ones with LTX; 10 adds two director scenes and puts it all on the timeline as one video.
+  [docs/facade_show_app.md](docs/facade_show_app.md)
+- **kubakub sample facade** takes your own matrix and mask folder.
 
 Everything that changed, version by version: [CHANGELOG.md](CHANGELOG.md). Updates arrive through ComfyUI Manager
 (*Update*) or `git pull`; a problem or a wish: [open an issue](https://github.com/kubakubkub/ComfyUI_KubaNodes/issues).
