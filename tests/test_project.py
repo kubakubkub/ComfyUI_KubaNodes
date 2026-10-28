@@ -36,6 +36,8 @@ check("viewer matches the size", p["viewer"].width_px == 3840 and p["viewer"].he
 check("viewer centre and distance", p["viewer"].x_m is None and p["viewer"].distance_m == 15.0)
 check("mm per px in the report", "10.4 mm per px" in p["report"], p["report"])
 check("fps is a float", isinstance(p["fps"], float) and p["fps"] == 25.0)
+check("fps is whole (old 29.97 workflows -> 30)", pj.build("x", "custom", 64, 64, 29.97, 40.0, 0.0, -1.0, 1.7, 15.0)["fps"] == 30.0)
+check("fps clamped to the director's 1..120", pj.whole_fps(0.2) == 1 and pj.whole_fps(500) == 120 and pj.whole_fps("x") == 25)
 
 
 # menu switches

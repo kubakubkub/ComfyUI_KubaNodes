@@ -28,6 +28,7 @@ _MODULES = [                        # nodes/<menu group>/<module>
     "nodes.generate.nodes_versions",
     "nodes.generate.nodes_frames",
     "nodes.director.nodes_director",
+    "nodes.master.nodes_master",
     "nodes.motion.nodes_video",
     "nodes.motion.nodes_keyframes",
     "nodes.motion.nodes_soundswap",

@@ -56,10 +56,20 @@ def eye_preview(viewer, picture=None):
     return prev.astype(np.float32) / 255
 
 
+def whole_fps(fps) -> int:
+    """Frames per second as the director uses them: a whole number from 1 to 120 (29.97 -> 30)."""
+    try:
+        f = float(fps)
+    except (TypeError, ValueError):
+        return 25
+    return max(1, min(120, int(round(f)))) if f == f else 25
+
+
 def build(name, preset, width, height, fps, facade_width_m, bottom_m, viewer_x_m, eye_height_m, distance_m,
           matrix_shape=None) -> dict:
     """Everything the node outputs, plus a one-line report."""
     w, h, src = resolve_size(preset, width, height, matrix_shape)
+    fps = whole_fps(fps)
     viewer = vw.Viewer(w, h, float(facade_width_m), float(bottom_m), None if viewer_x_m < 0 else float(viewer_x_m),
                        float(eye_height_m), float(distance_m))
     nm = safe_name(name)

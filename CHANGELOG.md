@@ -4,6 +4,18 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## not released yet
+
+**The master timeline** (*kubakub timeline* in ComfyUI's bottom panel): the whole show on one line, above the
+directors. Every director of the workflow is a block on it; rendered clips (output/) and files dropped from Explorer
+go around and over them, cut, trimmed and sped up like a video layer in the director, with a small preview that plays
+the arrangement and its sound (sound files too, waveforms on the clips). Length, fps and size of the show are set there or on project settings, and the directors follow the
+fps. See [docs/master.md](docs/master.md). The render of the whole show comes next.
+
+**Behaves differently than in 0.6.0:**
+- **project settings: fps is a whole number**, as in the director (25, 30 ...). A workflow saved with 29.97 now gives
+  30.
+
 ## 0.6.0 (2026-10-27)
 
 Crop by drawing, compare anything with anything, track what moves in a video to draw it as a diagram, and film a

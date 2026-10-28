@@ -30,8 +30,9 @@ class KUBA_Project(io.ComfyNode):
                                tooltip="Matrix size; custom = width / height below. A connected matrix wins."),
                 io.Int.Input("width", default=3840, min=64, max=16384, step=8, tooltip="Matrix width (preset custom)."),
                 io.Int.Input("height", default=2160, min=64, max=16384, step=8, tooltip="Matrix height (preset custom)."),
-                io.Float.Input("fps", default=25.0, min=1.0, max=120.0, step=0.001,
-                               tooltip="Frames per second of the show (e.g. 25, 30 or 29.97)."),
+                io.Float.Input("fps", default=25.0, min=1.0, max=120.0, step=1.0, round=1.0,
+                               tooltip="Frames per second of the show, a whole number (e.g. 25 or 30), the same as "
+                                       "the director's timeline."),
                 io.Float.Input("facade_width_m", default=40.0, min=0.1, max=10000.0, step=0.1,
                                tooltip="Real width of the whole matrix on the building, in metres."),
                 io.Float.Input("bottom_m", default=0.0, min=-100.0, max=1000.0, step=0.1, advanced=True,

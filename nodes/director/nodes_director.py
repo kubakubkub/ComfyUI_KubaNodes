@@ -233,12 +233,22 @@ def _input_path(name):
     return path if path.startswith(base + os.sep) and os.path.isfile(path) else None
 
 
+def _output_path(name):
+    """A file in ComfyUI's output folder (no escaping it), or None."""
+    base = os.path.realpath(folder_paths.get_output_directory())
+    path = os.path.realpath(os.path.join(base, name))
+    return path if path.startswith(base + os.sep) and os.path.isfile(path) else None
+
+
 def _source_video(ref):
-    """'file:<name in input/>' (uploaded) or 'path:<absolute path>' (linked, e.g. a big ProRes on disk) -> the video
-    file, or None."""
+    """'file:<name in input/>' (uploaded), 'output:<name in output/>' (a render, e.g. from the master timeline) or
+    'path:<absolute path>' (linked, e.g. a big ProRes on disk) -> the video file, or None."""
     ref = str(ref or "")
     if ref.startswith("path:"):
         p = _local_file(ref[5:])                                 # local drive letters only (mapped drives work)
+        return p if p and md.is_video(p) else None
+    if ref.startswith("output:"):
+        p = _output_path(ref[7:])
         return p if p and md.is_video(p) else None
     name = ref[5:] if ref.startswith("file:") else ref
     return _input_path(name) if name and md.is_video(name) else None
@@ -1285,7 +1295,7 @@ def _register_routes():
                 return web.json_response({"error": PATHS_OFF}, status=403)
             path = _source_video(name)
             if not path:
-                return web.json_response({"error": "video not found: " + name[5:]}, status=404)
+                return web.json_response({"error": "video not found: " + name.split(":", 1)[-1]}, status=404)
             info = md.probe(path)
             st = os.stat(path)
             # PROXY_VERSION: proxies made by an older media.py (e.g. before rotated phone clips) are made again
