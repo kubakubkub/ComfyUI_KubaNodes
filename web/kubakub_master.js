@@ -39,6 +39,7 @@ export function migrate(d) {                         // an older / partial docum
   d.fps = wholeFps(d.fps || n.fps);
   d.width = Math.round(+d.width || n.width); d.height = Math.round(+d.height || n.height);
   d.media = Array.isArray(d.media) ? d.media.filter(m => m && m.id && m.source) : [];
+  for (const m of d.media) m.name = String(m.name || m.source).replace(/^(output|file):/, "").split("/").pop();   // older shows: 'output:x.png'
   d.tracks = Array.isArray(d.tracks) && d.tracks.length ? d.tracks : n.tracks;
   for (const t of d.tracks) {
     t.id = t.id || uid("t"); t.name = String(t.name || "v");
@@ -485,7 +486,8 @@ class Timeline {
     if (!h) { if (!e.shiftKey) s.sel.clear(); s.emit("sel"); this.drag = { type: "scrub" }; this.seek(x); return; }
     if (h.zone === "key") { s.sel.clear(); s.sel.add(h.it.id); s.emit("sel"); s.setTime(h.t); this.panel.seeked(); return; }
     const id = h.it.id; let click = false;
-    if (e.shiftKey) s.sel.has(id) ? s.sel.delete(id) : s.sel.add(id);
+    if (e.shiftKey && h.zone === "body") s.sel.has(id) ? s.sel.delete(id) : s.sel.add(id);   // Shift on a grip = length, not selection
+    else if (e.shiftKey && !s.sel.has(id)) { s.sel.clear(); s.sel.add(id); }
     else if (!s.sel.has(id)) { s.sel.clear(); s.sel.add(id); } else click = true;
     s.emit("sel"); if (!s.sel.has(id)) return;
     const type = h.zone === "body" ? "move" : h.zone === "l" ? "l" : "r";
@@ -730,14 +732,22 @@ class Panel {
     this.insp = h("div", { class: "kkt-insp" });
     this.previewBox = h("div", { class: "kkt-preview kkd-stage" }, this.preview.cv);
     this.tlBox = h("div", { class: "kkt-tlbox" }, this.tl.cv);
-    this.root = h("div", { class: "kkt-root", tabindex: "0" }, bar,
+    this.root = h("div", { class: "kkt-root" }, bar,
       this.body = h("div", { class: "kkt-body" }, this.previewBox, this.splitter("preview", 1), h("div", { class: "kkt-bin" }, this.tabs, this.list, this.file),
         this.splitter("list", 1), this.tlBox, this.splitter("insp", -1), this.insp));
     this.cols = { ...COL_DEF };
     try { Object.assign(this.cols, JSON.parse(localStorage.getItem(COLS) || "{}")); } catch { /* private window: the defaults */ }
     this.applyCols();
-    this.root.addEventListener("keydown", e => this.key(e));
-    this.root.addEventListener("pointerdown", e => { if (!e.target.closest("input,select,textarea,button")) this.root.focus({ preventScroll: true }); });
+    // the graph canvas takes Ctrl Z / Del / Ctrl A on the whole page (document, capture): the window's capture comes first.
+    // The keys go to a hidden read-only field: ComfyUI's workflow undo (Ctrl Z / Y, window capture, ahead of us) leaves
+    // a focused input alone, else it would undo the workflow right after our own undo.
+    this.sink = h("input", { class: "kkt-sink", readonly: true, "aria-label": "kubakub timeline keys" });
+    this.root.append(this.sink);
+    window.addEventListener("keydown", e => { if (this.root.isConnected && this.root.contains(e.target)) this.key(e); }, true);
+    this.root.addEventListener("keydown", e => { if (e.target.closest("input,select,textarea")) e.stopPropagation(); });
+    // (an input focused on pointerdown cancels the drag of a list row: those take the focus on click)
+    this.root.addEventListener("pointerdown", e => { if (!e.target.closest("input,select,textarea,button,[draggable=true]")) this.focusKeys(); });
+    this.root.addEventListener("click", e => { if (e.target.closest("[draggable=true]")) this.focusKeys(); });
     this.dropZone(this.tlBox, true); this.dropZone(this.list, false);
     // ComfyUI opens a file dropped anywhere on the page as a workflow (a rendered mp4 carries one): keep ours here
     for (const ev of ["dragover", "drop"]) this.root.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); });
@@ -761,6 +771,7 @@ class Panel {
     for (const [k, v] of Object.entries(this.cols)) if (COL_DEF[k]) this.body.style.setProperty(`--c-${k}`, `${clamp(+v || COL_DEF[k], 100, 1200)}px`);
     this.preview.dirty = true;
   }
+  focusKeys() { if (document.activeElement !== this.sink) this.sink.focus({ preventScroll: true }); }
   saveCols() { try { localStorage.setItem(COLS, JSON.stringify(this.cols)); } catch { /* not kept: fine */ } }
   mount(el) { el.append(this.root); this.theme(); this.watch(); this.tl.resize(); this.tl.dirty = true; }
   theme() {                                          // follow ComfyUI's light / dark palette, not the system's
@@ -873,12 +884,12 @@ class Panel {
   }
   async mediaFor(source) {                           // the show's entry for a file, made (probed) when new
     const old = this.store.doc.media.find(m => m.source === source); if (old) return [old, null];
-    const kind = kindOf(source) || "image";
+    const kind = kindOf(source) || "image", name = source.replace(/^(output|file):/, "").split("/").pop();
     let info = null;
-    if (kind === "video") { this.status(`reading ${source.split("/").pop()}…`); info = await this.cache.info(source); }
-    else if (kind === "audio") { this.status(`reading ${source.split("/").pop()}…`); const w = await this.cache.waveOf(source); this.cache.waves.set(source, w); info = { duration: w.duration, audio: true }; }
+    if (kind === "video") { this.status(`reading ${name}…`); info = await this.cache.info(source); }
+    else if (kind === "audio") { this.status(`reading ${name}…`); const w = await this.cache.waveOf(source); this.cache.waves.set(source, w); info = { duration: w.duration, audio: true }; }
     else info = await new Promise(res => { const im = new Image(); im.onload = () => res({ w: im.naturalWidth, h: im.naturalHeight }); im.onerror = () => res({}); im.src = sourceURL(source); });
-    const m = { id: uid("m"), name: source.split("/").pop(), source, kind, info };
+    const m = { id: uid("m"), name, source, kind, info };
     return [m, m];
   }
   async addSource(source, at) {                      // at: {track, t} (onto the timeline) or null (the show's files only)
@@ -1056,7 +1067,7 @@ class Panel {
   key(e) {
     const ctrl = e.ctrlKey || e.metaKey, k = e.key, s = this.store, step = 1 / s.doc.fps;
     if (ctrl && /^(s|enter)$/i.test(k)) return;
-    if (e.target.closest("input,select,textarea")) { e.stopPropagation(); return; }
+    if (e.target !== this.sink && e.target.closest("input,select,textarea")) return;   // typing: the field's own (kept from ComfyUI in the bubble)
     let done = true;
     if (k === " " || k === "p" || k === "P") this.preview.toggle();
     else if (ctrl && /^z$/i.test(k)) e.shiftKey ? s.redo() : s.undo();
@@ -1092,6 +1103,7 @@ function injectStyle() {
 .kkt-root *{box-sizing:border-box}
 .kkt-root button,.kkt-root input,.kkt-root select{font:inherit;color:inherit}
 .kkt-root [hidden]{display:none!important}
+.kkt-root .kkt-sink{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0}
 .kkt-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;text-transform:lowercase}
 .kkt-root .kkd-logo{font-size:17px;letter-spacing:-.01em;margin-right:6px;white-space:nowrap;text-transform:lowercase}
 .kkt-root .kkd-logo b{font-weight:800}.kkt-root .kkd-logo span{font-weight:200;color:var(--lav)}
@@ -1157,7 +1169,11 @@ app.registerExtension({
         w.hidden = true; w.computeSize = () => [0, -4];
         if (w.element) w.element.style.display = "none";
         if (w.inputEl) w.inputEl.style.display = "none";
-        w.serializeValue = () => { const d = rootGraph()?.extra?.[KEY]; return d ? JSON.stringify(d) : ""; };
+        // a first look (the directors laid out, nothing edited yet) is not saved in the workflow, but it is the show
+        w.serializeValue = () => {
+          const ex = rootGraph()?.extra, d = ex?.[KEY] || (panel && panel.store.extra === ex ? panel.store.doc : null);
+          return d ? JSON.stringify(d) : "";
+        };
       }
       return r;
     };

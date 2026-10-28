@@ -101,4 +101,6 @@ check("ease: every key at that time", k3.anim.opacity[0].e === "hold" && k3.anim
 check("key times, each once", JSON.stringify(keyTimes(anim())) === "[0,1,3,4]", keyTimes(anim()));
 const mk = migrate({ tracks: [{ items: [{ type: "clip", media: "m", anim: { opacity: [{ t: 2, v: 1 }, { t: 1, v: "x" }, { t: 0, v: 0, e: "odd" }], fit: [{ t: 0, v: 1 }], x: [] } }] }] });
 check("migrate: keys sorted and cleaned, only the four settings", JSON.stringify(mk.tracks[0].items[0].anim) === '{"opacity":[{"t":0,"v":0,"e":"smooth"},{"t":2,"v":1,"e":"smooth"}]}', mk.tracks[0].items[0].anim);
+const mn = migrate({ media: [{ id: "a", source: "output:still.png", name: "output:still.png" }, { id: "b", source: "output:clips/a.mp4", name: "a.mp4" }, { id: "c", source: "file:x.wav" }] });
+check("migrate: file names without output: / file: (older shows)", mn.media.map(m => m.name).join() === "still.png,a.mp4,x.wav", mn.media);
 process.exit(fails ? 1 : 0);

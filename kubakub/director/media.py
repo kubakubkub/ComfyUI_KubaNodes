@@ -56,6 +56,17 @@ def _run(args, **kw):
 _PROBE: dict = {}
 
 
+def _clean_rate(f):
+    """23.98 / 29.97 / 59.94 printed rounded: the exact NTSC rate; any other rate as it is."""
+    n = round(f * 1.001)
+    return n * 1000 / 1001 if abs(f - round(f)) > 0.01 and abs(f * 1.001 - n) < 0.01 else f
+
+
+def _is_clean_rate(f):
+    """A whole number or an NTSC rate (n * 1000 / 1001)."""
+    return abs(f - round(f)) < 0.005 or abs(f * 1.001 - round(f * 1.001)) < 1e-6
+
+
 def probe(path: str) -> dict:
     """{w, h, fps, duration, frames, alpha, audio, codec, vp9} of a video file (cached per path + mtime)."""
     st = os.stat(path)
@@ -74,10 +85,13 @@ def probe(path: str) -> dict:
         if m:
             fps = re.search(r", ([\d.]+) fps", line)
             tbr = re.search(r", ([\d.]+) tbr", line)
-            f = float((fps or tbr).group(1)) if (fps or tbr) else 25.0
-            n = round(f * 1.001)                     # 23.98 / 29.97 / 59.94 printed rounded: the exact NTSC rate
-            if abs(f - round(f)) > 0.01 and abs(f * 1.001 - n) < 0.01:
-                f = n * 1000 / 1001
+            f = _clean_rate(float((fps or tbr).group(1))) if (fps or tbr) else 25.0
+            if fps and tbr and not _is_clean_rate(f):
+                # a constant-rate file with dropped frames: the average is a bit below the stream's base rate,
+                # and the frames sit on the base rate's grid (24 fps with one frame missing reports 23.75)
+                base = _clean_rate(float(tbr.group(1)))
+                if _is_clean_rate(base) and 0 < base - f <= 0.05 * base:
+                    f = base
             pf = re.search(r"Video: [^,]*, (\w+)(?:\(([^)]*)\))?", line)
             pix, tags = (pf.group(1), pf.group(2) or "") if pf else ("", "")
             bits = re.search(r"p(9|10|12|14|16)(le|be)|(48|64)(le|be)", pix)

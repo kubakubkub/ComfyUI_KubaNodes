@@ -1387,6 +1387,9 @@ class KUBA_Director(io.ComfyNode):
             category="kubakub/2d/director",
             search_aliases=['projection mapping', 'layers', 'compositor', 'timeline', 'lights'],
             is_output_node=True,
+            # its output belongs to this node (its id, state, temp folder): two directors with the same inputs must not
+            # share one cached result (ComfyUI adds the node id for a hidden unique_id only on legacy nodes)
+            not_idempotent=True,
             description=(
                 "Compose the projection by hand in a layer window: place, scale, rotate and stack images over the facade, "
                 "decide what is in front of what, mask layers with other layers, paint, colour grade, import "

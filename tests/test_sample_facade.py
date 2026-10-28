@@ -50,6 +50,32 @@ with tempfile.TemporaryDirectory() as d:
     check("the facade mask atlas reads the folder (mask_folder, recursive)", labels.shape == (540, 960) and len(meta) >= 27,
           f"{len(meta)} entries")
 
+# the node: your own facade_file + masks_folder instead of the sample (the facade show app's source)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(HERE))))     # ComfyUI (folder_paths, comfy_api)
+sys.path.insert(0, HERE)
+import _pack  # noqa: E402,F401
+from kubapack.nodes.project import nodes_sample as ns  # noqa: E402
+from kubakub import imio  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    own = os.path.join(tmp, "fassade_ż.png")                       # a non-ASCII path, as on Polish / French machines
+    imio.imwrite(own, (r["image"][..., ::-1] * 255).astype(np.uint8))
+    masks = os.path.join(tmp, "Masks")
+    sf.write_mask_folder(r["masks"], masks)
+    out = ns.KUBA_SampleFacade.execute(1920, 1080, 3, 7, "sandstone", 0, facade_file=f'"{own}"', masks_folder=masks).args
+    check("own facade: its size (not width / height), its pixels", tuple(out[0].shape) == (1, 540, 960, 3)
+          and float((out[0][0].numpy() - r["image"]).__abs__().max()) < 1 / 255 + 1e-6)
+    check("own facade: the mask folder passed on, silhouette = union of the masks",
+          out[3] == masks and float(out[2].sum()) > 0 and float(out[2][0, 2, 480]) == 0)
+    for kw, word in (({"facade_file": own}, "masks_folder is empty"), ({"masks_folder": masks}, "facade_file is empty")):
+        try:
+            ns.KUBA_SampleFacade.execute(1920, 1080, 3, 7, "sandstone", 0, **kw)
+            check(f"own facade: says '{word}'", False)
+        except ValueError as e:
+            check(f"own facade: says '{word}'", word in str(e), str(e))
+    empty = ns.KUBA_SampleFacade.execute(960, 540, 3, 7, "sandstone", 1).args
+    check("empty fields: still the sample", np.array_equal(empty[0][0].numpy(), r["image"]))
+
 print()
 print("all sample facade tests passed" if not failures else f"{len(failures)} FAILED: " + ", ".join(failures))
 sys.exit(1 if failures else 0)

@@ -160,6 +160,16 @@ for k, f in vd.items():
     if abs(index_of(f[5, 5]) - want) > 1:
         bad.append((k, index_of(f[5, 5]), want))
 check("VFR: decoded frame k is the one shown at k / fps (within 1)", not bad and len(vd) == vi["frames"], str(bad[:5]))
+# constant 24 fps with one dropped frame: the average says 23.84, the frames sit on the 24 grid (no drift after it)
+drop = os.path.join(tmp, "dropped.mov")
+frames_file(drop, 150, 24, vf=r"select='not(eq(n\,40))'", extra_out=["-fps_mode", "passthrough"])
+di = media.probe(drop)
+check("dropped frame: fps is the base rate 24, not the average", di["fps"] == 24.0 and not di["vfr"] and di["frames"] == 150,
+      str({k: di[k] for k in ("fps", "vfr", "frames")}))
+dd = media.decode(drop, [10, 39, 40, 41, 100, 101, 149], info=di)
+want = {10: 10, 39: 39, 40: 39, 41: 41, 100: 100, 101: 101, 149: 149}   # 40 is missing: 39 is held
+check("dropped frame: frames after the gap stay in place, also after a seek past 4 s",
+      all(np.array_equal(dd[k][5, 5, :3], colour(v)) for k, v in want.items()), str({k: index_of(dd[k][5, 5]) for k in dd}))
 # no Duration in the header (a piped WebM): real length from the stream, no ZeroDivisionError in a loop
 piped = os.path.join(tmp, "piped.webm")
 with open(piped, "wb") as fh:

@@ -167,6 +167,11 @@ class KUBA_MasterRender(io.ComfyNode):
                                tooltip="Size of the frames: 1 = the project size (memory: frames x width x height x 12 bytes)."),
                 io.String.Input("timeline", default="", tooltip="The show, written here by the kubakub timeline panel "
                                                                 "(hidden; empty = the one saved in the workflow)."),
+                io.Autogrow.Input("clips", optional=True, template=io.Autogrow.TemplatePrefix(
+                    input=io.Video.Input("clip", tooltip="The video output of a node whose saved clip is on the timeline "
+                                                         "(e.g. Save Video after an LTX node): the show is rendered after "
+                                                         "it, so a clip made in the same run is there."),
+                    prefix="clip_", min=0, max=16)),
             ],
             outputs=[
                 io.Image.Output("frames", tooltip="Every frame of the show."),
@@ -179,7 +184,8 @@ class KUBA_MasterRender(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, scale, timeline="", directors=None) -> io.NodeOutput:
+    def execute(cls, scale, timeline="", directors=None, clips=None) -> io.NodeOutput:
+        # clips only set the order (the files are read from the timeline's sources, after the nodes that save them)
         hid = getattr(cls, "hidden", None)
         doc = show_of(timeline, getattr(hid, "extra_pnginfo", None))
         if doc is None:

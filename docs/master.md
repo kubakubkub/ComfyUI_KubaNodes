@@ -70,7 +70,9 @@ workflow once). Clip sound at a speed other than 1 is not played (as in the dire
 times **scale**: every frame, and the sound of the clips, sound files and directors mixed. It reads the show from the
 timeline when you queue; editing the timeline renders again. Connect the **director** output of every director that
 is on the timeline (a new socket appears for the next one); a director block that is not connected is left out and
-the **report** output says so, like missing files and sound left out at another speed. Upper tracks are drawn over
+the **report** output says so, like missing files and sound left out at another speed. A clip that a node of the
+same workflow makes (an LTX clip saved by Save Video): connect that Save Video's output to **clips** (a new socket
+appears for the next one), so the show is drawn after the clip is written and the first run already has it. Upper tracks are drawn over
 lower ones, at their opacity, x / y, size and fit; hidden tracks are not drawn, muted ones not heard.
 
 Outputs: **frames**, **fps**, **audio**, **frame_count** and **report**. For a file, connect frames, fps and audio

@@ -214,6 +214,10 @@ director(doc, uid="p1", layers=lay)
 check("unchanged inputs / result: no new proxy files", sorted(os.listdir(folder)) == before, str(sorted(set(os.listdir(folder)) - set(before))))
 check("director state tells ComfyUI's cache its size", sum(t_.untyped_storage().nbytes() for t_ in d_in.result[11]._comfy_cache_tensors())
       >= base.numel() * 4)
+# two directors with the same inputs: ComfyUI's cache key holds the node id (else node 3 got node 2's state and the
+# timeline render left director 3 out although connected)
+check("director: the node id is in ComfyUI's cache key (not idempotent)", nd.KUBA_Director.define_schema().not_idempotent is True
+      and nd.KUBA_Director.NOT_IDEMPOTENT is True)
 
 # ------------------------------------------------------------------ video windows decoded ahead = decoded per frame
 try:

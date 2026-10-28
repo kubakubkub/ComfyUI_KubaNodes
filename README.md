@@ -30,7 +30,23 @@ Everything that changed, version by version: [CHANGELOG.md](CHANGELOG.md). Updat
 
 ## How the parts fit together
 
-The pack answers five questions, and each one has one place where you answer it.
+Three levels, like a film set:
+
+```
+ kubakub timeline   the show: always there in the bottom panel; directors, rendered clips, pictures and sounds
+        ▲           on tracks; timeline render → export for the projector
+ kubakub director   a scene: one window per director with layers, lights, keys, behaviours and sound
+        ▲
+ the nodes          the instruments that make material for a scene: regions, region sampler (Flux Klein),
+                    region video sampler (LTX / H3), shader, sound, tracker, pointclouder, 3D scene, finishing
+```
+
+A node is never on its own: its picture or clip goes into a director (as the facade, a layer or a video layer), and
+every director is a block on the timeline. You can start at any level: **09 facade show** is the shortest way from a
+facade to a moving picture, **03** opens a director, the timeline is the bottom panel tab *kubakub timeline*
+([docs/master.md](docs/master.md)).
+
+The nodes answer five questions, and each one has one place where you answer it.
 
 **Where? Regions.** The facade split into every window, door, cornice and floor, each with a name. From a colour
 matrix, a folder of After Effects masks, an Illustrator file, a hand sketch, SAM 3, a cryptomatte or ID render, or
