@@ -1127,7 +1127,7 @@ function injectStyle() {
 .kkt-split{position:relative;cursor:col-resize;touch-action:none}
 .kkt-split::after{content:"";position:absolute;top:0;bottom:0;left:4px;width:2px;border-radius:2px;background:transparent;transition:background .12s}
 .kkt-split:hover::after,.kkt-split.drag::after{background:var(--lav)}
-.kkt-root .kkd-stage{background:var(--stage);border:1px solid var(--stage-edge);border-radius:6px}
+.kkt-root .kkd-stage{background:var(--stage);border:1px solid var(--stage-edge);border-radius:6px;grid-column:auto;grid-row:auto}
 .kkt-preview{display:grid;place-items:center;overflow:hidden;min-height:0}
 .kkt-preview canvas{max-width:100%;max-height:100%;display:block}
 .kkt-bin{display:flex;flex-direction:column;gap:6px;min-height:0}
