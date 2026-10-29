@@ -1,8 +1,12 @@
 # kubakub nodes
 
-**Projection mapping inside ComfyUI.** Tools to turn a building facade into a show: split it into its parts,
-give every part its own material and its own prompt, move it with curves and sound, compose it in a timeline
-window, and export the result for the projector.
+**A visual toolset inside ComfyUI for pictures made of parts.** Bring a plate and its masks: object IDs, a
+cryptomatte, mask PNGs from any compositor, a vector file, or the 3D model itself (fbx / glb / blend). Give every
+part its own look and its own prompt, move it with curves and sound, compose scenes in a compositor window, and cut
+the show on a timeline. You can work at any of these levels and go back to the others at any time.
+
+It started with projection mapping on building facades, and a facade case study runs through the examples. The
+same steps work for previz, music visuals, installations, stage design and stills.
 
 ![the kubakub director window](docs/images/director.png)
 
@@ -44,11 +48,17 @@ every director is a block on the timeline. You can start at any level: **09 faca
 facade to a moving picture, **03** opens a director, the timeline is the bottom panel tab *kubakub timeline*
 ([docs/master.md](docs/master.md)).
 
+The three levels in one window (workflow 10 on the sample facade, waits sped up): the show plays on the timeline,
+a double click on a block opens its scene in the director, a change there or on a node runs only what it touches,
+and the timeline plays the new show:
+
+![the graph above, the kubakub timeline across the bottom, a scene opened in the director, a prompt changed on a node](docs/images/three_levels.gif)
+
 The nodes answer five questions, and each one has one place where you answer it.
 
 **Where? Regions.** The facade split into every window, door, cornice and floor, each with a name. From a colour
-matrix, a folder of After Effects masks, an Illustrator file, a hand sketch, SAM 3, a cryptomatte or ID render, or
-straight from a 3D file. Every other node works on these regions, and wherever you choose some of them the field
+matrix, a folder of mask PNGs from any compositor (After Effects, Nuke, Fusion ...), an Illustrator file, a hand
+sketch, SAM 3, a cryptomatte or object-ID render from any 3D app, or straight from a 3D file. Every other node works on these regions, and wherever you choose some of them the field
 is called **which regions** and reads the same way (`W_F1_*`, `group:Windows`).
 
 **What? A shader is the material.** *kubakub shader* draws moving pictures and masks on the graphics card, with no
@@ -178,8 +188,8 @@ The menu is split into **2d** (images, masks, video) and **3d** (anything that n
 | **2d / motion** | pointclouder (a picture or a video lifted into up to two million points by any depth node, played live on the node: drag to look around, set the camera move from the view, pick a move (push in, orbit, handheld ...) or record your own; glow / ink / solid, drift, breathe, wind, curl, fine trails, a scan through the depth, arrows you draw that push the points; follows the sound; pictures morph into each other; tracked things sit in the cloud at their depth; .ply out), tracker (what moves in a video, followed with ids: motion, a colour, lights, people and things with body points or outlines, anything named in words, body / hands / face points, a clicked motif, exact outlines; several at once, all from files on your disk; with a depth node every thing gets its depth; with a sound the tracks carry its loudness and beats), track draw (the tracks as a diagram, played live on the node: boxes, outlines, circles, labels and state words, lines between them in nine ways, reveal / pixels inside, depth layers, depth contours, far = earlier, a stamp trail of their own pixels, each part in its own blend mode, marks that pulse and lines that flash with the sound; the tracks also steer kubakub shader and the director's 'follow'), sound (your sound and how it is heard, set once and carried on one cable to every node that listens; draws the loudness, the beats and the hits), region video sampler (LTX or H3; a shader clip on `material` moves the regions), motion guide (LTX or H3: a rough moving clip from the director, a shader or a previz becomes a finished video that keeps its motion), keyframe clips (H3 or LTX, video with sound), height animate (a height map or any depth map grows out of the wall: all together, peaks first, in layers or along a field, on a curve or with the sound; also as a lit relief), sound mask swap (layers trade their masks on beats, on low / high hits, or on a control signal), trim to exact duration (audio clips of a constant length for LTX AV) |
 | **2d / post** | align to source (an edited picture back onto the picture it was made from, to the pixel), colour match (to a reference picture or a .cube look, saved as .cube too), deflicker, retime (optical flow), burn in, export video / frames |
 | **3d / scene** | scene render (Blender: clay, depth, ID passes), projector (where it stands: metres from the wall, height, throw ratio, lens shift or tilt), projector blend (soft-edge masks for several projectors), scene relight (Cycles), scene measure, scene preview and walkthrough (previz from the audience; the spots and the walk are placed on a map on the node), scene surroundings (the street around the building, from a place on the map or your own model), align 3d model (a model from image-to-3D, moved, turned and scaled onto the real one; written as .glb or .obj with textures), form height (how far that model stands out of the real wall, as a height map in the projection view), brightness compensation |
-| **3d / pieces** | scene pieces, pieces falloff, pieces transform, pieces render: the model's parts (or whole regions) moved like MOPS in Houdini (a wave, a pulse, a stagger, noise or the beats of the director's timeline push, tilt, turn and scale stones, windows and cornices), rendered in Cycles as clay or with the matrix projected on them, from the projector or from the audience |
-| **3d / from renders** | render passes (a folder of your passes: picture, depth, normals, every other pass as a mask), regions from cryptomatte (every object by its name from the 3D scene), regions from id renders (Houdini, Blender, any ID pass) |
+| **3d / pieces** | scene pieces, pieces falloff, pieces transform, pieces render: the model's parts (or whole regions) moved like a MoGraph effector or MOPS (a wave, a pulse, a stagger, noise or the beats of the director's timeline push, tilt, turn and scale stones, windows and cornices), rendered in Cycles as clay or with the matrix projected on them, from the projector or from the audience |
+| **3d / from renders** | render passes (a folder of your passes: picture, depth, normals, every other pass as a mask), regions from cryptomatte (every object by its name from the 3D scene), regions from id renders (an object-ID pass from any 3D app: Blender, Houdini, Cinema 4D, 3ds Max ...) |
 | **3d / fabricate** | relief panels in millimetres (mould prep with anti perch, safety check, mass, export as STL panel or OBJ prow), mesh to relief field, save GLB |
 | **lab** | experiments: mosaic illusion, onnx style transfer, frame guide (old) |
 | **utils** | crop (drawn on the picture as in Photoshop: ratio, size and canvas past the edge on pills, nothing typed), uncrop (the edited crop back into the picture, soft edge), compare (two pictures or videos on the same frame: swipe, side by side, difference, blink, onion, a big window with zoom), load images from a folder, timecode filename prefix (clip start in seconds -> `name_mm-ss-ff`) |
@@ -256,7 +266,7 @@ One page per menu group, with every input, the rule syntax, speeds and tests:
 | [pointclouder](docs/pointcloud.md) | kubakub pointclouder: inputs, the camera move, moves and recording, the look, the motion, trails, drawn forces, the sound, tracked things in 3D, .ply |
 | [3d scene](docs/scene3d.md) | scene render and its ID passes, architecture passes, scene measure, preview, walkthrough, brightness compensation, moving pieces |
 | [live link](docs/live-link.md) | installing the Blender add-on and the Houdini package (in `tools/`) that send the open scene to scene render; checking, updating, removing, troubleshooting |
-| [from renders](docs/from-renders.md) | regions from ID renders (Houdini, Blender, any ID pass), regions from cryptomatte |
+| [from renders](docs/from-renders.md) | regions from ID renders (an object-ID pass from any 3D app), regions from cryptomatte |
 | [fabricate](docs/fabricate.md) | relief panels in millimetres, safety check, STL / OBJ |
 | [models](docs/MODELS.md) | the models the example workflows use, and where they go |
 

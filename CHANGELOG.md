@@ -4,7 +4,7 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
-## 0.7.0 (2026-10-28)
+## 0.7.0 (2026-10-29)
 
 The show on one line: a master timeline above the directors, and two ready apps that go from a facade to a moving
 show (pictures with Flux 2 Klein, clips with LTX, scenes in the director, all on the timeline).

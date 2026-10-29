@@ -10,7 +10,7 @@ one region (unless small regions are dropped). Region ids follow reading order
 
 | input | default | what it does |
 |---|---|---|
-| matrix | | The facade matrix image, e.g. the 3840x2160 contest PNG. |
+| matrix | | The facade matrix image, e.g. a 3840x2160 PNG. |
 | mode | color_regions | `color_regions`: flat fills in the matrix. `line_drawing`: closed cells between lines. `mask_folder`: one region per PNG in a folder. |
 | min_region_area | 400 | Regions smaller than this many pixels are merged or dropped. Anti-aliasing specks and gaps end up here. |
 | merge_small_regions | on | On: a small region joins the neighbour it shares the longest border with. Off: it is dropped and its pixels stay unassigned (never diffused). |

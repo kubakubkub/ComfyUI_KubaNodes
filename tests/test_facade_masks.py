@@ -7,7 +7,7 @@ ComfyUI and loads no model.
 
 Run from the ComfyUI_windows_portable folder:
     python_embeded\\python.exe ComfyUI\\custom_nodes\\ComfyUI_KubaNodes\\tests\\test_facade_masks.py
-Add --full to also time color_regions at the contest size (3840x2160).
+Add --full to also time color_regions at a full facade size (3840x2160).
 Preview PNGs are written to tests/test_output/ (git ignored).
 """
 
