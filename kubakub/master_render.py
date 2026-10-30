@@ -128,6 +128,9 @@ def _read_picture(path):
     return cv2.cvtColor(im[..., :3], cv2.COLOR_BGR2RGB)
 
 
+DIRECTOR_STILL_S = 10.0                                           # = directorInfo() in web/kubakub_master.js
+
+
 def _mix_into(sound, part, a0):
     """part [2, n] added into sound [2, S] from sample a0 on (cut at both ends)."""
     a1 = min(sound.shape[1], a0 + part.shape[1])
@@ -197,7 +200,8 @@ def render(doc, scale, resolve, director, sr=SR):
                 dfr, dfps, dsound = got
                 n = int(dfr.shape[0])
                 tin = max(0.0, float(it.get("in", 0) or 0))
-                length = length if length > 0 else max(1.0 / fps, n / dfps - tin)
+                natural = n / dfps if n > 1 else DIRECTOR_STILL_S    # a still holds as long as the panel shows it
+                length = length if length > 0 else max(1.0 / fps, natural - tin)
                 counts["directors"] += 1
                 if seen:
                     for f in _frames(start, length, fps, N):

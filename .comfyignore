@@ -2,3 +2,4 @@
 # https://docs.comfy.org/registry/publishing
 tests/
 .github/
+colab/

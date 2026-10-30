@@ -17,6 +17,16 @@ regions of starter 01 connected):
 
 ## What's new
 
+**0.7.1**, fixes:
+- **LTX setup:** the setup tool now downloads the video VAE the LTX workflows load. If 04, 09 or 10 could not find
+  it, run the setup again.
+- **Tracker:** the face finder no longer stops the node, a second motif run no longer reads the frames of the one
+  before, and very long clips say so before they run out of memory.
+- **Timeline and compare:** a director with nothing applied holds for its whole block instead of going black, and
+  compare no longer mixes up two similar clips.
+- **Safer Colab notebook:** it starts with the file-reading routes closed, tells you when something fails, and can
+  be run again.
+
 **0.7.0**, the show on one line:
 - **kubakub timeline:** a tab of the bottom panel that holds the whole show. Every director is a block on it;
   rendered clips, pictures and sounds go around and over them, cut, trimmed, sped up and keyed (opacity, position,

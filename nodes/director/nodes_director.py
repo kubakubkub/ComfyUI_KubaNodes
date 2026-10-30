@@ -1550,8 +1550,10 @@ class KUBA_Director(io.ComfyNode):
                                  "or clear the node's document to start fresh.") from e
         follow = mo.compact_tracks(tracks)               # in the document while it renders, never in the saved one
         _TRACKS[uid] = follow
-        if follow and isinstance(doc_obj, dict) and doc_obj:
-            doc_obj["tracks"] = follow
+        if isinstance(doc_obj, dict):
+            doc_obj.pop("tracks", None)                  # a disconnected tracker is off, also in a pasted document
+            if follow and doc_obj:
+                doc_obj["tracks"] = follow
         audio_in, audio_doc = "", None
         if audio is not None and isinstance(doc_obj, dict):     # the sound on the cable is the timeline's sound
             if doc_obj:
@@ -1720,12 +1722,13 @@ class KUBA_Director(io.ComfyNode):
                         "set flow to 'always' to pass the base on)", uid)
             return io.NodeOutput(B, B, B, B, B, B, report, B, B, B, B, B, ui=ui_dict)
         pm_out = torch.from_numpy(pmask)[None] if pmask is not None else torch.ones((1, H, W))
+        saved_doc = json.dumps({k: v for k, v in doc_obj.items() if k != "tracks"}) if doc_obj else ""
         state = DirectorState(doc=seq_doc or doc_obj or None, base=base, sources=dict(sources), labels=labels, table=table,
                               scene=scene, W=W, H=H, pmask=pmask, audio=audio,
                               fps=float(rd.timeline(doc_obj)["fps"] if doc_obj else 25), still=comp,
-                              document=json.dumps(doc_obj) if doc_obj else "", uid=str(getattr(hid, "unique_id", "") or ""))
+                              document=saved_doc, uid=str(getattr(hid, "unique_id", "") or ""))
         return io.NodeOutput(comp, masks, changed, out_regions, r["rules"],
-                             json.dumps(doc_obj) if doc_obj else "", report, frames, fps, audio, pm_out, state, ui=ui_dict)
+                             saved_doc, report, frames, fps, audio, pm_out, state, ui=ui_dict)
 
 
 @dataclass(frozen=True)

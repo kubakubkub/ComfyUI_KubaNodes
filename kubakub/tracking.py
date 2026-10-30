@@ -36,7 +36,11 @@ import re
 from dataclasses import dataclass, field
 
 import cv2
+import shutil
+
 import numpy as np
+
+from . import imio
 
 log = logging.getLogger("KUBA.regions")
 
@@ -140,13 +144,11 @@ class MotionFinder:
                                                      detectShadows=False)
         self.min_area = max(4, float(s.get("min_size", 0.002)) * area)
         self.k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        self.amount = 0.0
 
     def __call__(self, rgb8, t):
         m = self.bg.apply(rgb8, learningRate=-1 if t > 0 else 1.0)
         m = cv2.morphologyEx(m, cv2.MORPH_OPEN, self.k)
         m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, self.k, iterations=2)
-        self.amount = float((m > 0).mean())
         return [] if t == 0 else _components(m > 0, "motion", self.min_area)
 
 
@@ -348,7 +350,7 @@ class FaceFinder:
         out = []
         for lms in res.multi_face_landmarks or []:
             allxy = np.array([(lm.x * W, lm.y * H) for lm in lms.landmark], np.float32)
-            pts = {f"p{i}": tuple(allxy[i]) for i in FACE_KEEP}
+            pts = {f"p{i}": (float(allxy[i, 0]), float(allxy[i, 1])) for i in FACE_KEEP}
             hull = cv2.convexHull(allxy).reshape(-1, 2)
             out.append(Det("face", (float(allxy[:, 0].min()), float(allxy[:, 1].min()), float(np.ptp(allxy[:, 0]) + 1),
                                     float(np.ptp(allxy[:, 1]) + 1)), "face", 1.0, hull, pts))
@@ -503,11 +505,10 @@ def sam2_motif(frames8, points, model_name, work_dir):
     """points [[t, x, y, positive, object] (x, y 0-1)] -> {t: [Det ...]} followed through all frames (both ways)."""
     import torch
     pred, dev = _sam2_model(model_name, True)
+    shutil.rmtree(work_dir, ignore_errors=True)          # never the frames of an earlier run (other clip or analysis size)
     os.makedirs(work_dir, exist_ok=True)
     for i, f in enumerate(frames8):                      # the video predictor reads a folder of numbered JPEGs
-        p = os.path.join(work_dir, f"{i:05d}.jpg")
-        if not os.path.isfile(p):
-            cv2.imwrite(p, cv2.cvtColor(f, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
+        imio.imwrite(os.path.join(work_dir, f"{i:05d}.jpg"), cv2.cvtColor(f, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 95])
     H, W = frames8[0].shape[:2]
     out = {}
     with torch.inference_mode(), torch.autocast(dev, dtype=torch.bfloat16, enabled=dev == "cuda"):
@@ -585,7 +586,7 @@ def associate(per_frame: list[list[Det]], keep_lost=8, max_tracks=200) -> list[_
         for kind in sorted({d.kind for d in dets} | {L.kind for L in live}):
             cand = [L for L in live if L.kind == kind]
             ds = [d for d in dets if d.kind == kind]
-            used_t, used_d = set(), set()
+            used_d = set()
             if cand and ds:
                 C = np.full((len(cand), len(ds)), 9.0)
                 for i, L in enumerate(cand):
@@ -611,11 +612,10 @@ def associate(per_frame: list[list[Det]], keep_lost=8, max_tracks=200) -> list[_
                         L.vel = (0.6 * L.vel[0] + 0.4 * v[0], 0.6 * L.vel[1] + 0.4 * v[1])
                         L.dets[t] = d
                         L.last = t
-                        used_t.add(i)
                         used_d.add(j)
             for j, d in enumerate(ds):
                 if j not in used_d and len(live) < max_tracks:
-                    L = _Live(next_id, kind, d.label if kind != "motif" else d.label, {t: d}, t)
+                    L = _Live(next_id, kind, d.label, {t: d}, t)
                     next_id += 1
                     live.append(L)
         for L in [q for q in live if t - q.last > keep_lost]:
@@ -810,10 +810,11 @@ def analyse(frames, fps=25.0, raw_settings="", work_dir=None, progress=None, onl
             per_frame[i] = dets
             if progress:
                 progress(k + 1, len(idx))
-        lives = associate(per_frame, int(s.get("keep_lost", 8)), int(s.get("max_tracks", 200)))
-        frames_for_colour = [small.get(i) if i in small else np.zeros((ah, aw, 3), np.uint8) for i in range(n)]
-        T = build_tracks(lives, frames_for_colour, scale, s, n, fps, W, H)
-        if only is not None:                              # one-frame check: every detection of those frames, ids by order
+        if only is None:
+            lives = associate(per_frame, int(s.get("keep_lost", 8)), int(s.get("max_tracks", 200)))
+            frames_for_colour = [small.get(i) if i in small else np.zeros((ah, aw, 3), np.uint8) for i in range(n)]
+            T = build_tracks(lives, frames_for_colour, scale, s, n, fps, W, H)
+        else:                                             # one-frame check: every detection of those frames, ids by order
             T = Tracks(W, H, n, fps)
             nid = 1
             for i in idx:
@@ -851,7 +852,6 @@ def near_field(data, t, w, h, reach=1.5):
     (the brightest wins where two meet). The picture's size is free (scaled from the tracks' own)."""
     sx, sy = w / data["W"], h / data["H"]
     out = np.zeros((h, w), np.float32)
-    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
     for tr in data["tracks"]:
         b = _at(tr, t)
         if b is None:
@@ -862,7 +862,8 @@ def near_field(data, t, w, h, reach=1.5):
         y0, y1 = int(max(0, cy - ry * (1 + reach))), int(min(h, cy + ry * (1 + reach) + 1))
         if x1 <= x0 or y1 <= y0:
             continue
-        d = np.sqrt(((xs[y0:y1, x0:x1] - cx) / rx) ** 2 + ((ys[y0:y1, x0:x1] - cy) / ry) ** 2)      # 1 = the thing's edge
+        ys, xs = np.ogrid[y0:y1, x0:x1]
+        d = np.sqrt(((xs - cx) / rx) ** 2 + ((ys - cy) / ry) ** 2)      # 1 = the thing's edge
         u = np.clip(1 - (d - 1) / reach, 0, 1)
         np.maximum(out[y0:y1, x0:x1], u * u * (3 - 2 * u), out=out[y0:y1, x0:x1])
     return out

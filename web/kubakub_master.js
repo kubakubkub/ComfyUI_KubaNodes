@@ -206,9 +206,14 @@ const rootGraph = () => app.rootGraph || app.graph;
 const nodesOf = type => (rootGraph()?._nodes || []).filter(n => (n.comfyClass || n.type) === type);
 const widgetOf = (n, name) => n?.widgets?.find(w => w.name === name);
 function directorDoc(node) { try { return JSON.parse(widgetOf(node, "document")?.value || "{}") || {}; } catch { return {}; } }
+const infoCache = new WeakMap();                    // the preview asks every frame: parse a document once per text
 function directorInfo(node) {                       // = loadDocument() in kubakub_director.js
+  const raw = widgetOf(node, "document")?.value, hit = infoCache.get(node);
+  if (hit && hit.raw === raw) return hit.info;
   const T = directorDoc(node).timeline || {};
-  return { duration: clamp(+T.duration || 10, 0.5, 3600), fps: clamp(Math.round(+T.fps || 25), 1, 120) };
+  const info = { duration: clamp(+T.duration || 10, 0.5, 3600), fps: clamp(Math.round(+T.fps || 25), 1, 120) };
+  infoCache.set(node, { raw, info });
+  return info;
 }
 const directorOpen = node => { try { return window.kubakubDirector?.()?.node === node; } catch { return false; } };
 function setDirectorFps(node, fps) {                 // false when its window is open (it saves its own copy on close)
@@ -730,7 +735,7 @@ class Panel {
       h("button", { class: "kkd-pill ico", title: "import videos or pictures", onclick: () => this.file.click() }, "+"));
     this.file = h("input", { type: "file", multiple: true, accept: "video/*,image/*,audio/*", hidden: true, onchange: e => { this.importFiles([...e.target.files]); e.target.value = ""; } });
     this.insp = h("div", { class: "kkt-insp" });
-    this.previewBox = h("div", { class: "kkt-preview kkd-stage" }, this.preview.cv);
+    this.previewBox = h("div", { class: "kkt-preview kkt-stage" }, this.preview.cv);
     this.tlBox = h("div", { class: "kkt-tlbox" }, this.tl.cv);
     this.root = h("div", { class: "kkt-root" }, bar,
       this.body = h("div", { class: "kkt-body" }, this.previewBox, this.splitter("preview", 1), h("div", { class: "kkt-bin" }, this.tabs, this.list, this.file),
@@ -1127,7 +1132,7 @@ function injectStyle() {
 .kkt-split{position:relative;cursor:col-resize;touch-action:none}
 .kkt-split::after{content:"";position:absolute;top:0;bottom:0;left:4px;width:2px;border-radius:2px;background:transparent;transition:background .12s}
 .kkt-split:hover::after,.kkt-split.drag::after{background:var(--lav)}
-.kkt-root .kkd-stage{background:var(--stage);border:1px solid var(--stage-edge);border-radius:6px;grid-column:auto;grid-row:auto}
+.kkt-stage{position:relative;overflow:hidden;min-height:0;background:var(--stage);border:1px solid var(--stage-edge);border-radius:6px}
 .kkt-preview{display:grid;place-items:center;overflow:hidden;min-height:0}
 .kkt-root .kkt-preview canvas{width:100%;height:100%;object-fit:contain;display:block}
 .kkt-bin{display:flex;flex-direction:column;gap:6px;min-height:0}

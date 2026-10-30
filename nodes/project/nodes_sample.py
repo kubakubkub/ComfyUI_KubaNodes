@@ -111,11 +111,10 @@ class KUBA_SampleFacade(io.ComfyNode):
             raise ValueError(f"kubakub sample facade: no PNG masks in '{masks}'")
         sil = np.zeros((h, w), np.float32)
         for f in files:
-            m = imio.imread(os.path.join(folder, f), cv2.IMREAD_GRAYSCALE)
-            if m is not None:
-                if m.shape != (h, w):
-                    m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
-                sil = np.maximum(sil, (m > 127).astype(np.float32))
+            m = fc.read_mask_png(os.path.join(folder, f)).astype(np.uint8)
+            if m.shape != (h, w):
+                m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
+            sil = np.maximum(sil, m.astype(np.float32))
         image = torch.from_numpy(np.ascontiguousarray(rgb))[None]
         return io.NodeOutput(image, image, torch.from_numpy(sil)[None], folder, image)
 

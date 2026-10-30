@@ -446,16 +446,16 @@ def purge(root, cap_bytes, min_age_s=7200.0, stale_stage_s=6 * 3600.0, now=None)
     return removed, freed, total
 
 
-_PURGE = {"last": 0.0}
+_PURGE = {}                                       # cache root -> time of its last purge
 
 
 def maybe_purge(root, cap_bytes, every_s=600.0):
     """purge() in a background thread, at most once per every_s (after renders and at start)."""
     import threading
     now = time.time()
-    if now - _PURGE["last"] < every_s or cap_bytes <= 0:
+    if now - _PURGE.get(root, 0.0) < every_s or cap_bytes <= 0:
         return None
-    _PURGE["last"] = now
+    _PURGE[root] = now
 
     def run():
         try:

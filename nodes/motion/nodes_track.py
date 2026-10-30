@@ -28,6 +28,7 @@ from ...kubakub import shader_render as sr
 from ...kubakub import sound as so
 from ...kubakub import tracking as tk
 from ...kubakub.io_types import SoundType, TracksType
+from ..shader.nodes_shader import _ram_check
 from ..utils.nodes_compare import frames_of, free_vram, save_json, save_wav, write_side
 
 log = logging.getLogger("KUBA.regions")
@@ -35,6 +36,7 @@ log = logging.getLogger("KUBA.regions")
 CATEGORY = "kubakub/2d/motion"
 PREVIEW_SIDE = 960
 _LAST: dict[str, tuple] = {}                       # node id -> (frames, fps): the frames 'try this frame' looks at
+LAST_MAX = 2                                       # clips kept for it, the newest
 CACHE_VERSION = 2                                  # raise when the analysis itself changes (old cached tracks are then not used)
 
 
@@ -52,7 +54,7 @@ CODE = _code_print()
 
 def cache_dir():
     """Tracks of earlier runs, kept across restarts: kuba_tracks in the pack's cache folder (setting cache_folder,
-    else user/kubakub_cache), at most cache_gb together with the other caches (least used first)."""
+    else user/kubakub_cache), at most cache_gb of tracks (least used first)."""
     kst = rc._pack_settings()
     env = (kst.get("cache_folder", "") if kst else "").strip()
     if env.lower() in ("temp", "off", "0"):
@@ -99,7 +101,7 @@ def keep_tracks(key, data):
         from ...kubakub.scene3d import bridge
         kst = rc._pack_settings()
         cap = int(float(kst.number("cache_gb", 20) if kst else 20) * 2 ** 30)
-        bridge.maybe_purge(os.path.dirname(d), cap)
+        bridge.maybe_purge(d, cap)
     except Exception as e:  # noqa: BLE001
         log.warning("[KUBA tracker] tracks not kept in the cache: %s", e)
 
@@ -264,13 +266,17 @@ class KUBA_Tracker(io.ComfyNode):
             notes.append("sound: " + "; ".join(lines))
         uid = str(getattr(cls.hidden, "unique_id", "") or "")
         if uid:
+            _LAST.pop(uid, None)
             _LAST[uid] = (frames, fps)
+            while len(_LAST) > LAST_MAX:
+                _LAST.pop(next(iter(_LAST)))
         side = write_side(frames, "v", PREVIEW_SIDE)
         meta = {"frames": side, "tracks": save_json(data, "kubakub_track"), "W": W, "H": H, "n": n, "fps": fps}
         if mono is not None:
             meta["audio"] = save_wav(audio_out, "kubakub_track")
         if dz is not None:
-            meta["depth"] = write_side(torch.from_numpy(np.repeat(dz[..., None], 3, -1)), "d", PREVIEW_SIDE)
+            depth_out = torch.from_numpy(dz)[..., None].expand(-1, -1, -1, 3)
+            meta["depth"] = write_side(depth_out, "d", PREVIEW_SIDE)
         on = [k for k in tk.FINDERS if s[k]["on"]] + (["outline"] if s["outline"]["on"] else [])
         kinds = {}
         for tr in data["tracks"]:
@@ -279,9 +285,11 @@ class KUBA_Tracker(io.ComfyNode):
                             f"{len(data['tracks'])} tracks: " + (", ".join(f"{v} {k}" for k, v in sorted(kinds.items())) or "nothing found"),
                             *notes])
         log.info("[KUBA tracker] %s", report.replace("\n", " | "))
+        _ram_check("kubakub tracker", n, W, H, 8)    # the found and near masks, float32
         found = torch.from_numpy(_union_masks(data, n, H, W))
         near = torch.from_numpy(np.stack([tk.near_field(data, t, W, H) for t in range(n)]))
-        depth_out = torch.from_numpy(np.repeat(dz[..., None], 3, -1)) if dz is not None else torch.zeros((1, H, W, 3))
+        if dz is None:
+            depth_out = torch.zeros((1, H, W, 3))
         return io.NodeOutput(data, found, near, frames, fps, report, depth_out, audio_out, ui={"kubakub_track": [meta]})
 
 

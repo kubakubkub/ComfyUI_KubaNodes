@@ -15,10 +15,11 @@ import cv2
 import numpy as np
 import torch
 
-import folder_paths
 from comfy_api.latest import io
 
 from ...kubakub import crop as cr
+from ...kubakub import imio
+from .nodes_compare import temp_file
 
 log = logging.getLogger("KUBA.regions")
 
@@ -34,12 +35,7 @@ def save_preview(frame: np.ndarray, folder: str, side: int = PREVIEW_SIDE) -> di
     small = cv2.resize(frame, (max(1, round(w * k)), max(1, round(h * k))), interpolation=cv2.INTER_AREA) if k < 1 else frame
     u8 = (np.clip(small[..., :3], 0, 1) * 255 + 0.5).astype(np.uint8)
     name = hashlib.sha1(u8.tobytes()).hexdigest()[:20] + ".jpg"
-    out = os.path.join(folder_paths.get_temp_directory(), folder)
-    os.makedirs(out, exist_ok=True)
-    path = os.path.join(out, name)
-    if not os.path.isfile(path):
-        cv2.imwrite(path, cv2.cvtColor(u8, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90])
-    return {"filename": name, "subfolder": folder, "type": "temp"}
+    return temp_file(folder, name, lambda path: imio.imwrite(path, cv2.cvtColor(u8, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90]))
 
 
 def _each(fn, n):

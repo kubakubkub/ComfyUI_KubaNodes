@@ -4,6 +4,26 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## 0.7.1 (2026-10-30)
+
+Fixes, no new features.
+
+- **Setup:** the LTX set downloads `ltx-2.5-video-vae-conv-bf16`, the VAE the workflows and docs name (it fetched
+  another one, so 04, 09, 10, motion_guide and director_video_ltx could not find theirs).
+- **Colab notebook:** ComfyUI starts with `--listen 0.0.0.0`, so the pack sees it is reachable from outside and closes
+  its routes that read file paths; before, they stayed open behind the public link. Stops with the log when ComfyUI or
+  the link fails, can be run again, resumes broken downloads, clones the newest pack.
+- **Tracker:** the face finder no longer crashes the node; SAM 2 motifs always read this run's frames; the depth clip
+  is built without copies; the cache purge stays in the tracker's own folder (it could delete other caches); 'try this
+  frame' is quicker and only the two newest clips stay in memory for it; long clips report their RAM need first; the
+  near mask is built without a full-size grid per frame.
+- **Director:** tracks stay out of the document output, and a disconnected tracker is off in a pasted document too.
+- **Timeline:** its preview has its own style (a director window can't move it); a director with nothing applied holds
+  for its block; documents are parsed once per text.
+- **Compare:** the cache key looks at every frame, so two similar clips no longer share a folder.
+- **Sample facade:** masks with transparency (After Effects) give the right silhouette.
+- **Paths with non-ASCII letters:** compare, crop, SAM 2 frames and point cloud basis write correctly.
+
 ## 0.7.0 (2026-10-29)
 
 The show on one line: a master timeline above the directors, and two ready apps that go from a facade to a moving

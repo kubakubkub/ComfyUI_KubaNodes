@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-kubanodes"
 description = "kubakub nodes: a visual toolset for pictures made of parts (projection mapping, previz, music visuals, stills). Regions from mask PNGs, vector files, object IDs, cryptomatte or the 3D model, region-wise diffusion, the kubakub director (layers, lights, keys, video, sound), the kubakub timeline and delivery export."
-version = "0.7.0"
+version = "0.7.1"
 license = { file = "LICENSE" }                    # GPL-3.0, as ComfyUI
 requires-python = ">=3.10"
 classifiers = [

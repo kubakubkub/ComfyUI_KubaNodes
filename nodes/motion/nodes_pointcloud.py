@@ -21,6 +21,7 @@ import comfy.utils
 import folder_paths
 from comfy_api.latest import io
 
+from ...kubakub import imio
 from ...kubakub import maskfields as mf
 from ...kubakub import pointcloud as pc
 from ...kubakub import shader_render as sr
@@ -70,16 +71,13 @@ def regions_of(regions, notes):
 def basis_file(reg):
     """The regions' basis as one PNG in temp for the node's live view: the groups one under the other, each two cells
     wide (channels 0-2 left, 3-5 right)."""
-    import cv2
     q = reg["q"]
     G, fh, fw, _ = q.shape
     img = np.concatenate([q[..., :3], q[..., 3:]], 2).reshape(G * fh, 2 * fw, 3)
 
-    def write(path):                                 # encoded here: imwrite fails silently on a path with non-ASCII letters
-        ok, buf = cv2.imencode(".png", np.ascontiguousarray(img[..., ::-1]))
-        if not ok:
+    def write(path):
+        if not imio.imwrite(path, np.ascontiguousarray(img[..., ::-1])):
             raise RuntimeError("the regions' basis could not be written as a PNG")
-        buf.tofile(path)
     return temp_file("kubakub_pointcloud", hashlib.sha1(img.tobytes()).hexdigest()[:20] + ".png", write)
 
 

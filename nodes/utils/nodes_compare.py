@@ -19,6 +19,8 @@ import numpy as np
 import folder_paths
 from comfy_api.latest import io
 
+from ...kubakub import imio
+
 log = logging.getLogger("KUBA.regions")
 
 CATEGORY = "kubakub/utils"
@@ -62,10 +64,11 @@ def write_side(frames, tag: str, side: int | None) -> dict:
     h, w = int(frames.shape[1]), int(frames.shape[2])
     k = 1.0 if not side else min(1.0, side / max(h, w))
     pw, ph = max(1, round(w * k)), max(1, round(h * k))
-    first = frames[0].cpu().float().numpy()
-    probe = (np.clip(first[::max(1, h // 64), ::max(1, w // 64), :3], 0, 1) * 255).astype(np.uint8).tobytes()
-    last = (np.clip(frames[n - 1].cpu().float().numpy()[::max(1, h // 64), ::max(1, w // 64), :3], 0, 1) * 255).astype(np.uint8).tobytes()
-    key = hashlib.sha1(probe + last + f"{n}|{w}|{h}|{pw}|{float(frames[:, ::4, ::4].float().mean())}".encode()).hexdigest()[:16]
+    digest = hashlib.sha1(f"{n}|{w}|{h}|{pw}".encode())
+    sy, sx = max(1, h // 256), max(1, w // 256)
+    for i in range(n):                              # two clips that differ anywhere never share a folder
+        digest.update(frames[i, ::sy, ::sx].cpu().numpy().tobytes())
+    key = digest.hexdigest()[:16]
     sub = f"kubakub_compare/{key}"
     out = os.path.join(folder_paths.get_temp_directory(), "kubakub_compare", key)
     os.makedirs(out, exist_ok=True)
@@ -80,7 +83,7 @@ def write_side(frames, tag: str, side: int | None) -> dict:
         u8 = (np.clip(f, 0, 1) * 255 + 0.5).astype(np.uint8)
         if u8.shape[-1] == 1:
             u8 = np.repeat(u8, 3, -1)
-        cv2.imwrite(path, cv2.cvtColor(u8, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 92])
+        imio.imwrite(path, cv2.cvtColor(u8, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 92])
 
     with ThreadPoolExecutor(max_workers=max(1, min(8, (os.cpu_count() or 4) - 2))) as pool:
         list(pool.map(one, range(n)))

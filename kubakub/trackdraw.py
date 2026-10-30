@@ -39,13 +39,9 @@ import cv2
 import numpy as np
 
 from .director import blend as bl
+from .optional import need
 
 STATE_WORDS = ["INPUT", "PROCESS", "STABLE", "ARCHIVED"]
-MARKS = ["box", "brackets", "outline", "circle", "cross", "dot", "label", "skeleton", "points"]
-CONNECT = ["nearest", "within", "network", "tree", "hull", "hub", "chain", "trail", "corners"]
-INSIDE = ["reveal", "pixels", "freeze", "invert"]
-
-DEPTH = ["layers", "lines", "time", "fog", "slice"]
 
 DEFAULT_LOOK = {
     "background": "video",
@@ -120,10 +116,6 @@ def sound_at(data, t):
 # ------------------------------------------------------------------------------------------------
 # what is where at frame t (= web/kubakub_track.js)
 # ------------------------------------------------------------------------------------------------
-
-def _box_at(tr, k):
-    return tr["box"][k]
-
 
 def centre(b):
     return (b[0] + b[2] / 2, b[1] + b[3] / 2)
@@ -563,7 +555,7 @@ def depth_lines(lk, t, depth_at, W, H):
     entries = [e for e in lk.get("depth") or [] if e.get("type") == "lines"]
     if not entries:
         return []
-    from skimage import measure
+    measure = need("skimage.measure", "track draw depth lines")
     g = depth_grid(depth_at(t), W, H)
     sx, sy = W / g.shape[1], H / g.shape[0]
     out = []
