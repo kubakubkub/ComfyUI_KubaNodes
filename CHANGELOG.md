@@ -4,6 +4,21 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## 0.7.2 (2026-11-03)
+
+- **kubakub shelf** (new, `web/kubakub_shelf.js`): a strip that slides out of the screen edge (hover, a drag reaching
+  the edge, or Alt+S, also above a director window). In: files, node previews, timeline renders, text, colours, paste,
+  "+ text", and right-click a node → *put on the kubakub shelf*. Out: onto the timeline (a clip), into a director (a
+  layer), onto a Load Image / Load Video / Load Audio node or a node's text field, onto empty canvas (a new loader or
+  text node), into any text box. Pins, filters, last 200 kept; files in `input/kuba_director`, the list in
+  `user/default/kubakub/shelf.json`; setting *kubakub shelf: screen edge* (right / left / off). Idea after Edge-Drop.
+- **Director:** takes pictures, videos and sounds dragged from the shelf as layers.
+- **Timeline:** a clip whose file is not there yet (a render before its first run, as in workflow 10) shows a "not
+  rendered yet" card instead of an uncaught error, is asked for again every 4 s instead of every frame, and appears
+  once the render is done.
+- **Startup check and README:** ultralytics and mediapipe (tracker finders) listed as optional; Colab notebook linked
+  under Install; *timeline render* in the node table.
+
 ## 0.7.1 (2026-10-30)
 
 Fixes, no new features.

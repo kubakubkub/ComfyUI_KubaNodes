@@ -376,6 +376,7 @@ class Preview {
         if (!src) { this.card(ctx, W, H, n ? (n.title || "kubakub director") : "director removed", n ? "run the workflow once to see it here" : ""); continue; }
       } else {
         const m = s.media(it.media); if (!m || m.kind === "audio") continue;
+        if (m.kind === "video" && this.cache.failed.has(m.source) && !this.videos.has(it.id)) { this.card(ctx, W, H, m.name || "video", "not rendered yet: run the workflow once"); continue; }
         if (m.kind === "video") { const v = this.videos.get(it.id); if (!v || v.el.readyState < 2) continue; src = v.el; sw = m.info?.w || v.el.videoWidth; sh = m.info?.h || v.el.videoHeight; }
         else { const im = this.image(sourceURL(m.source)); if (!im.complete || !im.naturalWidth) continue; src = im; sw = im.naturalWidth; sh = im.naturalHeight; }
       }
@@ -395,7 +396,7 @@ class Preview {
 
 // preview copies of videos: the director's own route makes them (once per file version); waveforms of the sound
 class MediaCache {
-  constructor(onReady) { this.urls = new Map(); this.pending = new Map(); this.waves = new Map(); this.onReady = onReady; }
+  constructor(onReady) { this.urls = new Map(); this.pending = new Map(); this.waves = new Map(); this.failed = new Map(); this.onReady = onReady; }
   playURL(m) { if (m.kind !== "video") return sourceURL(m.source); this.ensure(m); return this.urls.get(m.source) || null; }
   // {duration, rate, peaks} of a clip's sound; null while it loads (then onReady redraws), false without one
   wave(m) {
@@ -406,12 +407,17 @@ class MediaCache {
     return null;
   }
   waveOf(source) { return postJSON("/kubakub/master/wave", { source }); }
+  // a video that is not there yet (e.g. a render output before its first run): asked again at most every 4 s, so it
+  // shows up once the render is done, without a request per frame or an uncaught error
+  missing(m) { const t = this.failed.get(m.source); return t !== undefined && performance.now() - t < 4000; }
   ensure(m) {
     if (m.kind !== "video" || this.urls.has(m.source) || this.pending.has(m.source)) return this.pending.get(m.source);
+    if (this.missing(m)) return Promise.resolve(null);
     const p = postJSON("/kubakub/director/media", { source: m.source }).then(r => {
       const pr = r.proxy; this.urls.set(m.source, api.apiURL(`/view?${new URLSearchParams({ filename: pr.filename, subfolder: pr.subfolder, type: pr.type })}`));
-      this.onReady(); return r.info;
-    }).finally(() => this.pending.delete(m.source));
+      this.failed.delete(m.source); this.onReady(); return r.info;
+    }, () => { const first = !this.failed.has(m.source); this.failed.set(m.source, performance.now()); if (first) this.onReady(); return null; })
+      .finally(() => this.pending.delete(m.source));
     this.pending.set(m.source, p); return p;
   }
   async info(source) {                               // {w, h, fps, duration, frames, audio} of a video

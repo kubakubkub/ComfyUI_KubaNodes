@@ -18,6 +18,8 @@ OPTIONAL = [                        # (module, pip package, what needs it)
     ("imageio", "imageio", "EXR ID maps in regions from id maps"),
     ("trimesh", "trimesh", "mesh to field"),
     ("onnxruntime", "onnxruntime", "onnx style transfer"),
+    ("ultralytics", "ultralytics", "tracker: people and things (yolo)"),
+    ("mediapipe", "mediapipe", "tracker: body, hands and face points"),
 ]
 
 

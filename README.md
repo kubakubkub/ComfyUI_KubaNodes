@@ -17,6 +17,14 @@ regions of starter 01 connected):
 
 ## What's new
 
+**0.7.2**, the shelf:
+- **kubakub shelf:** a strip at the screen edge (or Alt+S) that keeps pictures, videos, sounds, prompts and colours
+  while you work; drag them onto the timeline, into a director, onto a node or the canvas. [The shelf](#the-shelf)
+- **Timeline:** a clip that is not rendered yet (workflow 10 before its first run) shows "not rendered yet" instead
+  of an error, and appears by itself once the render is done.
+- **README:** the Colab notebook is linked under Install; the tracker's optional packages (ultralytics, mediapipe)
+  are in Requirements and in the startup check.
+
 **0.7.1**, fixes:
 - **LTX setup:** the setup tool now downloads the video VAE the LTX workflows load. If 04, 09 or 10 could not find
   it, run the setup again.
@@ -139,6 +147,11 @@ The only package this adds is OpenCV, and only if you don't have it yet. Everyth
 (found by itself). To take the scene open in **Blender or Houdini** live into scene render, install their
 add-ons from this pack once: [docs/live-link.md](docs/live-link.md).
 
+**No GPU at hand?** Try the pack in the browser: [colab/try_kubakub.ipynb](colab/try_kubakub.ipynb)
+([open in Colab](https://colab.research.google.com/github/kubakubkub/ComfyUI_KubaNodes/blob/main/colab/try_kubakub.ipynb)).
+It installs ComfyUI with this pack on a free Colab GPU and opens it through a tunnel; read the notebook's warning
+about the link before you share it.
+
 **Models:** the example workflows need them, the nodes don't: see [docs/MODELS.md](docs/MODELS.md). Any variant of a
 model works (bf16, fp8, int8, NVFP4, GGUF ...): pick your file in the loader when a workflow names another one.
 
@@ -194,7 +207,7 @@ The menu is split into **2d** (images, masks, video) and **3d** (anything that n
 | **2d / shader** | shader (moving pictures and masks drawn on the graphics card: 74 presets picked by their picture: light that knows your regions (each its own colour, pace or pattern), contours, wire mesh and point cloud of the building, raymarched 3D scenes with a depth output (melting forms, a colonnade, the facade as a relief, regions extruded, light in fog), endless travel, 8 bit and pixels, VHS tape and composite video, slit scan and datamosh, clouds, fire, a mapping grid; or paste a shader from shadertoy.com; follows a loop, a field, a mask, your regions and the sound; its picture is the material the region samplers paint from), shader mix (two kubakub shaders on its inputs a and b and one mix value: A cuts B in, A bends B, or a fade; on a curve or with the sound) |
 | **2d / sketch** | scan to line (a phone photo of a drawing, straightened and cleaned), regions from sketch (closed shapes, coloured dots as names), line overlay (your line back on the render) |
 | **2d / generate** | region prompt (a prompt for chosen regions from fields: pick the regions from a list, write the prompt, set strategy and denoise; chain several), region plan (the same as written rules, with every setting), region sampler (Klein, Qwen Image 2.1; paints from a shader's picture on `material`, changes as much as a mask on `change` allows), seam pass, versions (a sheet of looks, ideas per region, prompt rotation, LoRAs and style images: fast numbered drafts, then the picks at full size), frame in frame (rooms and worlds behind windows) |
-| **2d / director** | kubakub director (the window), director sequence (every frame, sound), director diffuse |
+| **2d / director** | kubakub director (the window), director sequence (every frame, sound), director diffuse, timeline render (the show on the *kubakub timeline* tab as frames and sound for the projector) |
 | **2d / motion** | pointclouder (a picture or a video lifted into up to two million points by any depth node, played live on the node: drag to look around, set the camera move from the view, pick a move (push in, orbit, handheld ...) or record your own; glow / ink / solid, drift, breathe, wind, curl, fine trails, a scan through the depth, arrows you draw that push the points; follows the sound; pictures morph into each other; tracked things sit in the cloud at their depth; .ply out), tracker (what moves in a video, followed with ids: motion, a colour, lights, people and things with body points or outlines, anything named in words, body / hands / face points, a clicked motif, exact outlines; several at once, all from files on your disk; with a depth node every thing gets its depth; with a sound the tracks carry its loudness and beats), track draw (the tracks as a diagram, played live on the node: boxes, outlines, circles, labels and state words, lines between them in nine ways, reveal / pixels inside, depth layers, depth contours, far = earlier, a stamp trail of their own pixels, each part in its own blend mode, marks that pulse and lines that flash with the sound; the tracks also steer kubakub shader and the director's 'follow'), sound (your sound and how it is heard, set once and carried on one cable to every node that listens; draws the loudness, the beats and the hits), region video sampler (LTX or H3; a shader clip on `material` moves the regions), motion guide (LTX or H3: a rough moving clip from the director, a shader or a previz becomes a finished video that keeps its motion), keyframe clips (H3 or LTX, video with sound), height animate (a height map or any depth map grows out of the wall: all together, peaks first, in layers or along a field, on a curve or with the sound; also as a lit relief), sound mask swap (layers trade their masks on beats, on low / high hits, or on a control signal), trim to exact duration (audio clips of a constant length for LTX AV) |
 | **2d / post** | align to source (an edited picture back onto the picture it was made from, to the pixel), colour match (to a reference picture or a .cube look, saved as .cube too), deflicker, retime (optical flow), burn in, export video / frames |
 | **3d / scene** | scene render (Blender: clay, depth, ID passes), projector (where it stands: metres from the wall, height, throw ratio, lens shift or tilt), projector blend (soft-edge masks for several projectors), scene relight (Cycles), scene measure, scene preview and walkthrough (previz from the audience; the spots and the walk are placed on a map on the node), scene surroundings (the street around the building, from a place on the map or your own model), align 3d model (a model from image-to-3D, moved, turned and scaled onto the real one; written as .glb or .obj with textures), form height (how far that model stands out of the real wall, as a height map in the projection view), brightness compensation |
@@ -203,6 +216,25 @@ The menu is split into **2d** (images, masks, video) and **3d** (anything that n
 | **3d / fabricate** | relief panels in millimetres (mould prep with anti perch, safety check, mass, export as STL panel or OBJ prow), mesh to relief field, save GLB |
 | **lab** | experiments: mosaic illusion, onnx style transfer, frame guide (old) |
 | **utils** | crop (drawn on the picture as in Photoshop: ratio, size and canvas past the edge on pills, nothing typed), uncrop (the edited crop back into the picture, soft edge), compare (two pictures or videos on the same frame: swipe, side by side, difference, blink, onion, a big window with zoom), load images from a folder, timecode filename prefix (clip start in seconds -> `name_mm-ss-ff`) |
+
+### The shelf
+
+**kubakub shelf** is a strip that slides out of the right edge of the screen when the pointer (or a drag) reaches it,
+or with **Alt+S**, also above a director window. It keeps pictures, videos, sounds, prompts and colours while you
+work:
+
+- **in:** drop files from the desktop, a node's preview, a render from the timeline list, text or a colour (`#f18a58`)
+  on it; paste with Ctrl+V while it is open; **+ text** for a prompt; or right-click a node → *put on the kubakub
+  shelf* (its pictures, or its text).
+- **out:** drag a picture or video onto the **timeline** (a clip), into a **director** window (a layer), onto a
+  **Load Image / Load Video / Load Audio** node (its file) or a text field of a node (its text), or onto empty canvas
+  (a new loader, or a text node for a prompt). A prompt also drops into any text box. Clicking a prompt or colour
+  copies it.
+
+Pin what should stay (● on the card): the shelf keeps the last 200 things, pinned ones always. Files stay in
+`input/kuba_director` (or in `output/` where the render put them), the list is `user/default/kubakub/shelf.json`.
+Settings → kubakub → *shelf: screen edge* puts it on the left or switches it off. The idea comes from
+[Edge-Drop](https://github.com/Deepender25/Edge-Drop), a clipboard shelf for Windows.
 
 ### Show only what you use
 
@@ -249,6 +281,8 @@ Other systems are untested.
 | imageio | EXR ID maps in regions from id maps | PNG ID maps still work |
 | trimesh | mesh to field | that node only |
 | onnxruntime | onnx style transfer | that node only |
+| ultralytics | tracker: people and things (yolo), outlines | those finders only; the other finders still work |
+| mediapipe | tracker: body, hands and face points | those finders only |
 | **Blender 4.x** (found in Program Files or on PATH; else `blender = ...` in kubakub.ini or the blender_path input) | scene render, light layers, relight | the 3D scene nodes and light layers |
 | **ffmpeg** (imageio-ffmpeg or on PATH) | video layers, director sequence export, kubakub export | video in the director and exports |
 

@@ -3361,6 +3361,19 @@ class Director {
     this.refresh();
   }
   moveSel(to) { to = Math.max(0, Math.min(this.layers.length - 1, to)); if (to === this.sel) return; this.snap(); const [L] = this.layers.splice(this.sel, 1); this.layers.splice(to, 0, L); this.sel = to; this.refresh(); }
+  async importShelf(json, at) {                     // an item of the kubakub shelf: its file, imported like a dropped one
+    try {
+      const it = JSON.parse(json);
+      if (!it.source) { note("the director takes pictures, videos and sounds from the shelf"); return; }
+      const [type, rest] = it.source.startsWith("output:") ? ["output", it.source.slice(7)] : ["input", it.source.replace(/^file:/, "")];
+      const i = rest.lastIndexOf("/"), name = rest.slice(i + 1);
+      const r = await api.fetchApi(`/view?${new URLSearchParams({ filename: name, subfolder: i < 0 ? "" : rest.slice(0, i), type })}`);
+      if (!r.ok) throw new Error(`${name} is not there any more`);
+      const blob = await r.blob();
+      await this.importFile(new File([blob], name, { type: blob.type }), at);
+    } catch (e) { note("import failed: " + e.message); }
+  }
+
   async importFile(file, at) {
     if (file?.type?.startsWith("audio/") || /\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(file?.name || "")) return this.importAudio(file);
     if (file?.type?.startsWith("video/") || isVideoName(file?.name)) return this.importVideo(file, null, at);
@@ -4406,12 +4419,16 @@ class Director {
     this.onBlur = () => { if (this.space) { this.space = false; this.setTool(this.tool); } };   // Space released in another app
     window.addEventListener("blur", this.onBlur);
     // drop / paste images
-    let depth = 0; const hasFiles = e => [...(e.dataTransfer?.types || [])].includes("Files");
+    // files from the desktop, and pictures / videos / sounds from the kubakub shelf (a drop on the shelf is the shelf's)
+    const SHELF = "application/x-kubakub-shelf";
+    let depth = 0; const hasFiles = e => !e.target?.closest?.(".kksh-shelf") && [...(e.dataTransfer?.types || [])].some(t => t === "Files" || t === SHELF);
     this.on_dragenter = e => { if (!hasFiles(e)) return; depth++; this.dropzone.hidden = false; };
     this.on_dragleave = e => { if (!hasFiles(e)) return; if (--depth <= 0) { depth = 0; this.dropzone.hidden = true; } };
     this.on_dragover = e => { if (hasFiles(e)) { e.preventDefault(); e.stopPropagation(); } };
     this.on_drop = e => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); depth = 0; this.dropzone.hidden = true;
-      const at = e.target === this.cv ? toM(e) : null; [...e.dataTransfer.files].forEach((f, i) => this.importFile(f, at && [at[0] + i * 80, at[1] + i * 80])); };
+      const at = e.target === this.cv ? toM(e) : null, own = e.dataTransfer.getData(SHELF);
+      if (own) { this.importShelf(own, at); return; }
+      [...e.dataTransfer.files].forEach((f, i) => this.importFile(f, at && [at[0] + i * 80, at[1] + i * 80])); };
     this.on_paste = e => {                              // never reaches the graph behind the window (it would paste nodes)
       if (!this.root.isConnected || e.target.matches?.("input,textarea")) return;
       e.preventDefault(); e.stopPropagation();
