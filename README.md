@@ -17,6 +17,15 @@ regions of starter 01 connected):
 
 ## What's new
 
+**0.7.3**, the shelf after a review:
+- The shelf no longer takes the keys of a text box when the pointer touches the edge, and gives the keys back when
+  it closes; Esc in *+ text* cancels.
+- A director takes renders dragged from the timeline's list too, and uses a picture or video that is already in
+  `input/` as it is (no second copy, no upload limit).
+- Esc and typing in the shelf no longer reach a director window behind it.
+- The setup tool no longer offers to install the tracker's ultralytics and mediapipe (their version pins can change
+  packages ComfyUI needs); install them by hand when the tracker asks.
+
 **0.7.2**, the shelf:
 - **kubakub shelf:** a strip at the screen edge (or Alt+S) that keeps pictures, videos, sounds, prompts and colours
   while you work; drag them onto the timeline, into a director, onto a node or the canvas. [The shelf](#the-shelf)

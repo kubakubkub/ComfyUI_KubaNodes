@@ -345,7 +345,7 @@ def main(argv=None) -> int:
         offer_packages(req, "REQUIRED, the pack does not load without", check_only)
     else:
         print("\n  required packages: all there")
-    opt = [(pip, what) for mod, pip, what in env.OPTIONAL if not has_module(mod)]
+    opt = [(pip, what) for mod, pip, what in env.OPTIONAL if not has_module(mod) and pip not in env.NOT_OFFERED]
     for pip, what in opt:
         offer_packages([pip], f"optional, only for {what}", check_only)
     if not opt:

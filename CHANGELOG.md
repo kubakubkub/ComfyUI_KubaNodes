@@ -4,7 +4,27 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
-## 0.7.2 (2026-11-03)
+## 0.7.3 (2026-11-02)
+
+Review of the shelf (0.7.2), no new features.
+
+- **Shelf:** takes the focus only when opened with Alt+S (pointer at the edge no longer takes the keys of a text box)
+  and gives it back when it closes, so Ctrl+V and shortcuts reach the graph again; Esc in *+ text* cancels (the text
+  was added on blur); keeps only previews of this ComfyUI (a link of another server is never fetched); a wiped temp
+  preview says so instead of keeping an error page as a picture; drags carry no `text/uri-list` (ComfyUI's own drop
+  handler fetched it and could open a render's embedded workflow); a prompt drops into any text box; names never
+  show `file:` / `output:`; the list is saved once per burst of changes and its cards are built only when it changes.
+- **Director:** takes any `{source}` drag (the shelf and the timeline's renders); a picture or video in `input/` is
+  used as it is, a render in `output/` is copied in once through the streamed upload (no 95 MB limit); the file kind
+  comes from the name, not the server's MIME type; keys, pastes and drops inside an overlay marked
+  `data-kk-own-events` (the shelf) are left to it.
+- **Timeline:** a clip that could not be read is asked for again after a run finished, not every 4 s; its card shows
+  the server's reason when it is not just "not rendered yet".
+- **Setup:** ultralytics and mediapipe are reported at startup but not offered for install (`kub_env.NOT_OFFERED`).
+- **Code:** the timeline, the shelf and the director share `web/kubakub_media.js` (file kinds, source links, drag
+  type, upload); the JavaScript tests load it through `tests/_js.py`.
+
+## 0.7.2 (2026-11-02)
 
 - **kubakub shelf** (new, `web/kubakub_shelf.js`): a strip that slides out of the screen edge (hover, a drag reaching
   the edge, or Alt+S, also above a director window). In: files, node previews, timeline renders, text, colours, paste,

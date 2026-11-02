@@ -9,76 +9,53 @@
 // Idea after Edge-Drop (a clipboard shelf for Windows); written new for ComfyUI.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { DRAG_MIME, kindOf, fileName, sourceURL, sourceFromView, uploadSource, h } from "./kubakub_media.js";
 
 const HERE = new URL(".", import.meta.url).href;
-export const SHELF_MIME = "application/x-kubakub-shelf";
-const TIMELINE_MIME = "application/x-kubakub-master";   // = DRAG_MIME in kubakub_master.js: {source}
+const SHELF_MIME = "application/x-kubakub-shelf";   // the whole item: for the graph canvas (text needs more than {source})
 const FILE = "kubakub/shelf.json";
 const MAX = 200;                                    // unpinned items above this go, oldest first
 const EDGE_ID = "kubakub.shelf.edge";
-const VIDEO_RE = /\.(mp4|mov|webm|mkv|avi|m4v|gif)$/i, IMAGE_RE = /\.(png|jpe?g|webp|bmp|tiff?)$/i, AUDIO_RE = /\.(wav|mp3|ogg|flac|m4a|aac|opus)$/i;
-export const kindOf = name => (VIDEO_RE.test(name) ? "video" : IMAGE_RE.test(name) ? "image" : AUDIO_RE.test(name) ? "audio" : null);
 const COLOUR_RE = /^\s*(#[0-9a-f]{3}|#[0-9a-f]{6}|#[0-9a-f]{8}|rgba?\([\d\s.,%]+\))\s*$/i;
-export const isColour = t => COLOUR_RE.test(String(t || ""));
-const uid = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 // ------------------------------------------------------------------------------------------------ model (no DOM)
-// item: {id, kind: image|video|audio|text|colour, source?: 'file:<input/>' | 'output:<output/>', text?, name, pinned, t}
+// item: {kind: image|video|audio|text|colour, source?: 'file:<input/>' | 'output:<output/>', text?, name, pinned}
+// The list is newest first; the same thing added again moves to the top.
 export function addItem(list, it, max = MAX) {
   const same = list.findIndex(o => o.kind === it.kind && (it.source ? o.source === it.source : o.text === it.text));
-  if (same >= 0) { const [o] = list.splice(same, 1); list.unshift(o); o.t = Date.now(); return list; }   // again = to the top
-  list.unshift(Object.assign({ id: uid(), pinned: false, t: Date.now() }, it));
+  if (same >= 0) { list.unshift(...list.splice(same, 1)); return list; }
+  list.unshift(Object.assign({ pinned: false }, it));
   for (let i = list.length - 1; list.length > max && i >= 0; i--) if (!list[i].pinned) list.splice(i, 1);
   return list;
 }
 export function textItem(text) {
   const t = String(text || "").trim(); if (!t) return null;
-  return isColour(t) ? { kind: "colour", text: t, name: t.toLowerCase() } : { kind: "text", text: t, name: t.split("\n")[0].slice(0, 60) };
-}
-export function sourceFromView(url) {               // /view?filename=&subfolder=&type= -> {source} or {temp: url}
-  try {
-    const u = new URL(url, location.href); if (!u.pathname.endsWith("/view")) return null;
-    const f = u.searchParams.get("filename"), sub = u.searchParams.get("subfolder") || "", type = u.searchParams.get("type") || "output";
-    if (!f || !kindOf(f)) return null;
-    if (type === "temp") return { temp: u.href, name: f };          // previews are wiped on restart: copied in
-    if (type !== "output" && type !== "input") return null;
-    return { source: `${type === "output" ? "output:" : "file:"}${sub ? sub + "/" : ""}${f}`, name: f };
-  } catch { return null; }
-}
-export function viewURL(source) {
-  const [type, rest] = source.startsWith("output:") ? ["output", source.slice(7)] : ["input", source.replace(/^file:/, "")];
-  const i = rest.lastIndexOf("/");
-  return api.apiURL(`/view?${new URLSearchParams({ filename: rest.slice(i + 1), subfolder: i < 0 ? "" : rest.slice(0, i), type })}`);
+  return COLOUR_RE.test(t) ? { kind: "colour", text: t, name: t.toLowerCase() } : { kind: "text", text: t, name: t.split("\n")[0].slice(0, 60) };
 }
 // the value a core loader's file list takes for a source: 'sub/name.png' (input/) or 'sub/name.png [output]'
 export function loaderValue(source) { return source.startsWith("output:") ? source.slice(7) + " [output]" : source.replace(/^file:/, ""); }
 
 // ------------------------------------------------------------------------------------------------ the shelf
-function h(tag, attrs = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (k === "class") e.className = v; else if (v != null && v !== false) e.setAttribute(k, v === true ? "" : v);
-  }
-  for (const c of kids.flat()) if (c != null) e.append(c);
-  return e;
-}
 const FILTERS = [["all", null], ["pictures", "image"], ["videos", "video"], ["sounds", "audio"], ["text", "text"], ["colours", "colour"]];
 
 class Shelf {
   constructor() {
-    this.items = []; this.filter = null; this.open = false; this.hold = false; this.timer = null; this.dragging = false;
+    this.items = []; this.filter = null; this.open = false; this.hold = false; this.timer = null; this.saveTimer = null;
+    this.dragging = false; this.stale = true;       // stale: the cards no longer show the list (built again on show)
     injectStyle();
     this.hot = h("div", { class: "kksh-hot", title: "kubakub shelf (Alt+S)" });
     this.list = h("div", { class: "kksh-list" });
     this.msg = h("div", { class: "kksh-msg" });
-    this.pills = h("div", { class: "kksh-pills" }, FILTERS.map(([n, k]) => h("button", { class: "kksh-pill", "data-k": k ?? "", onclick: () => { this.filter = k; this.render(); } }, n)));
-    this.pinBtn = h("button", { class: "kksh-pill", title: "keep the shelf open", onclick: () => { this.hold = !this.hold; this.render(); } }, "keep open");
-    this.root = h("div", { class: "kksh-shelf", tabindex: "-1" },
-      h("div", { class: "kksh-head" }, h("span", { class: "kksh-title" }, h("b", {}, "kubakub"), " shelf"), this.pinBtn),
+    this.pills = h("div", { class: "kksh-pills" }, FILTERS.map(([n, k]) => h("button", { class: "kksh-pill", "data-k": k ?? "", onclick: () => { this.filter = k; this.commit(false); } }, n)));
+    this.holdBtn = h("button", { class: "kksh-pill", title: "keep the shelf open", "aria-pressed": "false",
+      onclick: () => { this.hold = !this.hold; this.holdBtn.setAttribute("aria-pressed", String(this.hold)); } }, "keep open");
+    // data-kk-own-events: the director window leaves the keys, pastes and drops made in here alone
+    this.root = h("div", { class: "kksh-shelf", tabindex: "-1", "data-kk-own-events": "" },
+      h("div", { class: "kksh-head" }, h("span", { class: "kksh-title" }, h("b", {}, "kubakub"), " shelf"), this.holdBtn),
       this.pills,
       h("div", { class: "kksh-add" },
         h("button", { class: "kksh-pill", onclick: () => this.addText() }, "+ text"),
-        h("button", { class: "kksh-pill", title: "remove everything that is not pinned", onclick: () => { this.items = this.items.filter(i => i.pinned); this.save(); this.render(); } }, "clear")),
+        h("button", { class: "kksh-pill", title: "remove everything that is not pinned", onclick: () => { this.items = this.items.filter(i => i.pinned); this.commit(); } }, "clear")),
       this.list, this.msg,
       h("div", { class: "kksh-hint" }, "drop pictures, videos, sounds, text or colours here · drag them onto the timeline, a director, a node or the canvas"));
     document.body.append(this.hot, this.root);
@@ -87,13 +64,17 @@ class Shelf {
     this.hot.addEventListener("pointerleave", () => clearTimeout(this.timer));
     this.hot.addEventListener("dragenter", e => { e.preventDefault(); this.show(true); });
     this.hot.addEventListener("dragover", e => e.preventDefault());
-    this.root.addEventListener("pointerleave", () => { if (!this.hold && !this.dragging) { clearTimeout(this.timer); this.timer = setTimeout(() => this.show(false), 450); } });
-    this.root.addEventListener("pointerenter", () => clearTimeout(this.timer));
-    this.root.addEventListener("dragover", e => { e.preventDefault(); e.stopPropagation(); clearTimeout(this.timer); if (!this.dragging) { e.dataTransfer.dropEffect = "copy"; this.root.classList.add("kksh-drop"); } });
-    this.root.addEventListener("dragleave", e => { if (!this.root.contains(e.relatedTarget)) this.root.classList.remove("kksh-drop"); });
-    this.root.addEventListener("drop", e => { e.preventDefault(); e.stopPropagation(); this.root.classList.remove("kksh-drop"); if (!this.dragging) this.takeDrop(e.dataTransfer); });
-    this.root.addEventListener("paste", e => { if (e.target.matches?.("textarea,input")) return; e.preventDefault(); e.stopPropagation(); this.takeDrop(e.clipboardData); });
-    this.root.addEventListener("keydown", e => { if (e.key === "Escape") this.show(false); e.stopPropagation(); });
+    const r = this.root;
+    r.addEventListener("pointerleave", () => { if (!this.hold && !this.dragging) { clearTimeout(this.timer); this.timer = setTimeout(() => this.show(false), 450); } });
+    r.addEventListener("pointerenter", () => clearTimeout(this.timer));
+    r.addEventListener("dragover", e => {
+      e.preventDefault(); e.stopPropagation(); clearTimeout(this.timer);
+      if (!this.dragging) { e.dataTransfer.dropEffect = "copy"; r.classList.add("kksh-drop"); }
+    });
+    r.addEventListener("dragleave", e => { if (!r.contains(e.relatedTarget)) r.classList.remove("kksh-drop"); });
+    r.addEventListener("drop", e => { e.preventDefault(); e.stopPropagation(); r.classList.remove("kksh-drop"); if (!this.dragging) this.take(e.dataTransfer); });
+    r.addEventListener("paste", e => { if (e.target.matches?.("textarea,input")) return; e.preventDefault(); e.stopPropagation(); this.take(e.clipboardData); });
+    r.addEventListener("keydown", e => { if (e.key === "Escape" && !e.target.matches?.("textarea")) { e.stopPropagation(); this.show(false); } });
     this.edge(app.extensionManager?.setting?.get?.(EDGE_ID) || "right");
     this.load();
   }
@@ -101,92 +82,107 @@ class Shelf {
     this.side = side; this.hot.dataset.side = this.root.dataset.side = side;
     this.hot.hidden = side === "off"; if (side === "off") this.show(false);
   }
-  toggle() { if (this.side !== "off") this.show(!this.open); }
-  show(on) {
+  toggle() { if (this.side !== "off") this.show(!this.open, true); }
+  // focus: only when opened with Alt+S (so Ctrl+V and Esc work on it); opened by the pointer it never takes the keys
+  // of what you are typing in, and closing hands the focus back to the page
+  show(on, focus = false) {
     this.open = on; this.root.classList.toggle("kksh-open", on);
-    if (on) { this.render(); this.root.focus({ preventScroll: true }); } else { this.hold = false; this.status(""); }
+    if (on) { this.render(); if (focus) this.root.focus({ preventScroll: true }); return; }
+    if (this.root.contains(document.activeElement)) document.activeElement.blur();
+    this.hold = false; this.holdBtn.setAttribute("aria-pressed", "false"); this.status("");
   }
   status(t) { this.msg.textContent = t; }
   async load() {
     try { const r = await api.getUserData(FILE); if (r.ok) { const j = await r.json(); this.items = Array.isArray(j?.items) ? j.items.filter(i => i && i.kind) : []; } }
     catch { /* a first start: no file yet */ }
-    this.render();
+    this.commit(false);
   }
-  save() { api.storeUserData(FILE, { version: 1, items: this.items }, { overwrite: true, stringify: true, throwOnError: false }).catch(() => {}); }
-  add(it) { if (!it) return; addItem(this.items, it); this.save(); this.render(); }
+  // after every change: the cards are built again (now if open, else on the next show) and the list is saved once
+  // per burst of changes
+  commit(save = true) {
+    this.stale = true; this.render();
+    if (!save) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => api.storeUserData(FILE, { version: 1, items: this.items }, { overwrite: true, stringify: true, throwOnError: false }).catch(() => {}), 300);
+  }
+  add(...its) { its = its.filter(Boolean); if (!its.length) return; for (const it of its) addItem(this.items, it); this.commit(); }
 
   // ---- in
-  async takeDrop(dt) {
+  async take(dt) {
     if (!dt) return;
     try {
       const files = [...(dt.files || [])];
-      if (files.length) { for (const f of files) await this.addFile(f); return; }
-      const tl = dt.getData?.(TIMELINE_MIME);
-      if (tl) { const p = JSON.parse(tl); if (p.source) this.add({ kind: kindOf(p.source) || "image", source: p.source, name: p.source.split("/").pop() }); else this.status("a director stays on the timeline"); return; }
-      const url = (dt.getData("text/uri-list") || "").split("\n").find(l => l && !l.startsWith("#"))?.trim();
+      if (files.length) { this.add(...await Promise.all(files.map(f => this.fileItem(f).catch(e => { this.status(e.message); return null; })))); return; }
+      const own = dt.getData?.(DRAG_MIME);         // a render from the timeline's list
+      if (own) {
+        const p = JSON.parse(own);
+        if (p.source) this.add({ kind: kindOf(p.source) || "image", source: p.source, name: fileName(p.source) }); else this.status("a director stays on the timeline");
+        return;
+      }
+      const text = dt.getData("text/plain") || "";
+      const url = (dt.getData("text/uri-list") || "").split("\n").find(l => l && !l.startsWith("#"))?.trim() || text.trim();
       const v = url && sourceFromView(url);
-      if (v) { await this.addView(v); return; }
-      const text = dt.getData("text/plain");
-      if (text) { const v2 = sourceFromView(text.trim()); if (v2) await this.addView(v2); else this.add(textItem(text)); return; }
-      this.status("nothing the shelf can hold");
+      if (v) this.add(await this.viewItem(v)); else if (text) this.add(textItem(text)); else this.status("nothing the shelf can hold");
     } catch (e) { this.status(e.message); }
   }
-  async addView(v) {
-    if (v.source) return this.add({ kind: kindOf(v.name), source: v.source, name: v.name });
-    const blob = await (await fetch(v.temp)).blob();            // a temp preview: kept as a copy in input/
-    return this.addFile(new File([blob], v.name, { type: blob.type }));
+  async viewItem(v) {                               // a node preview; a temp one is kept as a copy in input/
+    if (v.source) return { kind: kindOf(v.name), source: v.source, name: v.name };
+    const r = await fetch(v.temp);
+    if (!r.ok) throw new Error(`${v.name} is not there any more (previews are wiped when ComfyUI restarts)`);
+    const blob = await r.blob();
+    return this.fileItem(new File([blob], v.name, { type: blob.type }));
   }
-  async addFile(f) {
+  async fileItem(f) {
     const name = f.name || (f.type === "image/png" ? "pasted.png" : "pasted");
-    if (!kindOf(name)) { this.status(`${name}: not a picture, video or sound`); return; }
-    this.status(`copying ${name}…`);
-    const fd = new FormData(); fd.append("file", f, name);
-    const r = await api.fetchApi("/kubakub/master/upload", { method: "POST", body: fd }), j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || r.statusText);
-    this.status(""); this.add({ kind: kindOf(j.name), source: "file:" + j.name, name: j.name.split("/").pop() });
+    if (!kindOf(name)) throw new Error(`${name}: not a picture, video or sound`);
+    const source = await uploadSource(f, name);
+    return { kind: kindOf(source), source, name: fileName(source) };
   }
   addText() {
     const ta = h("textarea", { class: "kksh-edit", placeholder: "a prompt, a note or a colour (#f18a58) · Enter keeps it, Shift+Enter = new line", rows: "4" });
-    const done = keep => { if (keep) this.add(textItem(ta.value)); ta.remove(); };
+    let finished = false;                         // remove() blurs it: the blur after Esc or Enter must not add again
+    const done = keep => { if (finished) return; finished = true; if (keep) this.add(textItem(ta.value)); ta.remove(); };
     ta.addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); done(true); } if (e.key === "Escape") done(false); });
     ta.addEventListener("blur", () => done(!!ta.value.trim()));
     this.list.before(ta); ta.focus();
   }
-  async fromNode(node) {                             // right-click -> put on the kubakub shelf
-    let n = 0;
-    for (const im of node.imgs || []) { const v = sourceFromView(im.src); if (v) { await this.addView(v); n++; } }
-    const vid = node.videoContainer?.querySelector?.("video,source")?.src;            // core video previews
-    if (vid) { const v = sourceFromView(vid); if (v) { await this.addView(v); n++; } }
-    if (!n) for (const w of node.widgets || []) if (isTextWidget(w) && String(w.value || "").trim()) { this.add(textItem(w.value)); n++; }
-    this.show(true); this.status(n ? "" : "this node has no picture or text to keep yet");
+  async fromNode(node) {                             // right-click -> put on the kubakub shelf: its previews, else its text
+    const urls = [...(node.imgs || []).map(i => i.src), node.videoContainer?.querySelector?.("video,source")?.src].filter(Boolean);
+    const views = urls.map(sourceFromView).filter(Boolean);
+    let its = await Promise.all(views.map(v => this.viewItem(v)));
+    if (!its.length) its = (node.widgets || []).filter(w => isTextWidget(w) && String(w.value || "").trim()).map(w => textItem(w.value));
+    this.add(...its); this.show(true); this.status(its.length ? "" : "this node has no picture or text to keep yet");
   }
 
   // ---- the list
   render() {
     for (const b of this.pills.children) b.setAttribute("aria-pressed", String((b.dataset.k || null) === this.filter));
-    this.pinBtn.setAttribute("aria-pressed", String(this.hold));
-    if (!this.open) return;
+    if (!this.open || !this.stale) return;
+    this.stale = false;
     const items = this.items.filter(i => !this.filter || i.kind === this.filter);
     this.list.replaceChildren(...(items.length ? items.map(i => this.card(i)) : [h("div", { class: "kksh-empty" }, this.items.length ? "nothing of this kind" : "empty: drop something here")]));
   }
   card(it) {
     let face;
-    if (it.kind === "image") face = h("img", { src: viewURL(it.source), loading: "lazy", draggable: "false", alt: "" });
-    else if (it.kind === "video") { face = h("video", { src: viewURL(it.source) + "#t=0.1", muted: true, preload: "metadata", draggable: "false" }); face.muted = true;
-      face.addEventListener("pointerenter", () => face.play().catch(() => {})); face.addEventListener("pointerleave", () => { face.pause(); }); }
+    if (it.kind === "image") face = h("img", { src: sourceURL(it.source), loading: "lazy", draggable: "false", alt: "" });
+    else if (it.kind === "video") {
+      face = h("video", { src: sourceURL(it.source) + "#t=0.1", preload: "metadata", draggable: "false" }); face.muted = true;
+      face.addEventListener("pointerenter", () => face.play().catch(() => {})); face.addEventListener("pointerleave", () => face.pause());
+    }
     else if (it.kind === "audio") face = h("div", { class: "kksh-sound" }, "♪");
     else if (it.kind === "colour") face = h("div", { class: "kksh-swatch", style: `background:${it.text}` });
     else face = h("div", { class: "kksh-text" }, it.text.slice(0, 220));
     const pin = h("button", { class: "kksh-icon", title: it.pinned ? "pinned: stays when the shelf is full or cleared" : "pin", "aria-pressed": String(!!it.pinned),
-      onclick: e => { e.stopPropagation(); it.pinned = !it.pinned; this.save(); this.render(); } }, "●");
-    const del = h("button", { class: "kksh-icon", title: "remove from the shelf (the file stays)", onclick: e => { e.stopPropagation(); this.items = this.items.filter(o => o !== it); this.save(); this.render(); } }, "×");
+      onclick: e => { e.stopPropagation(); it.pinned = !it.pinned; this.commit(); } }, "●");
+    const del = h("button", { class: "kksh-icon", title: "remove from the shelf (the file stays)", onclick: e => { e.stopPropagation(); this.items = this.items.filter(o => o !== it); this.commit(); } }, "×");
     const c = h("div", { class: "kksh-card", draggable: "true", "data-kind": it.kind,
       title: `${it.name}\ndrag it out${it.text ? " · click to copy" : ""}` }, face, h("div", { class: "kksh-foot" }, h("span", { class: "kksh-name" }, it.name), pin, del));
     if (it.text) c.addEventListener("click", () => navigator.clipboard?.writeText(it.text).then(() => this.status("copied"), () => {}));
     c.addEventListener("dragstart", e => {
       this.dragging = true; const dt = e.dataTransfer; dt.effectAllowed = "copy";
       dt.setData(SHELF_MIME, JSON.stringify(it));
-      if (it.source) { const u = viewURL(it.source); dt.setData(TIMELINE_MIME, JSON.stringify({ source: it.source })); dt.setData("text/uri-list", u); dt.setData("text/plain", u); }
+      // no text/uri-list: ComfyUI's own drop handler would fetch it and open a render's embedded workflow
+      if (it.source) { dt.setData(DRAG_MIME, JSON.stringify({ source: it.source })); dt.setData("text/plain", it.name); }
       else dt.setData("text/plain", it.text);
     });
     c.addEventListener("dragend", () => { this.dragging = false; if (!this.hold && !this.root.matches(":hover")) this.show(false); });
@@ -197,30 +193,25 @@ class Shelf {
 // ------------------------------------------------------------------------------------------------ out: the canvas
 function isTextWidget(w) { return !!w && (w.type === "customtext" || w.options?.multiline || w.element?.tagName === "TEXTAREA" || w.inputEl?.tagName === "TEXTAREA"); }
 const LOADERS = { image: ["LoadImage", "image"], video: ["LoadVideo", "file"], audio: ["LoadAudio", "audio"] };
+const takesFiles = kind => w => Array.isArray(w.options?.values) && w.options.values.some(v => typeof v === "string" && kindOf(v) === kind);
 function setWidget(node, w, value) {
-  if (w.options?.values && Array.isArray(w.options.values) && !w.options.values.includes(value)) w.options.values.push(value);
+  if (Array.isArray(w.options?.values) && !w.options.values.includes(value)) w.options.values.push(value);
   w.value = value; w.callback?.(value, app.canvas, node);
   node.setDirtyCanvas?.(true, true); app.graph?.setDirtyCanvas?.(true, true);
 }
 // a shelf item dropped on the graph canvas: onto a node that can take it, else a new node at the spot
-export function dropOnCanvas(it, e) {
+function dropOnCanvas(it, e) {
   const c = app.canvas, g = c?.graph; if (!c || !g) return false;
   const [x, y] = c.convertEventToCanvasOffset(e);
-  const node = g.getNodeOnPos?.(x, y);
-  if (node) {
-    if (it.source) {
-      const want = LOADERS[it.kind]?.[1];
-      const w = node.widgets?.find(w => w.name === want) || node.widgets?.find(w => Array.isArray(w.options?.values) && w.options.values.some(v => typeof v === "string" && kindOf(v) === it.kind));
-      if (w) { setWidget(node, w, loaderValue(it.source)); return true; }
-    } else {
-      const w = node.widgets?.find(isTextWidget) || node.widgets?.find(w => w.type === "text" || w.type === "string");
-      if (w) { setWidget(node, w, it.text); return true; }
-    }
-  }
+  const value = it.source ? loaderValue(it.source) : it.text;
   const [type, wname] = it.source ? LOADERS[it.kind] || [] : ["PrimitiveStringMultiline", "value"];
+  const node = g.getNodeOnPos?.(x, y), ws = node?.widgets || [];
+  const w = it.source ? ws.find(w => w.name === wname) || ws.find(takesFiles(it.kind))
+    : ws.find(isTextWidget) || ws.find(w => w.type === "text" || w.type === "string");
+  if (w) { setWidget(node, w, value); return true; }
   const n = type && globalThis.LiteGraph?.createNode?.(type); if (!n) return false;
   n.pos = [x, y]; g.add(n);
-  const w = n.widgets?.find(w => w.name === wname); if (w) setWidget(n, w, it.source ? loaderValue(it.source) : it.text);
+  const nw = n.widgets?.find(w => w.name === wname); if (nw) setWidget(n, nw, value);
   return true;
 }
 
@@ -263,7 +254,6 @@ function injectStyle() {
 // ------------------------------------------------------------------------------------------------ register
 let shelf = null;
 const getShelf = () => (shelf = shelf || new Shelf());
-export const shelfOpen = () => !!shelf?.open;
 
 app.registerExtension({
   name: "kubakub.shelf",
@@ -276,8 +266,8 @@ app.registerExtension({
   },
   setup() {
     getShelf();
-    // Alt+S: its own listener, added before any director window, so it works above the director too (the window
-    // takes every other key while it is open); never while typing in a text field
+    // Alt+S: not a ComfyUI keybinding, because an open director window takes every key at window capture; this
+    // listener is added at setup, before any director's, so it runs first. Never while typing in a text field.
     window.addEventListener("keydown", e => {
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.code !== "KeyS" || e.repeat) return;
       if (e.target.matches?.("textarea, input:not([type=range]):not([type=checkbox]):not([type=color])") && !e.target.closest?.(".kksh-shelf")) return;
@@ -289,9 +279,12 @@ app.registerExtension({
     const carries = e => [...(e.dataTransfer?.types || [])].includes(SHELF_MIME);
     document.addEventListener("dragover", e => { if (carries(e) && onCanvas(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }, true);
     document.addEventListener("drop", e => {
-      if (!carries(e) || !onCanvas(e)) return;
+      if (!carries(e)) return;
+      // into a text box: the browser inserts the text; ComfyUI's document drop handler must not cancel that
+      if (e.target.matches?.("textarea, input[type=text], input:not([type])")) { e.stopPropagation(); return; }
+      if (!onCanvas(e)) return;
       e.preventDefault(); e.stopPropagation();
-      try { const it = JSON.parse(e.dataTransfer.getData(SHELF_MIME)); if (!dropOnCanvas(it, e)) getShelf().status("that node takes no " + it.kind); }
+      try { const it = JSON.parse(e.dataTransfer.getData(SHELF_MIME)); if (!dropOnCanvas(it, e)) getShelf().status("nothing on the canvas takes this " + it.kind); }
       catch (err) { console.error("[kubakub shelf]", err); }
     }, true);
   },

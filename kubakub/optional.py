@@ -10,7 +10,8 @@ from __future__ import annotations
 import importlib
 
 PIP = {"shapely": "shapely", "skimage": "scikit-image", "fitz": "PyMuPDF", "imageio": "imageio",
-       "trimesh": "trimesh", "onnxruntime": "onnxruntime"}        # module -> pip package (kub_env.OPTIONAL)
+       "trimesh": "trimesh", "onnxruntime": "onnxruntime", "ultralytics": "ultralytics",
+       "mediapipe": "mediapipe"}                                  # module -> pip package (kub_env.OPTIONAL)
 
 
 def hint(module: str, feature: str) -> str:

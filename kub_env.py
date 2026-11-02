@@ -21,6 +21,9 @@ OPTIONAL = [                        # (module, pip package, what needs it)
     ("ultralytics", "ultralytics", "tracker: people and things (yolo)"),
     ("mediapipe", "mediapipe", "tracker: body, hands and face points"),
 ]
+# reported when missing, but the setup tool does not offer to install them: their version pins (numpy, protobuf,
+# torch) can change packages ComfyUI itself needs, so they are installed by hand when the tracker needs them
+NOT_OFFERED = {"ultralytics", "mediapipe"}
 
 
 def _has(module):

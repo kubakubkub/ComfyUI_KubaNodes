@@ -7,7 +7,6 @@ Without node the checks are skipped and said so.
 """
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -43,16 +42,19 @@ check("a prompt is text, named by its first line", textItem("warm windows\nwet s
 check("empty text is nothing", textItem("   ") === null);
 
 // node previews
-const o = sourceFromView("http://h/api/view?filename=a.png&subfolder=kubakub_show&type=output");
+const o = sourceFromView("http://127.0.0.1:8188/api/view?filename=a.png&subfolder=kubakub_show&type=output");
 check("an output preview -> output:sub/name", o.source === "output:kubakub_show/a.png", o);
 check("an input preview -> file:name", sourceFromView("/view?filename=b.mp4&type=input").source === "file:b.mp4");
 check("a temp preview is copied in", !!sourceFromView("/view?filename=c.png&type=temp").temp);
+check("a link of another server -> null (the shelf never fetches from the network)",
+  sourceFromView("https://other.host/x/view?filename=a.png&type=temp") === null && sourceFromView("http://h/api/view?filename=a.png&type=output") === null);
+check("names without file: / output:", fileName("file:b.png") === "b.png" && fileName("output:kubakub_show/x.mp4") === "x.mp4");
 check("not a picture / video / sound -> null", sourceFromView("/view?filename=c.json&type=output") === null && sourceFromView("/other?filename=a.png") === null);
 
 // what the core loaders take
 check("loader value for input/", loaderValue("file:kuba_director/a.png") === "kuba_director/a.png");
 check("loader value for output/", loaderValue("output:kubakub_show/a.mp4") === "kubakub_show/a.mp4 [output]");
-check("viewURL round trip", sourceFromView(viewURL("output:kubakub_show/a.png")).source === "output:kubakub_show/a.png");
+check("sourceURL round trip", sourceFromView(sourceURL("output:kubakub_show/a.png")).source === "output:kubakub_show/a.png");
 process.exit(fails ? 1 : 0);
 """
 
@@ -60,11 +62,9 @@ node = shutil.which("node")
 if node is None:
     print("skip the shelf checks: node is not installed")
 else:
-    with open(os.path.join(HERE, "..", "web", "kubakub_shelf.js"), encoding="utf-8") as f:
-        src = f.read()
-    src = re.sub(r"(?m)^import \{ app \} from .*$", "const app = { registerExtension() {} };", src)
-    src = re.sub(r"(?m)^import \{ api \} from .*$", 'const api = { apiURL: p => "/api" + p };', src)
-    src = "globalThis.location = { href: 'http://127.0.0.1:8188/' };\n" + src + "\n" + CHECKS
+    sys.path.insert(0, HERE)
+    from _js import module_source
+    src = module_source("kubakub_shelf.js") + "\n" + CHECKS
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "shelf.mjs")
         with open(path, "w", encoding="utf-8") as f:

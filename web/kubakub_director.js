@@ -6,6 +6,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { pickShader, shaderPresets } from "./kubakub_shader.js";
 import { RATIOS as CROP_RATIOS, ratioValue, fitRatio, dragBox, ratioName } from "./kubakub_crop.js";
+import { DRAG_MIME, kindOf, fileName, sourceURL, uploadSource } from "./kubakub_media.js";
 
 const HERE = new URL(".", import.meta.url).href;
 const OPS = { normal: "source-over", multiply: "multiply", screen: "screen", overlay: "overlay", darken: "darken",
@@ -910,6 +911,9 @@ const shaderGL = {
   },
 };
 const isVideoName = n => VIDEO_RE.test(String(n || ""));
+// an overlay of another tool above the window (the kubakub shelf) marks itself data-kk-own-events: its keys, pastes
+// and drops are its own, the window leaves them alone
+const foreign = e => !!e.target?.closest?.("[data-kk-own-events]");
 const isVideo = L => L?.kind === "image" && /^(file|path):/.test(L.source || "") && isVideoName(L.source);   // path: = linked from disk
 function mediaSegs(media, dur) {                    // = media.segments(): normalised, sorted by start
   const num = (s, k, d) => (typeof s?.[k] === "number" && Number.isFinite(s[k]) ? s[k] : d);
@@ -3361,16 +3365,24 @@ class Director {
     this.refresh();
   }
   moveSel(to) { to = Math.max(0, Math.min(this.layers.length - 1, to)); if (to === this.sel) return; this.snap(); const [L] = this.layers.splice(this.sel, 1); this.layers.splice(to, 0, L); this.sel = to; this.refresh(); }
-  async importShelf(json, at) {                     // an item of the kubakub shelf: its file, imported like a dropped one
+  // a {source} dragged from the kubakub shelf or the timeline's renders: a file already in input/ is used as it is;
+  // a render in output/ is copied into input/kuba_director first (layers read input/ or a path), streamed, any size
+  async importSource(source, at) {
+    const kind = kindOf(source), name = fileName(source);
+    if (!kind) { note("the director takes pictures, videos and sounds"); return; }
     try {
-      const it = JSON.parse(json);
-      if (!it.source) { note("the director takes pictures, videos and sounds from the shelf"); return; }
-      const [type, rest] = it.source.startsWith("output:") ? ["output", it.source.slice(7)] : ["input", it.source.replace(/^file:/, "")];
-      const i = rest.lastIndexOf("/"), name = rest.slice(i + 1);
-      const r = await api.fetchApi(`/view?${new URLSearchParams({ filename: name, subfolder: i < 0 ? "" : rest.slice(0, i), type })}`);
-      if (!r.ok) throw new Error(`${name} is not there any more`);
-      const blob = await r.blob();
-      await this.importFile(new File([blob], name, { type: blob.type }), at);
+      if (!source.startsWith("file:")) {
+        this.busy(true, `copying ${name}`);
+        try {
+          const r = await fetch(sourceURL(source));
+          if (!r.ok) throw new Error(`${name} is not there any more`);
+          source = await uploadSource(new File([await r.blob()], name), name);
+        } finally { this.busy(false); }
+      }
+      if (kind === "image") return await this.importImage(source.slice(5), name, at);
+      if (kind === "video") return await this.importVideo(null, null, at, source);
+      const r = await fetch(sourceURL(source));                     // a sound: the director keeps its own copy
+      await this.importAudio(new File([await r.blob()], name, { type: "audio/" + name.split(".").pop() }));
     } catch (e) { note("import failed: " + e.message); }
   }
 
@@ -3378,26 +3390,35 @@ class Director {
     if (file?.type?.startsWith("audio/") || /\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(file?.name || "")) return this.importAudio(file);
     if (file?.type?.startsWith("video/") || isVideoName(file?.name)) return this.importVideo(file, null, at);
     if (!file || !file.type.startsWith("image/")) return;
+    let name;
+    this.busy(true, "importing");
+    try { name = await upload(file, (file.name || "pasted.png").replace(/[^\w.\-]+/g, "_"), false); }
+    catch (e) { console.error("[kubakub director]", e); note("import failed: " + e.message); return; }
+    finally { this.busy(false); }
+    return this.importImage(name, file.name || "pasted image", at);
+  }
+
+  async importImage(name, label, at) {               // a picture in input/ (its name there) as a new layer
     this.busy(true, "importing");
     try {
-      const name = await upload(file, (file.name || "pasted.png").replace(/[^\w.\-]+/g, "_"), false);
       const img = await loadImage(inputURL(name));
       if (this.closed) return;
       const w0 = img.naturalWidth, h0 = img.naturalHeight, s = Math.min(1, (this.W * 0.4) / w0, (this.H * 0.5) / h0);
       const [cx, cy] = at || [this.W / 2, this.H / 2];
       this.snap();
-      const L = this.defaults({ id: "L" + (this.uid++), name: (file.name || "pasted image").replace(/\.[^.]+$/, "").toLowerCase(), kind: "image",
+      const L = this.defaults({ id: "L" + (this.uid++), name: label.replace(/\.[^.]+$/, "").toLowerCase(), kind: "image",
         source: "file:" + name, x: cx - w0 * s / 2, y: cy - h0 * s / 2, w: w0 * s, h: h0 * s });
       L.img = img; this.insert(L); this.setTool("move"); this.refresh();
     } catch (e) { console.error("[kubakub director]", e); note("import failed: " + e.message); }
     this.busy(false);
   }
 
-  async importVideo(file, path, at) {                // an uploaded file (input/kuba_director) or one linked by its path
+  async importVideo(file, path, at, given) {         // an uploaded file (input/kuba_director), one linked by its path, or a source already in input/
     this.busy(true, "importing the video · making a preview copy");
     try {
-      let source;
-      if (path) source = "path:" + path.trim().replace(/^"|"$/g, "");
+      let source = given;
+      if (source) { /* already there */ }
+      else if (path) source = "path:" + path.trim().replace(/^"|"$/g, "");
       else {
         if (file.size > 95 * 1024 * 1024) throw new Error(`${(file.size / 2 ** 20).toFixed(0)} MB is over ComfyUI's upload limit: use + layer → video from a path`);
         source = "file:" + await upload(file, (file.name || "video.mp4").replace(/[^\w.\-]+/g, "_"), false);
@@ -4350,7 +4371,7 @@ class Director {
     }, { passive: false });
     // keyboard (captured, so ComfyUI's own shortcuts stay quiet while the window is open)
     this.onKey = e => {
-      if (!this.root.isConnected) return;
+      if (!this.root.isConnected || foreign(e)) return;
       if (document.querySelector(".kkd-modal")) {    // a dialog of the window is open: its own keys only
         if (!e.target.closest?.(".kkd-modal")) e.stopPropagation();
         return;
@@ -4414,23 +4435,23 @@ class Director {
       if (k.startsWith("Arrow")) { const q = this.cur(); if (!this.transformable(q)) return; e.preventDefault(); this.once();
         const d = e.shiftKey ? 20 : 2; if (k === "ArrowLeft") q.x -= d; if (k === "ArrowRight") q.x += d; if (k === "ArrowUp") q.y -= d; if (k === "ArrowDown") q.y += d; this.draw(); }
     };
-    this.onKeyUp = e => { if (e.key === " ") { this.space = false; this.setTool(this.tool); } if (this.root.isConnected) e.stopPropagation(); };
+    this.onKeyUp = e => { if (foreign(e)) return; if (e.key === " ") { this.space = false; this.setTool(this.tool); } if (this.root.isConnected) e.stopPropagation(); };
     window.addEventListener("keydown", this.onKey, true); window.addEventListener("keyup", this.onKeyUp, true);
     this.onBlur = () => { if (this.space) { this.space = false; this.setTool(this.tool); } };   // Space released in another app
     window.addEventListener("blur", this.onBlur);
     // drop / paste images
-    // files from the desktop, and pictures / videos / sounds from the kubakub shelf (a drop on the shelf is the shelf's)
-    const SHELF = "application/x-kubakub-shelf";
-    let depth = 0; const hasFiles = e => !e.target?.closest?.(".kksh-shelf") && [...(e.dataTransfer?.types || [])].some(t => t === "Files" || t === SHELF);
+    // files from the desktop, and {source} drags (the kubakub shelf, the timeline's renders); events inside an overlay
+    // marked data-kk-own-events (the shelf) are that overlay's own
+    let depth = 0; const hasFiles = e => !foreign(e) && [...(e.dataTransfer?.types || [])].some(t => t === "Files" || t === DRAG_MIME);
     this.on_dragenter = e => { if (!hasFiles(e)) return; depth++; this.dropzone.hidden = false; };
     this.on_dragleave = e => { if (!hasFiles(e)) return; if (--depth <= 0) { depth = 0; this.dropzone.hidden = true; } };
     this.on_dragover = e => { if (hasFiles(e)) { e.preventDefault(); e.stopPropagation(); } };
     this.on_drop = e => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); depth = 0; this.dropzone.hidden = true;
-      const at = e.target === this.cv ? toM(e) : null, own = e.dataTransfer.getData(SHELF);
-      if (own) { this.importShelf(own, at); return; }
+      const at = e.target === this.cv ? toM(e) : null, own = e.dataTransfer.getData(DRAG_MIME);
+      if (own) { const p = JSON.parse(own); if (p.source) this.importSource(p.source, at); else note("a director goes on the timeline"); return; }
       [...e.dataTransfer.files].forEach((f, i) => this.importFile(f, at && [at[0] + i * 80, at[1] + i * 80])); };
     this.on_paste = e => {                              // never reaches the graph behind the window (it would paste nodes)
-      if (!this.root.isConnected || e.target.matches?.("input,textarea")) return;
+      if (!this.root.isConnected || foreign(e) || e.target.matches?.("input,textarea")) return;
       e.preventDefault(); e.stopPropagation();
       const f = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith("image/"));
       if (f) this.importFile(f.getAsFile());

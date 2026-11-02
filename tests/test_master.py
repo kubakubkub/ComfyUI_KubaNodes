@@ -93,10 +93,9 @@ node = shutil.which("node")
 if node is None:
     print("skip the JavaScript checks: node is not installed")
 else:
-    with open(os.path.join(HERE, "..", "web", "kubakub_master.js"), encoding="utf-8") as f:
-        src = f.read()
-    src = re.sub(r"(?m)^import \{ app \} from .*$", "const app = { registerExtension() {} };", src)
-    src = re.sub(r"(?m)^import \{ api \} from .*$", "const api = { addEventListener() {} };", src)
+    sys.path.insert(0, HERE)
+    from _js import module_source
+    src = module_source("kubakub_master.js")
     src += "\nconst CASES = " + json.dumps(cases) + ";\nconst KEY_CASES = " + json.dumps(key_cases) + ";\n"
     with open(os.path.join(HERE, "js", "master_checks.mjs"), encoding="utf-8") as f:
         src += f.read()

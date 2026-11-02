@@ -7,14 +7,12 @@
 // #a187b7 selection), like the director window.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { DRAG_MIME, kindOf, sourceURL, sourceFromView, uploadSource, h } from "./kubakub_media.js";
 
 const HERE = new URL(".", import.meta.url).href;
 const ORANGE = "#f18a58", LAV = "#a187b7";
 const KEY = "kubakub_master";
-const DRAG_MIME = "application/x-kubakub-master";
 const PRESETS = { "hd 1920x1080": [1920, 1080], "uhd 3840x2160": [3840, 2160], "dci 4k 4096x2160": [4096, 2160], "8k 7680x4320": [7680, 4320] };
-const VIDEO_RE = /\.(mp4|mov|webm|mkv|avi|m4v|gif)$/i, IMAGE_RE = /\.(png|jpe?g|webp|bmp|tiff?)$/i, AUDIO_RE = /\.(wav|mp3|ogg|flac|m4a|aac|opus)$/i;
-const kindOf = name => (VIDEO_RE.test(name) ? "video" : IMAGE_RE.test(name) ? "image" : AUDIO_RE.test(name) ? "audio" : null);
 const COLS = "kubakub.timeline.columns";            // the column widths, per browser
 const COL_DEF = { preview: 240, list: 210, insp: 220 };
 const HEADER_W = 112, RULER_H = 24, TRACK_H = 42, EDGE = 7, SNAP_PX = 8, UNDO_MAX = 200;
@@ -236,11 +234,6 @@ function nodeStill(node) {                            // the director's last pic
   return node.imgs?.[0]?.src || null;
 }
 function markChanged() { try { app.extensionManager?.workflow?.activeWorkflow?.changeTracker?.captureCanvasState?.(); } catch { /* older frontends */ } }
-function sourceURL(source) {                          // 'file:<input/>' | 'output:<output/>' -> /view
-  const [type, rest] = source.startsWith("output:") ? ["output", source.slice(7)] : ["input", source.replace(/^file:/, "")];
-  const i = rest.lastIndexOf("/");
-  return api.apiURL(`/view?${new URLSearchParams({ filename: rest.slice(i + 1), subfolder: i < 0 ? "" : rest.slice(0, i), type })}`);
-}
 async function postJSON(path, body) {
   const r = await api.fetchApi(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.statusText); return j;
@@ -376,7 +369,8 @@ class Preview {
         if (!src) { this.card(ctx, W, H, n ? (n.title || "kubakub director") : "director removed", n ? "run the workflow once to see it here" : ""); continue; }
       } else {
         const m = s.media(it.media); if (!m || m.kind === "audio") continue;
-        if (m.kind === "video" && this.cache.failed.has(m.source) && !this.videos.has(it.id)) { this.card(ctx, W, H, m.name || "video", "not rendered yet: run the workflow once"); continue; }
+        const why = m.kind === "video" && !this.videos.has(it.id) && this.cache.failed.get(m.source);
+        if (why) { this.card(ctx, W, H, m.name || "video", why.startsWith("video not found") ? "not rendered yet: run the workflow once" : why); continue; }
         if (m.kind === "video") { const v = this.videos.get(it.id); if (!v || v.el.readyState < 2) continue; src = v.el; sw = m.info?.w || v.el.videoWidth; sh = m.info?.h || v.el.videoHeight; }
         else { const im = this.image(sourceURL(m.source)); if (!im.complete || !im.naturalWidth) continue; src = im; sw = im.naturalWidth; sh = im.naturalHeight; }
       }
@@ -407,16 +401,16 @@ class MediaCache {
     return null;
   }
   waveOf(source) { return postJSON("/kubakub/master/wave", { source }); }
-  // a video that is not there yet (e.g. a render output before its first run): asked again at most every 4 s, so it
-  // shows up once the render is done, without a request per frame or an uncaught error
-  missing(m) { const t = this.failed.get(m.source); return t !== undefined && performance.now() - t < 4000; }
+  // a video that could not be read (e.g. a render output before its first run) keeps its reason here and is not asked
+  // for again until a run finishes (retry(), from the panel's 'executed' listener) or the show is bound again
+  retry() { this.failed.clear(); }
   ensure(m) {
     if (m.kind !== "video" || this.urls.has(m.source) || this.pending.has(m.source)) return this.pending.get(m.source);
-    if (this.missing(m)) return Promise.resolve(null);
+    if (this.failed.has(m.source)) return null;
     const p = postJSON("/kubakub/director/media", { source: m.source }).then(r => {
       const pr = r.proxy; this.urls.set(m.source, api.apiURL(`/view?${new URLSearchParams({ filename: pr.filename, subfolder: pr.subfolder, type: pr.type })}`));
-      this.failed.delete(m.source); this.onReady(); return r.info;
-    }, () => { const first = !this.failed.has(m.source); this.failed.set(m.source, performance.now()); if (first) this.onReady(); return null; })
+      this.onReady(); return r.info;
+    }, e => { this.failed.set(m.source, e.message); this.onReady(); return null; })
       .finally(() => this.pending.delete(m.source));
     this.pending.set(m.source, p); return p;
   }
@@ -685,14 +679,6 @@ class Timeline {
 
 // ------------------------------------------------------------------------------------------------ panel
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-function h(tag, attrs = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (k === "class") e.className = v; else if (v != null && v !== false) e.setAttribute(k, v === true ? "" : v);
-  }
-  for (const c of kids.flat()) if (c != null) e.append(c);
-  return e;
-}
 const fmtT = (t, fps) => `${t.toFixed(2)} s · frame ${Math.round(t * fps)}`;
 
 class Panel {
@@ -704,7 +690,7 @@ class Panel {
     this.build();
     this.store.on(why => {
       this.tl.dirty = true; this.preview.dirty = true;
-      if (why === "bind") { this.preview.pause(); for (const m of this.store.doc.media) this.cache.ensure(m)?.catch?.(() => {}); requestAnimationFrame(() => this.tl.fit()); }
+      if (why === "bind") { this.preview.pause(); this.cache.retry(); for (const m of this.store.doc.media) this.cache.ensure(m)?.catch?.(() => {}); requestAnimationFrame(() => this.tl.fit()); }
       if (why !== "time") this.side(why);
       else if (!this.preview.playing) { const sel = this.store.selected(); if (sel.length === 1 && sel[0].it.anim) this.inspector(); }   // keyed values at the playhead
       this.bar();
@@ -917,10 +903,7 @@ class Panel {
     for (const f of files) {
       try {
         this.status(`importing ${f.name}…`);
-        const fd = new FormData(); fd.append("file", f, f.name);
-        const r = await api.fetchApi("/kubakub/master/upload", { method: "POST", body: fd }), j = await r.json();
-        if (!r.ok) throw new Error(j.error || r.statusText);
-        t = await this.addSource("file:" + j.name, at ? { track: at.track, t } : null);
+        t = await this.addSource(await uploadSource(f), at ? { track: at.track, t } : null);
       } catch (e) { this.status(`${f.name}: ${e.message}`); return; }
     }
     this.status("");
@@ -944,18 +927,11 @@ class Panel {
           return;
         }
         const url = (dt.getData("text/uri-list") || dt.getData("text/plain") || "").split("\n")[0].trim();
-        const src = this.sourceFromView(url); if (src) await this.addSource(src, at); else this.status("drop a video or picture, a director or a render from the list");
+        const src = sourceFromView(url)?.source; if (src) await this.addSource(src, at); else this.status("drop a video or picture, a director or a render from the list");
       } catch (err) { this.status(err.message); }
     });
   }
-  sourceFromView(url) {                              // a preview dragged out of a node: /view?filename=&subfolder=&type=
-    try {
-      const u = new URL(url, location.href); if (!u.pathname.endsWith("/view")) return null;
-      const f = u.searchParams.get("filename"), sub = u.searchParams.get("subfolder") || "", type = u.searchParams.get("type");
-      if (!f || !kindOf(f) || (type !== "output" && type !== "input")) return null;
-      return `${type === "output" ? "output:" : "file:"}${sub ? sub + "/" : ""}${f}`;
-    } catch { return null; }
-  }
+
 
   // ---- side: list (directors / renders / the show's files) and the inspector
   setTab(t) { this.tab = t; if (t === "renders") this.outputs = null; this.side("tab"); }
@@ -965,7 +941,7 @@ class Panel {
     if (this.tab === "renders") this.side("tab");
   }
   rendersChanged() {                                // a run finished: new renders, new director pictures
-    this.preview.dirty = true; this.tl.dirty = true;
+    this.cache.retry(); this.preview.dirty = true; this.tl.dirty = true;
     if (this.tab === "renders" && this.root.isConnected) this.loadOutputs(); else this.outputs = null;
     if (this.tab === "directors") this.listView();
   }
