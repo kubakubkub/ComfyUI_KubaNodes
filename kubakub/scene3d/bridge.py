@@ -279,6 +279,17 @@ def export(path: str, cache_root: str, camera: str = "", width: int = 0, height:
         raise
 
 
+def run_blender_script(exe, script, args, timeout, autoexec=True):
+    """Blender in background mode, once: `script` with `args` after "--" -> subprocess.CompletedProcess (stdout and
+    stderr as text). autoexec False: the file's own Python scripts never run. subprocess.TimeoutExpired when it takes
+    longer than `timeout` s. No window on Windows."""
+    cmd = [exe, "-b", "--factory-startup", *([] if autoexec else ["--disable-autoexec"]), "--python", script, "--",
+           *args]
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=timeout, creationflags=flags)
+
+
 def _run_job(job_d, out, done, blender, timeout):
     job = os.path.join(out, "job.json")
     with open(job, "w", encoding="utf-8") as f:
@@ -292,10 +303,7 @@ def _run_job(job_d, out, done, blender, timeout):
         except Exception as e:  # noqa: BLE001  (a dead or stuck worker: the one-off process below)
             _worker_stop(exe)
             print(f"[KUBA scene3d] Blender worker failed ({e}); running Blender once for this job")
-    cmd = [exe, "-b", "--factory-startup", "--python", SCRIPT, "--", job]
-    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                         timeout=timeout, creationflags=flags)
+    res = run_blender_script(exe, SCRIPT, [job], timeout)
     tail = "\n".join((res.stdout or "").splitlines()[-40:])
     if res.returncode != 0 or not is_done(out, done):
         err = [ln for ln in (res.stdout or "").splitlines() + (res.stderr or "").splitlines()
