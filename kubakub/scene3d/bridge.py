@@ -93,7 +93,7 @@ def find_blender(explicit: str = "") -> str:
     exe = shutil.which("blender")
     if exe:
         return exe
-    raise FileNotFoundError("Blender not found: install Blender 4.x, or set blender_path or blender = ... in kubakub.ini [settings]")
+    raise FileNotFoundError("Blender not found: install Blender (4.2 or newer), or set blender_path or blender = ... in kubakub.ini [settings]")
 
 
 def clean_path(path: str) -> str:

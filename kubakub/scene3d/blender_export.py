@@ -172,6 +172,38 @@ def image_to_numpy(path, channels):
     return buf.reshape(h, w, 4)[::-1, :, :channels]   # Blender images are bottom-up
 
 
+def pass_writer(sc, slots):
+    """A fresh compositor tree: Render Layers -> one EXR File Output per (file prefix, pass socket).
+    Blender 5 keeps the compositor in a node group (scene.compositing_node_group) and the File Output
+    node has directory / file_output_items; Blender 4 has scene.node_tree, base_path and file_slots.
+    Returns set_dir(path). The compositor itself is switched with render.use_compositing."""
+    if hasattr(sc, "compositing_node_group"):
+        tree = bpy.data.node_groups.new("kubakub_passes", "CompositorNodeTree")
+        sc.compositing_node_group = tree
+    else:
+        sc.use_nodes = True
+        tree = sc.node_tree
+        tree.nodes.clear()
+    rl = tree.nodes.new("CompositorNodeRLayers"); rl.scene = sc
+    fo = tree.nodes.new("CompositorNodeOutputFile")
+    if hasattr(fo.format, "media_type"):
+        fo.format.media_type = "IMAGE"                   # Blender 5 default is a multilayer EXR
+    fo.format.file_format, fo.format.color_depth, fo.format.color_mode = "OPEN_EXR", "32", "RGB"
+    fo.format.exr_codec = "ZIP"
+    items = fo.file_output_items if hasattr(fo, "file_output_items") else fo.file_slots
+    items.clear()
+    for slot, sock in slots:
+        items.new("RGBA", slot) if hasattr(fo, "file_output_items") else items.new(slot)
+        tree.links.new(rl.outputs[sock], fo.inputs[slot])
+
+    def set_dir(path):
+        if hasattr(fo, "directory"):
+            fo.directory, fo.file_name = path, ""
+        else:
+            fo.base_path = path
+    return set_dir
+
+
 
 def frame_bounds(sc, cob, size=None):
     """The projection camera's picture as tangents in its own space (x0, x1, y0, y1): lens shift and sensor fit
@@ -590,8 +622,7 @@ def relight(job, sc, cob, W, H, placed_objects, out, t0):
     r.use_persistent_data = True                              # frames of a sequence reuse the scene (BVH, textures)
     if hasattr(sc.cycles, "denoising_use_gpu"):
         sc.cycles.denoising_use_gpu = True                     # OIDN on the GPU (Blender 4.1+)
-    sc.use_nodes = False
-    r.use_compositing = False
+    r.use_compositing = False                                 # no compositor (Blender 4 and 5)
     r.image_settings.file_format, r.image_settings.color_mode, r.image_settings.color_depth = "PNG", "RGBA", "16"
     r.image_settings.compression = 0                          # temp files: writing uncompressed saves ~0.07 s / frame
     frames = R.get("frames") or [dict(name="relit.png")]
@@ -855,17 +886,8 @@ def main(job=None):
     sc.cycles.device = "GPU" if device != "CPU" else "CPU"
     r.use_compositing = True                 # a .blend may have compositing / the sequencer switched
     r.use_sequencer = False                  # differently; the File Output node needs the compositor
-    sc.use_nodes = True
-    tree = sc.node_tree
-    tree.nodes.clear()
-    rl = tree.nodes.new("CompositorNodeRLayers"); rl.scene = sc
-    fo = tree.nodes.new("CompositorNodeOutputFile")
-    fo.format.file_format, fo.format.color_depth, fo.format.color_mode = "OPEN_EXR", "32", "RGB"
-    fo.format.exr_codec = "ZIP"
-    fo.file_slots.clear()
-    for slot, sock in (("pass_faceid_", "Image"), ("pass_position_", "Position"), ("pass_normal_", "Normal")):
-        fo.file_slots.new(slot)
-        tree.links.new(rl.outputs[sock], fo.inputs[slot])
+    set_pass_dir = pass_writer(sc, (("pass_faceid_", "Image"), ("pass_position_", "Position"),
+                                    ("pass_normal_", "Normal")))
     timing = {"clay": 0.0, "ids": 0.0}
 
     def render_to(dst):
@@ -873,7 +895,7 @@ def main(job=None):
         t1 = time.time()
         r.engine = "BLENDER_WORKBENCH"
         vl.material_override = None
-        sc.use_nodes = False
+        r.use_compositing = False
         r.film_transparent = False
         r.image_settings.file_format, r.image_settings.color_mode, r.image_settings.color_depth = "PNG", "RGB", "8"
         r.filepath = os.path.join(dst, "clay.png")
@@ -882,9 +904,9 @@ def main(job=None):
         t1 = time.time()
         r.engine = "CYCLES"
         vl.material_override = mat
-        sc.use_nodes = True
+        r.use_compositing = True
         r.film_transparent = True
-        fo.base_path = dst
+        set_pass_dir(os.path.abspath(dst))
         r.filepath = os.path.join(dst, "_cycles_unused.png")
         bpy.ops.render.render(write_still=False)
         timing["ids"] += time.time() - t1

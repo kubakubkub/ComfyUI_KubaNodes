@@ -9,7 +9,7 @@ already read. Example: `example_workflows/scene3d_to_regions.json`.
 
 - **`file` empty** = the built-in sample building (kubakub sample model with its default size), so the node
   runs as it is; paste the path of your own file to replace it.
-- **Files**: .blend .fbx .obj .abc .glb .gltf .stl .ply .usd(a/c/z). Blender 4.x runs headless as a
+- **Files**: .blend .fbx .obj .abc .glb .gltf .stl .ply .usd(a/c/z). Blender (4.2 or newer, 5.x included) runs headless as a
   subprocess (found in `C:\Program Files\Blender Foundation`, or the `blender_path` input / `blender = ...` in kubakub.ini);
   it is not imported into ComfyUI's Python. **.c4d** cannot be read outside Cinema 4D: ask for FBX or
   Alembic. The source file is only read, never saved.

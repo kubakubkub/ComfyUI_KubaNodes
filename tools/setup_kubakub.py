@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PACK = os.path.dirname(HERE)
 COMFY = os.path.dirname(os.path.dirname(PACK))          # ComfyUI/custom_nodes/<pack> -> ComfyUI
 MODELS = os.path.join(COMFY, "models")
-BLENDER_LTS = "https://www.blender.org/download/lts/4-5/"
+BLENDER_LTS = "https://www.blender.org/download/lts/"
 KJNODES = "https://github.com/kijai/ComfyUI-KJNodes"
 
 # Model sets for the example workflows. URLs are the ones ComfyUI's own workflow templates use.
@@ -363,7 +363,7 @@ def main(argv=None) -> int:
     try:
         print(f"  Blender: {bridge.find_blender()}")
     except FileNotFoundError:
-        print(f"\n  Blender 4.x not found (3D scene nodes, light layers, relight). Install Blender 4.5 LTS from")
+        print(f"\n  Blender not found (3D scene nodes, light layers, relight). Install Blender 4.2 or newer (5.2 LTS) from")
         print(f"  {BLENDER_LTS}")
         print("  (a default install is found by itself), or give the path to blender.exe now.")
         if not check_only:

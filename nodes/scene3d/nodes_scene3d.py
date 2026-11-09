@@ -198,7 +198,7 @@ class KUBA_SceneRender(io.ComfyNode):
                 "the projection view from the file's camera: clay render, metric depth, normals and ID passes (shelves = the "
                 "facade's depth steps, layers, facing, planes, loose parts, objects / materials / "
                 "collections). The ID passes are written as a From ID Maps folder: connect 'folder' to "
-                "kubakub regions from id maps (regions_pass e.g. shelves or parts). Needs Blender 4.x "
+                "kubakub regions from id maps (regions_pass e.g. shelves or parts). Needs Blender 4.2+ "
                 "(runs headless). .c4d: export FBX or Alembic from Cinema 4D."),
             inputs=[
                 io.String.Input("file", display_name="scene file", default="", placeholder="paste the path of your .blend / .fbx / .obj  (empty = the sample building)",

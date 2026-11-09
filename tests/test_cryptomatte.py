@@ -1,6 +1,6 @@
 """
 Model free test of the EXR reader (kubakub/exr.py) and cryptomatte decoding (kubakub/cryptomatte.py):
-a synthetic cryptomatte EXR written by exr.write (NONE and ZIP), and - if Blender 4.x is installed - real Blender
+a synthetic cryptomatte EXR written by exr.write (NONE and ZIP), and - if Blender is installed - real Blender
 cryptomatte renders (ZIP read in numpy, PIZ through Blender's OpenImageIO), made in a temp folder.
 
 Run from the ComfyUI_windows_portable folder:
@@ -91,7 +91,7 @@ with tempfile.TemporaryDirectory() as d:
     # --- real Blender cryptomatte (skipped without Blender)
     blender = bridge.find_blender("")
     if not blender or not os.path.isfile(blender):
-        print("skip real Blender cryptomatte (no Blender 4.x found)")
+        print("skip real Blender cryptomatte (no Blender found)")
     else:
         script = os.path.join(d, "mk.py")
         with open(script, "w", encoding="utf-8") as f:
@@ -111,7 +111,10 @@ sc.camera.data.type = "ORTHO"; sc.camera.data.ortho_scale = 13
 sc.render.engine = "CYCLES"; sc.cycles.samples = 1; sc.cycles.device = "CPU"
 sc.render.resolution_x, sc.render.resolution_y = 240, 135
 vl = sc.view_layers[0]; vl.use_pass_cryptomatte_object = True; vl.use_pass_cryptomatte_material = True
-s = sc.render.image_settings; s.file_format = "OPEN_EXR_MULTILAYER"; s.color_depth = "32"
+s = sc.render.image_settings
+if hasattr(s, "media_type"):            # Blender 5: pick the multilayer media type first
+    s.media_type = "MULTI_LAYER_IMAGE"
+s.file_format = "OPEN_EXR_MULTILAYER"; s.color_depth = "32"
 for codec in ("ZIP", "PIZ"):
     s.exr_codec = codec; sc.render.filepath = os.path.join(out, "crypto_" + codec.lower() + ".exr")
     bpy.ops.render.render(write_still=True)

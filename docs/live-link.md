@@ -9,7 +9,7 @@ leaves your computer. Both add-ons are in this pack, in the `tools` folder:
 
 | app | file | tested with |
 |---|---|---|
-| Blender 4.2 or newer | `tools/blender/kubakub_live.py` | Blender 4.5 |
+| Blender 4.2 or newer | `tools/blender/kubakub_live.py` | Blender 4.5, 5.2 |
 | Houdini | `tools/houdini/` (installed with `tools/houdini/install_houdini_link.py`) | Houdini 21 |
 
 Below, `<pack>` is the folder of this pack, e.g. `ComfyUI\custom_nodes\ComfyUI_KubaNodes` (the portable build:

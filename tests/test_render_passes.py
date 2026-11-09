@@ -294,17 +294,44 @@ with tempfile.TemporaryDirectory() as d:
     except ValueError as e:
         check("a path that is no folder and no file is refused", "not found" in str(e), str(e))
 
-    # a multipart file: the headers of every part are listed, only the first part's layers can be read
+    # a multipart file (Blender 5 writes one part per pass): every part's layers are listed and read
     attr = lambda n, t, raw: n.encode() + b"\0" + t.encode() + b"\0" + struct.pack("<i", len(raw)) + raw  # noqa: E731
     chl = lambda names: b"".join(n.encode() + b"\0" + struct.pack("<iB3xii", 1, 0, 1, 1) for n in names) + b"\0"  # noqa: E731
-    part = lambda name, names: attr("channels", "chlist", chl(names)) + attr("name", "string", name.encode()) + b"\0"  # noqa: E731
+    mh, mw = 3, 4
+    win = struct.pack("<4i", 0, 0, mw - 1, mh - 1)
+
+    def part(name, names):
+        return (attr("channels", "chlist", chl(sorted(names))) + attr("compression", "compression", b"\0")
+                + attr("dataWindow", "box2i", win) + attr("displayWindow", "box2i", win)
+                + attr("lineOrder", "lineOrder", b"\0") + attr("name", "string", name.encode())
+                + attr("type", "string", b"scanlineimage") + attr("chunkCount", "int", struct.pack("<i", mh)) + b"\0")
+    pix = {("rgba", n): np.full((mh, mw), v, np.float16) for n, v in (("A", 1), ("B", 0.25), ("G", 0.5), ("R", 0.75))}
+    pix.update({("masks", n): np.full((mh, mw), v, np.float16) for n, v in (("B", 0.1), ("G", 0.2), ("R", 0.3))})
+    pix[("masks", "windows.Y")] = np.arange(mh * mw, dtype=np.float16).reshape(mh, mw)
+    head = struct.pack("<iI", exr.MAGIC, 0x1000 | 2) + part("rgba", "ABGR") + part("masks", ["B", "G", "R", "windows.Y"]) + b"\0"
+    chunks = [struct.pack("<iii", pi, y, mw * 2 * len([k for k in pix if k[0] == pn]))
+              + b"".join(pix[(pn, n)][y].tobytes() for n in sorted(n for p2, n in pix if p2 == pn))
+              for pi, pn in enumerate(("rgba", "masks")) for y in range(mh)]
+    pos, offs = len(head) + 8 * len(chunks), []
+    for c in chunks:
+        offs.append(pos)
+        pos += len(c)
     mp = os.path.join(d, "multipart.exr")
-    open(mp, "wb").write(struct.pack("<iI", exr.MAGIC, 0x1000 | 2) + part("rgba", ["A", "B", "G", "R"])
-                         + part("masks", ["B", "G", "R", "windows.Y"]) + b"\0" + b"pixels would follow")
+    open(mp, "wb").write(head + struct.pack(f"<{len(offs)}Q", *offs) + b"".join(chunks))
     parts = rp.layers_of(mp)
-    check("a multipart EXR: every part's layers are listed; those of the later parts are marked as not read",
-          [(L["name"], L["role"], L["part"]) for L in parts] == [("rgba", "picture", 0), ("masks.rgb", "skip", 1), ("windows", "skip", 1)]
-          and "multipart" in parts[1]["why"] and len(exr.read_headers(mp)) == 2, str(parts))
+    check("a multipart EXR: every part's layers are listed, none marked as not read",
+          [(L["name"], L["part"]) for L in parts] == [("rgba", 0), ("masks.rgb", 1), ("windows", 1)]
+          and parts[0]["role"] == "picture" and not any("part" in (L["why"] or "") for L in parts)
+          and len(exr.read_headers(mp)) == 2, str(parts))
+    got = exr.read(mp)
+    check("a multipart EXR: the pixels of every part are read (later parts' plain R G B under the part's name)",
+          sorted(got["channels"]) == ["A", "B", "G", "R", "masks.B", "masks.G", "masks.R", "windows.Y"]
+          and float(got["channels"]["masks.G"][1, 2]) == float(np.float16(0.2))
+          and np.array_equal(got["channels"]["windows.Y"], pix[("masks", "windows.Y")])
+          and float(got["channels"]["R"][0, 0]) == 0.75, str(sorted(got["channels"])))
+    check("a multipart EXR: only= reads just the wanted channels", sorted(exr.read(mp, only={"windows.Y"})["channels"]) == ["windows.Y"])
+    check("a multipart EXR: the full names of a later part's layer point at the read channels",
+          set(parts[1]["full"].values()) == {"masks.B", "masks.G", "masks.R"}, str(parts[1]["full"]))
 
 print()
 print("all render passes tests passed" if not failures else f"{len(failures)} FAILED: " + ", ".join(failures))

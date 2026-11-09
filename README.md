@@ -17,6 +17,14 @@ regions of starter 01 connected):
 
 ## What's new
 
+**0.7.4**, Blender 5:
+- **Blender 5 works:** scene render, walkthrough, pieces and light layers run with Blender 5.x (tested with 5.2 LTS)
+  as well as 4.2 or newer. With both installed, the newest is used; `blender = ...` in kubakub.ini picks another.
+- **Blender 5 EXRs:** Blender 5 saves a multilayer EXR as one part per pass. Render passes and cryptomatte now read
+  every part, so all your passes and ID mattes show up (before, only *Combined* came through).
+- **Live link:** the Blender add-on runs in Blender 5 unchanged. After installing a new Blender, install the add-on
+  in it once more (Preferences > Add-ons > Install from Disk, `tools/blender/kubakub_live.py`).
+
 **0.7.3**, the shelf after a review:
 - The shelf no longer takes the keys of a text box when the pointer touches the edge, and gives the keys back when
   it closes; Esc in *+ text* cancels.
@@ -152,7 +160,7 @@ python -m pip install -r ComfyUI_KubaNodes/requirements.txt     # the portable b
 ```
 
 The only package this adds is OpenCV, and only if you don't have it yet. Everything else comes with ComfyUI
-(0.37.0 or newer). For the 3D nodes and light layers, install [Blender 4.x](https://www.blender.org/download/lts/4-5/)
+(0.37.0 or newer). For the 3D nodes and light layers, install [Blender 4.2 or newer](https://www.blender.org/download/lts/)
 (found by itself). To take the scene open in **Blender or Houdini** live into scene render, install their
 add-ons from this pack once: [docs/live-link.md](docs/live-link.md).
 
@@ -194,7 +202,7 @@ Most of the pack runs on a plain ComfyUI. Add the rest when you get there:
 - **Image models** (Klein 4B is the smallest, see [docs/MODELS.md](docs/MODELS.md)): region sampler, seam pass,
   versions, frame in frame, sketch to render. Workflows 02, 05 and region_materials_klein.
 - **Video models** (any LTX 2.x or MiniMax H3: dev or distilled, fl2va or ref2va, fp8 / nvfp4 / int8 / GGUF, with or without a speed LoRA; tested on a 12 GB GPU): region video sampler, motion guide, keyframe clips. Plug in the model you have: the nodes see which one it is and sample it the way it needs. Workflows 04 and motion_guide.
-- **Blender 4.x:** everything under 3d / scene and 3d / pieces, and light layers in the director. Workflows 07 and
+- **Blender (4.2 or newer, 5.x included):** everything under 3d / scene and 3d / pieces, and light layers in the director. Workflows 07 and
   08 use the sample model; your own file needs no camera (kubakub projector). Workflow clay_to_final.
 - **Your own files**, for the nodes that read them: an Illustrator file, render passes, ID renders or a cryptomatte
   EXR, a video clip for 06.
@@ -276,7 +284,7 @@ are settings in `kubakub.ini` (section `[settings]`, see `kubakub.ini.example`);
 
 ## Requirements
 
-**Tested with:** ComfyUI 0.38.2, torch 2.10 cu130, Python 3.12, Blender 4.5, Windows 11, RTX 5070 Ti 12 GB.
+**Tested with:** ComfyUI 0.38.2, torch 2.10 cu130, Python 3.12, Blender 5.2 (and 4.5), Windows 11, RTX 5070 Ti 12 GB.
 Other systems are untested.
 
 | needs | for | without it |
@@ -292,7 +300,7 @@ Other systems are untested.
 | onnxruntime | onnx style transfer | that node only |
 | ultralytics | tracker: people and things (yolo), outlines | those finders only; the other finders still work |
 | mediapipe | tracker: body, hands and face points | those finders only |
-| **Blender 4.x** (found in Program Files or on PATH; else `blender = ...` in kubakub.ini or the blender_path input) | scene render, light layers, relight | the 3D scene nodes and light layers |
+| **Blender 4.2 or newer** (found in Program Files or on PATH; else `blender = ...` in kubakub.ini or the blender_path input) | scene render, light layers, relight | the 3D scene nodes and light layers |
 | **ffmpeg** (imageio-ffmpeg or on PATH) | video layers, director sequence export, kubakub export | video in the director and exports |
 
 At startup the console prints `[Kub] N nodes from M modules` and, only when something is missing, one line per

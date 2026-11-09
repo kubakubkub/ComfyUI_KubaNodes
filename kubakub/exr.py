@@ -1,10 +1,12 @@
 """
 exr.py
 
-A small OpenEXR reader in numpy for render passes (cryptomatte, AOVs): single-part scanline or tiled files with NONE,
-RLE, ZIPS or ZIP compression - what Blender, Houdini and most renderers write for data passes - including all header
-attributes (cryptomatte manifests live there). Other files (PIZ, DWA, B44, PXR24, multipart, deep) are read through
-the OpenImageIO module that ships with Blender 4.x (read_via_blender), or the OpenEXR module when installed.
+A small OpenEXR reader in numpy for render passes (cryptomatte, AOVs): scanline or tiled files with NONE, RLE, ZIPS
+or ZIP compression, single-part or multipart (Blender 5 writes a multilayer EXR as one part per pass) - what Blender,
+Houdini and most renderers write for data passes - including all header attributes (cryptomatte manifests live
+there). Other files (PIZ, DWA, B44, PXR24, deep) are read through the OpenImageIO module that ships with Blender
+(read_via_blender), or the OpenEXR module when installed. The channels of every part come back in one dict
+(names: channel_names).
 
 read(path) -> {"width", "height", "channels": {name: HxW array (float16 / float32 / uint32)}, "attrs": {...},
                "compression": name}
@@ -103,8 +105,9 @@ def read_header(buf):
     return attrs, bool(flags & 0x200), i + 1
 
 
-def _headers(buf):
-    """Every header in the first bytes of a file -> [attrs] (IndexError when the bytes end inside a header)."""
+def _headers(buf, with_end=False):
+    """Every header in the first bytes of a file -> [attrs] (IndexError when the bytes end inside a header);
+    with_end: ([attrs], where the offset tables start)."""
     multipart = bool(struct.unpack_from("<I", buf, 4)[0] & 0x1000)
     out, i = [], 8
     while True:
@@ -121,7 +124,38 @@ def _headers(buf):
         i += 1
         out.append(attrs)
         if not multipart or buf[i] == 0:                               # a multipart file ends with an empty header
-            return out
+            return (out, i + multipart) if with_end else out
+
+
+def channel_names(parts):
+    """[{channel name in a part: name in read()'s result}] per part. The first part keeps its names; a later part's
+    channel without a layer prefix (R, Z) gets the part's name in front, as does one already taken by an earlier part.
+    Blender 5 writes a multilayer EXR as one part per pass with full names (ViewLayer.CryptoObject00.r)."""
+    taken, out = set(), []
+    for pi, attrs in enumerate(parts):
+        pname, m = attrs.get("name") or f"part{pi + 1}", {}
+        for c in attrs.get("channels") or []:
+            n = c[0]
+            if pi and ("." not in n or n in taken):
+                n = f"{pname}.{n}"
+            while n in taken:
+                n += "_2"
+            taken.add(n)
+            m[c[0]] = n
+        out.append(m)
+    return out
+
+
+def merged_attrs(parts):
+    """One attrs dict for a multipart file: the first part's, plus what later parts add (cryptomatte manifests can
+    sit in any part); 'channels' lists every part's channels under their read() names."""
+    names = channel_names(parts)
+    attrs = dict(parts[0])
+    for p in parts[1:]:
+        for k, v in p.items():
+            attrs.setdefault(k, v)
+    attrs["channels"] = [(names[pi][c[0]],) + tuple(c[1:]) for pi, p in enumerate(parts) for c in p.get("channels") or []]
+    return attrs
 
 
 def read_headers(path):
@@ -197,45 +231,96 @@ def read(path, only=None):
             return read_via_blender(path)
         except FileNotFoundError:
             raise Unsupported(f"{os.path.basename(path)}: {e}; save it with ZIP compression (scanline) or install "
-                              "Blender 4.x (its OpenImageIO reads every EXR)") from None
+                              "Blender (its OpenImageIO reads every EXR)") from None
 
 
 def _read_own(path, only=None):
     with open(path, "rb") as f:
         buf = f.read()
-    attrs, tiled, pos = read_header(buf)
+    flags = struct.unpack_from("<I", buf, 4)[0] if len(buf) >= 8 else 0
+    if not flags & 0x1000:
+        attrs, tiled, pos = read_header(buf)
+        out = {}
+        offs = np.frombuffer(buf, "<u8", _chunk_count(attrs, tiled), pos)
+        comp = _read_part(buf, attrs, tiled, offs, 0, {c[0]: c[0] for c in attrs["channels"]}, only, out)
+        W, H = _size(attrs)
+        return {"width": W, "height": H, "channels": out, "attrs": attrs, "compression": comp}
+    # multipart (Blender 5 multilayer EXRs: one part per pass): the headers, then one offset table per part,
+    # each chunk starts with its part number
+    if flags & 0x800:
+        raise Unsupported("deep EXR")
+    parts, pos = _headers(buf, with_end=True)
+    names = channel_names(parts)
+    W, H = _size(parts[0])
+    out, comps = {}, []
+    for pi, attrs in enumerate(parts):
+        if _size(attrs) != (W, H) or attrs.get("dataWindow") != parts[0].get("dataWindow"):
+            raise Unsupported("multipart EXR with parts of different sizes")
+        if "deep" in str(attrs.get("type", "")):
+            raise Unsupported("deep EXR part")
+        tiled = "tiles" in attrs
+        n = attrs.get("chunkCount") or _chunk_count(attrs, tiled)
+        offs = np.frombuffer(buf, "<u8", n, pos)
+        pos += 8 * n
+        comps.append(_read_part(buf, attrs, tiled, offs, 4, names[pi], only, out))
+    comp = comps[0] if len(set(comps)) == 1 else "mixed"
+    return {"width": W, "height": H, "channels": out, "attrs": merged_attrs(parts), "compression": comp}
+
+
+def _size(attrs):
+    x0, y0, x1, y1 = attrs["dataWindow"]
+    return x1 - x0 + 1, y1 - y0 + 1
+
+
+def _chunk_count(attrs, tiled):
+    W, H = _size(attrs)
+    if tiled:
+        tx, ty = attrs["tiles"]["x"], attrs["tiles"]["y"]
+        return ((W + tx - 1) // tx) * ((H + ty - 1) // ty)
+    lpb = LINES_PER_BLOCK.get(COMPRESSIONS[attrs.get("compression", 0)], 1)
+    return (H + lpb - 1) // lpb
+
+
+def _read_part(buf, attrs, tiled, offsets, skip, names, only, out):
+    """Decode one part's chunks into out ({read() name: HxW}); skip = bytes before each chunk (4 = the part number
+    of a multipart file). Returns the compression name."""
     comp = COMPRESSIONS[attrs.get("compression", 0)]
     if comp not in OWN:
         raise Unsupported(f"{comp} compression")
-    x0, y0, x1, y1 = attrs["dataWindow"]
-    W, H = x1 - x0 + 1, y1 - y0 + 1
+    x0, y0, _x1, _y1 = attrs["dataWindow"]
+    W, H = _size(attrs)
     chans = sorted(attrs["channels"], key=lambda c: c[0])
     if any(c[2] != 1 or c[3] != 1 for c in chans):
         raise Unsupported("subsampled channels")
+    keep = {c[0]: names[c[0]] for c in chans if only is None or names[c[0]] in only}
+    if not keep:
+        return comp                                                    # nothing wanted from this part
+    for raw_name, name in keep.items():
+        out[name] = np.zeros((H, W), PIXEL[next(c[1] for c in chans if c[0] == raw_name)][0])
     px_bytes = sum(PIXEL[c[1]][1] for c in chans)
-    out = {c[0]: np.zeros((H, W), PIXEL[c[1]][0]) for c in chans if only is None or c[0] in only}
+    view = {r: out[n] for r, n in keep.items()}
     if not tiled:
         lpb = LINES_PER_BLOCK[comp]
-        n = (H + lpb - 1) // lpb
-        for off in np.frombuffer(buf, "<u8", n, pos):
-            yy, size = struct.unpack_from("<ii", buf, int(off))
+        for off in offsets:
+            o = int(off) + skip
+            yy, size = struct.unpack_from("<ii", buf, o)
             r0 = yy - y0
             rows = min(lpb, H - r0)
-            raw = _decode(buf[int(off) + 8:int(off) + 8 + size], comp, rows * W * px_bytes)
-            _scatter(raw, chans, out, r0, rows, 0, W)
+            raw = _decode(buf[o + 8:o + 8 + size], comp, rows * W * px_bytes)
+            _scatter(raw, chans, view, r0, rows, 0, W)
     else:
         td = attrs["tiles"]
         if td["mode"] & 0x0F != 0:
             raise Unsupported("mipmapped / ripmapped tiles")
         tx, ty = td["x"], td["y"]
-        nx, ny = (W + tx - 1) // tx, (H + ty - 1) // ty
-        for off in np.frombuffer(buf, "<u8", nx * ny, pos):
-            ix, iy, _lx, _ly, size = struct.unpack_from("<5i", buf, int(off))
+        for off in offsets:
+            o = int(off) + skip
+            ix, iy, _lx, _ly, size = struct.unpack_from("<5i", buf, o)
             c0, r0 = ix * tx, iy * ty
             cols, rows = min(tx, W - c0), min(ty, H - r0)
-            raw = _decode(buf[int(off) + 20:int(off) + 20 + size], comp, rows * cols * px_bytes)
-            _scatter(raw, chans, out, r0, rows, c0, cols)
-    return {"width": W, "height": H, "channels": out, "attrs": attrs, "compression": comp}
+            raw = _decode(buf[o + 20:o + 20 + size], comp, rows * cols * px_bytes)
+            _scatter(raw, chans, view, r0, rows, c0, cols)
+    return comp
 
 
 def _scatter(raw, chans, out, r0, rows, c0, cols):
@@ -255,37 +340,56 @@ def _scatter(raw, chans, out, r0, rows, c0, cols):
 # ------------------------------------------------------------------------------------------------- fallbacks
 
 
+def _merge_parts(parts):
+    """[{"name", "attrs", "channels": {name in the part: HxW}}] -> one read() result (the first part's size; a part
+    of another size is left out), names as channel_names()."""
+    h, w = next(iter(parts[0]["channels"].values())).shape[:2]
+    parts = [p for p in parts if p["channels"] and next(iter(p["channels"].values())).shape[:2] == (h, w)]
+    names = channel_names([{"name": p["name"], "channels": [(n,) for n in p["channels"]]} for p in parts])
+    chans, attrs = {}, {}
+    for pi, p in enumerate(parts):
+        for n, a in p["channels"].items():
+            chans[names[pi][n]] = a
+        for k, v in p["attrs"].items():
+            attrs.setdefault(k, v)
+    return {"width": w, "height": h, "channels": chans, "attrs": attrs}
+
+
 def read_via_openexr(path):
     import OpenEXR  # noqa: F401  (optional)
     with OpenEXR.File(path, separate_channels=True) as fl:
-        part = fl.parts[0]
-        chans = {k: np.asarray(v.pixels) for k, v in part.channels.items()}
-        hdr = {k: (v if isinstance(v, (str, int, float, tuple, list, dict)) else str(v)) for k, v in part.header.items()}
-    h, w = next(iter(chans.values())).shape[:2]
-    return {"width": w, "height": h, "channels": chans, "attrs": hdr, "compression": "openexr"}
+        parts = [{"name": getattr(part, "name", "") or "",
+                  "channels": {k: np.asarray(v.pixels) for k, v in part.channels.items()},
+                  "attrs": {k: (v if isinstance(v, (str, int, float, tuple, list, dict)) else str(v))
+                            for k, v in part.header.items()}} for part in fl.parts]
+    return dict(_merge_parts(parts), compression="openexr")
 
 
 _BLENDER_SCRIPT = r'''
 import sys, json, numpy as np, OpenImageIO as oiio
 src, dst = sys.argv[-2], sys.argv[-1]
 inp = oiio.ImageInput.open(src)
-spec = inp.spec()
-names = list(spec.channelnames)
-fmts = [str(f) for f in spec.channelformats] if len(spec.channelformats) else [str(spec.format)] * len(names)
-data = {}
-for i, n in enumerate(names):
-    t = oiio.UINT if fmts[i] == "uint" else oiio.FLOAT
-    px = inp.read_image(0, 0, i, i + 1, t)
-    data["c_" + str(i)] = np.asarray(px).reshape(spec.height, spec.width)
-attrs = {}
-for a in spec.extra_attribs:
-    try:
-        attrs[a.name] = a.value if isinstance(a.value, (str, int, float)) else str(a.value)
-    except Exception:
-        pass
+data, subs, k, si = {}, [], 0, 0
+while inp.seek_subimage(si, 0):                  # every part of a multipart EXR (Blender 5: one per pass)
+    spec = inp.spec()
+    names = list(spec.channelnames)
+    fmts = [str(f) for f in spec.channelformats] if len(spec.channelformats) else [str(spec.format)] * len(names)
+    for i, n in enumerate(names):
+        t = oiio.UINT if fmts[i] == "uint" else oiio.FLOAT
+        px = inp.read_image(si, 0, i, i + 1, t)
+        data["c_" + str(k)] = np.asarray(px).reshape(spec.height, spec.width)
+        k += 1
+    attrs = {}
+    for a in spec.extra_attribs:
+        try:
+            attrs[a.name] = a.value if isinstance(a.value, (str, int, float)) else str(a.value)
+        except Exception:
+            pass
+    subs.append({"name": str(spec.getattribute("oiio:subimagename") or ""), "names": names, "fmts": fmts,
+                 "attrs": attrs})
+    si += 1
 inp.close()
-data["meta"] = np.frombuffer(json.dumps({"names": names, "fmts": fmts, "attrs": attrs,
-                                        "w": spec.width, "h": spec.height}).encode(), np.uint8)
+data["meta"] = np.frombuffer(json.dumps(subs).encode(), np.uint8)
 np.savez(dst, **data)
 '''
 
@@ -296,7 +400,7 @@ def blender_path():
 
 
 def read_via_blender(path):
-    """Any EXR through the OpenImageIO module inside Blender 4.x (a background process, a few seconds)."""
+    """Any EXR through the OpenImageIO module inside Blender (a background process, a few seconds)."""
     exe = blender_path()
     if not exe or not os.path.isfile(exe):
         raise FileNotFoundError("Blender")
@@ -310,13 +414,18 @@ def read_via_blender(path):
         if not os.path.isfile(dst):
             raise RuntimeError("Blender could not read the EXR: " + (r.stdout + r.stderr)[-800:])
         with np.load(dst) as z:                                      # closed before the temp folder goes (Windows)
-            meta = json.loads(bytes(z["meta"]).decode())
-            chans = {}
-            for i, n in enumerate(meta["names"]):
-                a = z[f"c_{i}"]
-                chans[n] = a.astype(np.uint32) if meta["fmts"][i] == "uint" else a.astype(np.float32)
-    return {"width": meta["w"], "height": meta["h"], "channels": chans, "attrs": meta["attrs"],
-            "compression": "via Blender"}
+            subs = json.loads(bytes(z["meta"]).decode())
+            parts, k = [], 0
+            for s in subs:
+                chans = {}
+                for i, n in enumerate(s["names"]):
+                    a = z[f"c_{k}"]
+                    chans[n] = a.astype(np.uint32) if s["fmts"][i] == "uint" else a.astype(np.float32)
+                    k += 1
+                parts.append({"name": s["name"], "channels": chans, "attrs": s["attrs"]})
+    if not parts:
+        raise RuntimeError("Blender could not read the EXR: no image in it")
+    return dict(_merge_parts(parts), compression="via Blender")
 
 
 # ------------------------------------------------------------------------------------------------------ writer

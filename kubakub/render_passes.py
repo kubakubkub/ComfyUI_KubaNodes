@@ -110,7 +110,7 @@ def _read_exr(path):
             raise ValueError(f"render passes: cannot read {os.path.basename(path)}: {e}") from None
 
     # the names first, then only the pixels used (a beauty EXR can carry dozens of other passes)
-    keys = _exr_pass_keys([c[0] for c in (reading(lambda: exr.read_headers(path))[0].get("channels") or [])], path)
+    keys = _exr_pass_keys([c[0] for c in (reading(lambda: exr.merged_attrs(exr.read_headers(path))).get("channels") or [])], path)
     ch = reading(lambda: exr.read(path, only=set(keys)))["channels"]
     return np.stack([np.asarray(ch[k], np.float32) for k in keys], -1)
 
@@ -196,11 +196,12 @@ def layers_of(path):
         raise ValueError(f"render passes: cannot read {os.path.basename(path)}: {e}") from None
     order = "RGBAXYZUVW"
     out, seen = [], set()
+    read_name = exr.channel_names(parts)                               # every part is read (Blender 5: one per pass)
     for pi, attrs in enumerate(parts):
         groups, root = {}, {}
         for cname, ptype, _xs, _ys in attrs.get("channels") or []:
             pre, _, c = cname.rpartition(".")
-            (groups.setdefault(pre, {}) if pre else root)[c] = (cname, ptype)
+            (groups.setdefault(pre, {}) if pre else root)[c] = (read_name[pi][cname], ptype)
         up = {c.upper(): c for c in root}
         found = []
         if all(c in up for c in "RGB"):
@@ -213,8 +214,6 @@ def layers_of(path):
                 nm += "_2"
             seen.add(nm.lower())
             role, rank, why = _guess(nm, any(pt == 0 for _n, pt in g.values()), is_root and not pi)
-            if pi:
-                role, why = "skip", f"in part {pi + 1} of a multipart EXR: only the first part is read"
             out.append({"name": nm, "role": role, "why": why, "part": pi, "_rank": rank,
                         "channels": sorted(g, key=lambda c: (order.find(c.upper()) if c.upper() in order else 99, c)),
                         "full": {c.upper(): v[0] for c, v in g.items()}})
@@ -271,9 +270,6 @@ def pick_layers(layers, text=""):
         wild = any(c in pat for c in "*?[")
         if role in ("picture", "depth", "normal"):
             L = hits[0]
-            if L["part"]:
-                notes.append(f"exr_layers: {L['name']} cannot be the {role} ({L['why']})")
-                continue
             use.update({k: "" for k, v in use.items() if v == role})
             use[L["name"]] = role
             forced.discard(L["name"])
@@ -284,7 +280,7 @@ def pick_layers(layers, text=""):
                 use[n] = ""
             elif wild and use[n] in ("picture", "depth", "normal"):
                 pass
-            elif L["part"] or "crypto" in n.lower():
+            elif "crypto" in n.lower():
                 if not wild:
                     notes.append(f"exr_layers: {n} cannot be a mask ({L['why']})")
             elif role == "mask" or (not wild and L["role"] in ("skip", "id")):

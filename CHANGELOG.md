@@ -4,6 +4,24 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## 0.7.4 (2026-11-09)
+
+Blender 5 support.
+
+- **Scene render (and walkthrough, pieces):** the face-ID, position and normal passes are written through Blender 5's
+  compositor (a compositor node group, the File Output node's new directory / items); Blender 4.2 or newer still
+  works the old way. The compositor is switched with *render > compositing* instead of the scene's *use nodes*.
+- **EXR reader:** multipart EXRs (Blender 5 writes multilayer files as one part per pass) are read by the built-in
+  reader (no, RLE, ZIPS, ZIP) and through Blender's OpenImageIO or the OpenEXR module (PIZ, DWA ...), every part.
+  A channel of a later part without a layer prefix gets the part's name in front (`masks.R`).
+- **Render passes:** the layers of every part of a multipart EXR can be the picture, depth, normal or a mask (they
+  were listed as not read). **Cryptomatte** finds the ID mattes of Blender 5 renders.
+- **Live link:** the Blender add-on is checked in Blender 5.2 (snapshot, camera pick, viewport). Install it again in a
+  newly installed Blender.
+- **Code:** shader render sessions for repeated draws (`open_session`, `release_sessions`); `run_blender_script` in
+  the scene bridge.
+- Docs and messages say "Blender 4.2 or newer"; tested with Blender 5.2.
+
 ## 0.7.3 (2026-11-02)
 
 Review of the shelf (0.7.2), no new features.

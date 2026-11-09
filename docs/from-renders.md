@@ -41,8 +41,8 @@ pass per file:
   - In a folder that has both `<render>_beauty.png` ... and `<render>.exr`, the separate files are read, as before;
     the report says how many layers the EXR holds. Paste the EXR's own path to read its layers instead.
   - Listing the layers reads only the start of the file, so it is quick for every EXR. Reading PIZ / DWA files
-    goes through Blender (see *EXR support*). Of a multipart EXR only the first part is read; the layers of the
-    other parts are shown as not read.
+    goes through Blender (see *EXR support*). A multipart EXR (Blender 5 writes one part per pass) is read
+    part by part: every layer of every part can be used.
 - `matrix` (optional): a render of another size is fitted to your matrix: picture, depth, normal and masks, with
   one uniform scale. A render with other proportions is refused; render in the matrix's aspect.
 
@@ -126,9 +126,9 @@ quotes; `~` and `%VARIABLES%` work). A network path (`\\server\share`) is not op
 or folder field of the pack: give the share a drive letter in Windows and use that path.
 
 EXR support: built in (no extra packages) for scanline and tiled files with no, RLE, ZIPS or ZIP compression,
-which is what Blender and most renderers write by default. PIZ, DWA, B44, PXR24 and multipart files are read
-through the OpenImageIO module inside Blender 4.x (found automatically, a few seconds), or the `OpenEXR` Python
-module if you have it. Cryptomatte is Psyop's open standard (github.com/Psyop/Cryptomatte).
+single-part or multipart (Blender 5 multilayer EXRs), which is what Blender and most renderers write by default.
+PIZ, DWA, B44 and PXR24 files are read through the OpenImageIO module inside Blender 4.2 or newer (found
+automatically, a few seconds), or the `OpenEXR` Python module if you have it. Cryptomatte is Psyop's open standard (github.com/Psyop/Cryptomatte).
 
 Speed: the ID map is decoded per distinct colour instead of per pixel and legend
   entry, and a pass with an ID map but no mask files (Scene Render's) uses the decoded labels directly
