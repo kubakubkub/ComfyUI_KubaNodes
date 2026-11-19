@@ -4,7 +4,7 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
-## Unreleased
+## 0.7.5 (2026-11-19)
 
 The shelf takes folders and gets a library.
 

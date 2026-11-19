@@ -17,6 +17,17 @@ regions of starter 01 connected):
 
 ## What's new
 
+**0.7.5**, the shelf gets a library:
+- **Drop a folder on the shelf:** its pictures, videos and sounds (sub folders too, up to 500 at a time) come in as
+  one card; click it to see its files. Text files become prompts.
+- **Library:** the *library* pill opens a searchable store of everything you put on the shelf, your renders and
+  any folder you index (read where it is, nothing copied; left empty it reads the output folder). Search by prompt
+  words, file name, model, LoRA or tag.
+- **Inspect a picture or video:** its prompt and negative prompt (click to copy, drag onto a node), seed, steps,
+  cfg, sampler, models and LoRAs with their strengths; *load workflow* opens the workflow saved in it.
+- **Last generations:** one click takes everything this session rendered; *keep adding new ones* adds each render
+  as it finishes. Everything stays on your computer.
+
 **0.7.4**, Blender 5:
 - **Blender 5 works:** scene render, walkthrough, pieces and light layers run with Blender 5.x (tested with 5.2 LTS)
   as well as 4.2 or newer. With both installed, the newest is used; `blender = ...` in kubakub.ini picks another.
