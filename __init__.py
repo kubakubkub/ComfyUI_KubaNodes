@@ -56,6 +56,7 @@ _MODULES = [                        # nodes/<menu group>/<module>
     "nodes.utils.timecode_filename_Kub",
     "nodes.utils.nodes_crop",
     "nodes.utils.nodes_compare",
+    "nodes.utils.nodes_library",
 ]
 
 _loaded, _failed = [], []

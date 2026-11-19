@@ -58,6 +58,13 @@ def safe_name(name: str) -> str | None:
     return n if n and kind_of(n) else None
 
 
+def safe_folder(name: str) -> str:
+    """One folder name for an upload ('' when nothing usable is left): no paths, no dots in front."""
+    n = os.path.basename(str(name or "").replace("\\", "/").rstrip("/"))
+    n = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", n).strip(" .")
+    return n[:80]
+
+
 def free_name(folder: str, name: str) -> str:
     """`name`, or 'name (1).ext', 'name (2).ext' ... the first one not taken in `folder`."""
     stem, ext = os.path.splitext(name)

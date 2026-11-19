@@ -5,6 +5,9 @@ import os
 import re
 
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web")
+LIBRARY_STUB = ("class LibraryView { constructor() { this.root = { hidden: true }; this.follow = false; this.inspector = { hidden: true }; } "
+                "setFollow(on) { this.follow = on; } close() {} open() {} showTag() {} }\n"
+                "const library = { add: async () => ({}) }; const LIBRARY_CSS = '';")
 API_STUB = 'const api = { apiURL: p => "/api" + p, addEventListener() {} };'
 
 
@@ -20,4 +23,6 @@ def module_source(name):
     media = re.sub(r"(?m)^import \{ api \} from .*$", "", _read("kubakub_media.js"))
     media = re.sub(r"(?m)^export (const|function|async function) ", r"\1 ", media)
     src = re.sub(r"(?m)^import \{[^}]*\} from \"\./kubakub_media\.js\";$", lambda m: media, src)
+    # the shelf's library view needs a server: a stub that only keeps the shape the shelf uses
+    src = re.sub(r"(?m)^import \{[^}]*\} from \"\./kubakub_library\.js\";$", lambda m: LIBRARY_STUB, src)
     return "globalThis.location = globalThis.location || { href: 'http://127.0.0.1:8188/', origin: 'http://127.0.0.1:8188' };\n" + src

@@ -11,7 +11,8 @@ directors on the timeline are rendered from their 'director' outputs connected t
 
     GET  /kubakub/master/outputs           videos and images in output/, newest first
     POST /kubakub/master/upload            multipart "file" -> input/kuba_director/<name> (streamed, so videos bigger
-                                           than ComfyUI's upload limit work too)
+                                           than ComfyUI's upload limit work too); an optional "folder" field before it
+                                           -> input/kuba_director/<folder>/<name> (a folder dropped on the shelf)
     POST /kubakub/master/wave              {source} -> {duration, rate, peaks}: the sound of a clip as a waveform
 """
 
@@ -82,13 +83,16 @@ def _register_routes():
         import asyncio
         try:
             reader = await request.multipart()
-            field = await reader.next()
+            field, sub = await reader.next(), ""
             while field is not None and field.name != "file":
+                if field.name == "folder":              # the shelf: a dropped folder keeps its files together
+                    sub = ms.safe_folder(await field.text())
                 field = await reader.next()
             name = ms.safe_name(field.filename if field is not None else "")
             if not name:
                 return web.json_response({"error": "not a video, picture or sound the timeline can use"}, status=400)
-            folder = os.path.join(folder_paths.get_input_directory(), UPLOAD_SUB)
+            rel = f"{UPLOAD_SUB}/{sub}" if sub else UPLOAD_SUB
+            folder = os.path.join(folder_paths.get_input_directory(), *rel.split("/"))
             os.makedirs(folder, exist_ok=True)
             tmp = os.path.join(folder, f".upload_{uuid.uuid4().hex}.part")
             try:
@@ -103,7 +107,7 @@ def _register_routes():
             finally:
                 if os.path.exists(tmp):
                     os.remove(tmp)
-            return web.json_response({"name": f"{UPLOAD_SUB}/{name}", "kind": ms.kind_of(name)})
+            return web.json_response({"name": f"{rel}/{name}", "kind": ms.kind_of(name)})
         except Exception as e:  # noqa: BLE001
             log.exception("[KUBA master] upload failed")
             return web.json_response({"error": str(e).splitlines()[0]}, status=500)

@@ -4,6 +4,23 @@ Newest first. The numbered versions (0.1.1 and later) are the published ones, wr
 The dated entries below them are working notes from before the first release: file names and node names in them
 may have changed since.
 
+## Unreleased
+
+The shelf takes folders and gets a library.
+
+- **Shelf:** a folder dropped on it works (it did nothing): its pictures, videos and sounds, also in sub folders (up
+  to 500 a drop), are copied into `input/kuba_director/<folder>` and become one card (click: its files in the
+  library); `.txt` / `.md` become prompts; the status says what was taken and skipped. The library pill sits next to
+  *+ text*.
+- **Library** (new, `web/kubakub_library.js`, `kubakub/library.py`, routes in `nodes/utils/nodes_library.py`): a
+  sqlite store (`user/default/kubakub/library.db`) of everything that reaches the shelf, this session's runs (*last
+  generations*, *keep adding new ones*) and indexed folders (read in place; empty field = the output folder). Reads
+  prompts, negative, seed, steps, cfg, sampler, scheduler, models and LoRAs from ComfyUI PNG / WEBP / video files and
+  A1111 pictures. Search (sqlite FTS5), filters by kind, model, LoRA and tag; inspect with preview, copy or drag a
+  prompt, load workflow, to shelf, show in folder, tags.
+- **Timeline upload route:** an optional `folder` field puts the file into `input/kuba_director/<folder>`.
+- Tests: `tests/test_library.py` (new), `tests/test_shelf_js.py` (folder walk, batches, history).
+
 ## 0.7.4 (2026-11-09)
 
 Blender 5 support.

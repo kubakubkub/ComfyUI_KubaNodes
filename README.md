@@ -240,9 +240,13 @@ The menu is split into **2d** (images, masks, video) and **3d** (anything that n
 or with **Alt+S**, also above a director window. It keeps pictures, videos, sounds, prompts and colours while you
 work:
 
-- **in:** drop files from the desktop, a node's preview, a render from the timeline list, text or a colour (`#f18a58`)
-  on it; paste with Ctrl+V while it is open; **+ text** for a prompt; or right-click a node → *put on the kubakub
-  shelf* (its pictures, or its text).
+- **in:** drop files or whole folders from the desktop, a node's preview, a render from the timeline list, text or a
+  colour (`#f18a58`) on it; paste with Ctrl+V while it is open; **+ text** for a prompt; or right-click a node →
+  *put on the kubakub shelf* (its pictures, or its text).
+- **a folder:** its pictures, videos and sounds (also in sub folders, up to 500 in one drop) are copied into
+  `input/kuba_director/<folder name>` and the folder becomes one card on the shelf (▦ and the count); click it to see
+  its files in the library. `.txt` and `.md` files in it become prompts. What it cannot use is counted ("took 84,
+  skipped 12"). For big folders use *index a folder* in the library instead: nothing is copied.
 - **out:** drag a picture or video onto the **timeline** (a clip), into a **director** window (a layer), onto a
   **Load Image / Load Video / Load Audio** node (its file) or a text field of a node (its text), or onto empty canvas
   (a new loader, or a text node for a prompt). A prompt also drops into any text box. Clicking a prompt or colour
@@ -252,6 +256,33 @@ Pin what should stay (● on the card): the shelf keeps the last 200 things, pin
 `input/kuba_director` (or in `output/` where the render put them), the list is `user/default/kubakub/shelf.json`.
 Settings → kubakub → *shelf: screen edge* puts it on the left or switches it off. The idea comes from
 [Edge-Drop](https://github.com/Deepender25/Edge-Drop), a clipboard shelf for Windows.
+
+**The library** (the *library* pill on the shelf) is the searchable store behind the strip: the shelf widens and
+stays open until you close it (the pill again, Esc or Alt+S). Everything that ever reached the shelf is in it, and
+whatever the files themselves say about how they were made: the prompt and negative prompt (followed from the
+sampler to the text boxes, also through Flux guidance, reference latents and string nodes), seed, steps, cfg,
+sampler, scheduler, denoise, the models and LoRAs with their strengths, size and length. It reads ComfyUI PNG, WEBP
+and video files and A1111 / Forge pictures.
+
+- **search:** words from a prompt, a file name, a model, a LoRA or a tag (several words = all of them, the start of a
+  word is enough); the pills pick pictures / videos / sounds and the order (newest, oldest, name); the pick lists
+  show only the files made with one model, one LoRA, or with one tag (a dropped or indexed folder, *this session*).
+- **last generations:** everything the runs of this ComfyUI session saved (since it started), into the library
+  (tag *this session*) and the newest 60 onto the strip. **keep adding new ones**: every run from now on, as it
+  finishes (off by default, remembered).
+- **index a folder:** a folder of this computer (a project's renders, an old output folder) is read where it is,
+  nothing is copied; its name becomes a tag; ↻ reads it again (new, changed and deleted files), × takes it out of the
+  library (the files stay). Left empty, it indexes ComfyUI's output folder. Only from the computer ComfyUI runs on.
+- **click a file** to inspect it: big preview (videos and sounds play), the prompts (click: copy; drag one onto a
+  node, the canvas or any text box; *+ shelf* keeps it on the strip), all settings, model and LoRA chips (click: every
+  file made with it), tags (add your own). **load workflow** opens the workflow the file was made with, the same as
+  dropping the file on ComfyUI. **to shelf** puts it on the strip (a file from an indexed folder is copied into
+  `input/kuba_director` first, so the loaders can take it). **show in folder** opens the file browser at it.
+- Drag a file out of the library like a shelf card: onto the timeline, a director, a node or the canvas (a file of an
+  indexed folder outside ComfyUI's folders: *to shelf* first).
+
+The library is `user/default/kubakub/library.db` (with small previews in `library_thumbs/`). It only ever reads files
+in ComfyUI's input, output and temp folders and in the folders you indexed, and nothing leaves this computer.
 
 ### Show only what you use
 

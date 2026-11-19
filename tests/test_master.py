@@ -36,6 +36,9 @@ def check(name, cond, detail=""):
 check("upload name: folders and odd characters", ms.safe_name("clips\\my:clip?.mp4") == "my_clip_.mp4",
       ms.safe_name("clips\\my:clip?.mp4"))
 check("upload name: not a video or picture", ms.safe_name("notes.txt") is None and ms.safe_name("") is None)
+check("upload folder: one name, no path, no escape", ms.safe_folder("night set") == "night set"
+      and ms.safe_folder("a/b") == "b" and ms.safe_folder("..") == "" and ms.safe_folder("x\\.y") == "y"
+      and len(ms.safe_folder("x" * 200)) == 80, [ms.safe_folder(t) for t in ("a/b", "..", "x\\.y")])
 check("upload name: types", ms.kind_of("a.MOV") == "video" and ms.kind_of("a.png") == "image" and ms.kind_of("a.txt") is None)
 
 with tempfile.TemporaryDirectory() as d:

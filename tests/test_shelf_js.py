@@ -55,7 +55,43 @@ check("not a picture / video / sound -> null", sourceFromView("/view?filename=c.
 check("loader value for input/", loaderValue("file:kuba_director/a.png") === "kuba_director/a.png");
 check("loader value for output/", loaderValue("output:kubakub_show/a.mp4") === "kubakub_show/a.mp4 [output]");
 check("sourceURL round trip", sourceFromView(sourceURL("output:kubakub_show/a.png")).source === "output:kubakub_show/a.png");
-process.exit(fails ? 1 : 0);
+
+// folders dropped from the desktop: fake file system entries (readEntries hands out a few at a time, as browsers do)
+const fileE = name => ({ isFile: true, isDirectory: false, name, file: (ok) => ok({ name, size: 3, text: async () => "warm windows" }) });
+const dirE = (name, kids) => ({ isFile: false, isDirectory: true, name, createReader() { let i = 0; return { readEntries(ok) { const b = kids.slice(i, i + 2); i += b.length; setTimeout(() => ok(b)); } }; } });
+(async () => {
+  const drop = [dirE("facade night", [fileE("b.png"), fileE("a10.png"), fileE("a2.png"), fileE("notes.txt"), fileE("x.psd"),
+    dirE("sub", [fileE("c.mp4"), fileE(".hidden.png")]), dirE(".cache", [fileE("d.png")])]), fileE("loose.wav"), fileE("readme.pdf")];
+  const w = await walkEntries(drop);
+  check("a folder walk takes pictures, videos, sounds and text, deep", w.files.length === 6, w.files.map(f => f.entry.name));
+  check("the walk counts what it skips (psd, pdf), hidden files and folders are left out", w.skipped === 2, w.skipped);
+  check("files keep the dropped folder's name, loose ones none", w.files.find(f => f.entry.name === "c.mp4").top === "facade night" && w.files.find(f => f.entry.name === "loose.wav").top === "");
+  check("numbered names in number order", w.files.map(f => f.entry.name).slice(0, 3).join() === "a2.png,a10.png,b.png", w.files.map(f => f.entry.name));
+  const capped = await walkEntries(drop, 3);
+  check("the cap stops the walk and says so", capped.files.length === 3 && capped.capped);
+  const plan = dropPlan(w);
+  check("drop plan: one set per folder, loose files, texts", plan.sets.length === 1 && plan.sets[0].name === "facade night" && plan.sets[0].files.length === 4 && plan.loose.length === 1 && plan.texts.length === 1, plan);
+  check("entryFile reads the file", (await entryFile(fileE("q.png"))).name === "q.png");
+  let ticks = 0, live = 0, most = 0;
+  const res = await inBatches([1, 2, 3, 4, 5, 6, 7], 3, async x => { live++; most = Math.max(most, live); await new Promise(r => setTimeout(r, 5)); live--; if (x === 4) throw new Error("bad"); return x * 2; }, () => ticks++);
+  check("batches: order kept, at most n at once, a failure does not stop the rest", res[0] === 2 && res[6] === 14 && res[3].error && most === 3 && ticks === 7, { res, most, ticks });
+  const set = { kind: "set", text: "facade night", name: "facade night", count: 4, cover: "file:kuba_director/facade night/a2.png" };
+  L = []; addItem(L, set); addItem(L, Object.assign({}, set));
+  check("the same folder dropped again stays one card", L.length === 1);
+
+  // this session's runs (ComfyUI /history)
+  const hist = {
+    p1: { prompt: [1, "p1"], outputs: { "9": { images: [{ filename: "old.png", subfolder: "", type: "output" }] } } },
+    p2: { prompt: [2, "p2"], outputs: { "9": { images: [{ filename: "new.png", subfolder: "show", type: "output" }, { filename: "prev.png", subfolder: "", type: "temp" }] },
+      "12": { gifs: [{ filename: "clip.mp4", subfolder: "", type: "output", format: "video/h264-mp4" }], text: ["not a file"] } } },
+    p3: { prompt: [3, "p3"], status: {}, outputs: { "4": { audio: [{ filename: "song.flac", subfolder: "", type: "output" }, { filename: "old.png", subfolder: "", type: "output" }] } } },
+    bad: null };
+  const hf = historyFiles(hist);
+  check("history: saved files newest run first, previews (temp) left out, each file once",
+    hf.map(f => f.filename).join() === "song.flac,old.png,new.png,clip.mp4", hf.map(f => f.filename));
+  check("history file -> output source", outputSource(hf[2]) === "output:show/new.png" && outputSource(hf[0]) === "output:song.flac");
+  process.exit(fails ? 1 : 0);
+})().catch(e => { console.log("FAIL async checks " + e.stack); process.exit(1); });
 """
 
 node = shutil.which("node")
